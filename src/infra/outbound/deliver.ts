@@ -29,12 +29,15 @@ import type { sendMessageSlack } from "../../slack/send.js";
 import type { sendMessageTelegram } from "../../telegram/send.js";
 import type { sendMessageWhatsApp } from "../../web/outbound.js";
 import { throwIfAborted } from "./abort.js";
+import { logOutboundAudit } from "./audit-log.js";
 import { ackDelivery, enqueueDelivery, failDelivery } from "./delivery-queue.js";
 import type { OutboundIdentity } from "./identity.js";
 import type { NormalizedOutboundPayload } from "./payloads.js";
 import { normalizeReplyPayloadsForDelivery } from "./payloads.js";
+import { checkChannelRateLimit, recordMessage } from "./rate-limiter.js";
 import type { OutboundSessionContext } from "./session-context.js";
 import type { OutboundChannel } from "./targets.js";
+import { requestMessageSendApproval, shouldInterceptAction } from "./trust-gate.js";
 
 export type { NormalizedOutboundPayload } from "./payloads.js";
 export { normalizeOutboundPayloads } from "./payloads.js";
@@ -469,6 +472,52 @@ async function deliverOutboundPayloadsCore(
       mediaUrls: payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []),
       channelData: payload.channelData,
     };
+    const rateLimitCheck = checkChannelRateLimit({
+      cfg,
+      channel,
+      accountId,
+    });
+    if (!rateLimitCheck.allowed) {
+      log.warn(rateLimitCheck.reason ?? "Rate limit exceeded", { channel, to, accountId });
+      const auditSessionId = params.session?.key ?? params.mirror?.sessionKey ?? null;
+      logOutboundAudit({
+        channel,
+        recipient: to,
+        content: payloadSummary.text ?? "",
+        blocked: true,
+        blockReason: "rate_limit",
+        sessionId: auditSessionId,
+      });
+      if (rateLimitCheck.overflow === "drop") {
+        continue;
+      }
+      const rateLimitError = new Error(rateLimitCheck.reason ?? "Rate limit exceeded");
+      rateLimitError.name = "RateLimitError";
+      if (!params.bestEffort) {
+        throw rateLimitError;
+      }
+      params.onError?.(rateLimitError, payloadSummary);
+      continue;
+    }
+    if (shouldInterceptAction(cfg, "message.send")) {
+      const auditSessionId = params.session?.key ?? params.mirror?.sessionKey ?? null;
+      const trustResult = await requestMessageSendApproval({
+        cfg,
+        channel,
+        recipient: to,
+        content: payloadSummary.text,
+        sessionId: auditSessionId,
+      });
+      if (!trustResult.allowed) {
+        const trustError = new Error("Message held: owner denied or approval timed out");
+        trustError.name = "TrustGateError";
+        if (!params.bestEffort) {
+          throw trustError;
+        }
+        params.onError?.(trustError, payloadSummary);
+        continue;
+      }
+    }
     const emitMessageSent = (params: {
       success: boolean;
       content: string;
@@ -539,6 +588,7 @@ async function deliverOutboundPayloadsCore(
       }
 
       params.onPayload?.(payloadSummary);
+      const auditSessionId = params.session?.key ?? params.mirror?.sessionKey ?? null;
       const sendOverrides = {
         replyToId: effectivePayload.replyToId ?? params.replyToId ?? undefined,
         threadId: params.threadId ?? undefined,
@@ -551,6 +601,14 @@ async function deliverOutboundPayloadsCore(
           content: payloadSummary.text,
           messageId: delivery.messageId,
         });
+        logOutboundAudit({
+          channel,
+          recipient: to,
+          content: payloadSummary.text,
+          blocked: false,
+          sessionId: auditSessionId,
+        });
+        recordMessage({ channel, accountId });
         continue;
       }
       if (payloadSummary.mediaUrls.length === 0) {
@@ -566,6 +624,14 @@ async function deliverOutboundPayloadsCore(
           content: payloadSummary.text,
           messageId,
         });
+        logOutboundAudit({
+          channel,
+          recipient: to,
+          content: payloadSummary.text,
+          blocked: false,
+          sessionId: auditSessionId,
+        });
+        recordMessage({ channel, accountId });
         continue;
       }
 
@@ -590,6 +656,14 @@ async function deliverOutboundPayloadsCore(
         content: payloadSummary.text,
         messageId: lastMessageId,
       });
+      logOutboundAudit({
+        channel,
+        recipient: to,
+        content: payloadSummary.text,
+        blocked: false,
+        sessionId: auditSessionId,
+      });
+      recordMessage({ channel, accountId });
     } catch (err) {
       emitMessageSent({
         success: false,
@@ -603,8 +677,9 @@ async function deliverOutboundPayloadsCore(
     }
   }
   if (params.mirror && results.length > 0) {
+    const channelTag = `[channel:${channel}] `;
     const mirrorText = resolveMirroredTranscriptText({
-      text: params.mirror.text,
+      text: params.mirror.text ? channelTag + params.mirror.text : undefined,
       mediaUrls: params.mirror.mediaUrls,
     });
     if (mirrorText) {

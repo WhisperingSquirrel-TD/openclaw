@@ -266,6 +266,12 @@ export type AgentDefaultsConfig = {
   };
   /** Optional sandbox settings for non-main sessions. */
   sandbox?: AgentSandboxConfig;
+  /** Immutable system prompt preamble injected before SOUL.md in every session. Not visible to or editable by the agent. */
+  systemPrompt?: string;
+  /** Trust level for the agent (0 = full trust, >= 1 = require approval for outbound actions). Default: 0. */
+  trustLevel?: number;
+  /** Actions that require owner approval when trustLevel >= 1 (e.g. ["message.send"]). */
+  requireApproval?: string[];
 };
 
 export type AgentCompactionMode = "default" | "safeguard";

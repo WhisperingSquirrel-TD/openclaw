@@ -169,6 +169,14 @@ export type TelegramAccountConfig = {
    * Telegram expects unicode emoji (e.g., "👀") rather than shortcodes.
    */
   ackReaction?: string;
+  /** Commands to deny for this channel (merged with global gateway.nodes.denyCommands). */
+  denyCommands?: string[];
+  /** Maximum outbound messages allowed per minute. */
+  maxMessagesPerMinute?: number;
+  /** Maximum outbound messages allowed per hour. */
+  maxMessagesPerHour?: number;
+  /** Behavior when rate limit is exceeded: "queue" (default) or "drop". */
+  rateLimitOverflow?: "queue" | "drop";
 };
 
 export type TelegramTopicConfig = {

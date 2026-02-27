@@ -54,6 +54,9 @@ export const SessionSchema = z
     typingMode: TypingModeSchema.optional(),
     parentForkMaxTokens: z.number().int().nonnegative().optional(),
     mainKey: z.string().optional(),
+    outboundContextScope: z
+      .union([z.literal("channel-isolated"), z.literal("shared")])
+      .optional(),
     sendPolicy: SessionSendPolicySchema.optional(),
     agentToAgent: z
       .object({

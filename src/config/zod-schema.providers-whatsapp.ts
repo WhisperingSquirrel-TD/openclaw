@@ -58,6 +58,10 @@ const WhatsAppSharedSchema = z.object({
   ackReaction: WhatsAppAckReactionSchema,
   debounceMs: z.number().int().nonnegative().optional().default(0),
   heartbeat: ChannelHeartbeatVisibilitySchema,
+  denyCommands: z.array(z.string()).optional(),
+  maxMessagesPerMinute: z.number().int().positive().optional(),
+  maxMessagesPerHour: z.number().int().positive().optional(),
+  rateLimitOverflow: z.enum(["queue", "drop"]).optional(),
 });
 
 function enforceOpenDmPolicyAllowFromStar(params: {

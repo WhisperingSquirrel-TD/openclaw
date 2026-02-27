@@ -7,7 +7,9 @@ import {
   resolveBootstrapMaxChars,
   resolveBootstrapTotalMaxChars,
 } from "./pi-embedded-helpers.js";
+import { verifySoulIntegrity } from "./soul-integrity.js";
 import {
+  DEFAULT_SOUL_FILENAME,
   filterBootstrapFilesForSession,
   loadWorkspaceBootstrapFiles,
   type WorkspaceBootstrapFile,
@@ -57,6 +59,21 @@ export async function resolveBootstrapFilesForRun(params: {
       })
     : await loadWorkspaceBootstrapFiles(params.workspaceDir);
   const bootstrapFiles = filterBootstrapFilesForSession(rawFiles, sessionKey);
+
+  const soulFile = bootstrapFiles.find(
+    (f) => f.name === DEFAULT_SOUL_FILENAME && !f.missing && f.content,
+  );
+  if (soulFile?.content) {
+    const integrityResult = verifySoulIntegrity(soulFile.content, params.workspaceDir);
+    if (!integrityResult.ok) {
+      const errorMsg =
+        `SOUL.md integrity verification failed: content has been modified at runtime. ` +
+        `Expected hash ${integrityResult.expected}, got ${integrityResult.actual}. ` +
+        `Session refused.`;
+      params.warn?.(errorMsg);
+      throw new Error(errorMsg);
+    }
+  }
 
   const updated = await applyBootstrapHookOverrides({
     files: bootstrapFiles,

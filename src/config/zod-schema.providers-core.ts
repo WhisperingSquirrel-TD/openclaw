@@ -215,6 +215,10 @@ export const TelegramAccountSchemaBase = z
     linkPreview: z.boolean().optional(),
     responsePrefix: z.string().optional(),
     ackReaction: z.string().optional(),
+    denyCommands: z.array(z.string()).optional(),
+    maxMessagesPerMinute: z.number().int().positive().optional(),
+    maxMessagesPerHour: z.number().int().positive().optional(),
+    rateLimitOverflow: z.enum(["queue", "drop"]).optional(),
   })
   .strict();
 
@@ -513,6 +517,9 @@ export const DiscordAccountSchema = z
       .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)])
       .optional(),
     activityUrl: z.string().url().optional(),
+    maxMessagesPerMinute: z.number().int().positive().optional(),
+    maxMessagesPerHour: z.number().int().positive().optional(),
+    rateLimitOverflow: z.enum(["queue", "drop"]).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

@@ -157,6 +157,25 @@ function buildMessagingSection(params: {
   ];
 }
 
+function buildChannelIsolationSection(params: {
+  isMinimal: boolean;
+  outboundContextScope?: "channel-isolated" | "shared";
+  runtimeChannel?: string;
+}) {
+  if (params.isMinimal) {
+    return [];
+  }
+  if (params.outboundContextScope !== "channel-isolated") {
+    return [];
+  }
+  const channel = params.runtimeChannel ?? "this channel";
+  return [
+    "## Channel Isolation",
+    `You are responding on ${channel}. You may reference information from watch transcripts of other channels. You must NEVER include content from other channel conversations in your ${channel} responses. Keep each channel's context strictly separated to prevent cross-channel data leakage.`,
+    "",
+  ];
+}
+
 function buildVoiceSection(params: { isMinimal: boolean; ttsHint?: string }) {
   if (params.isMinimal) {
     return [];
@@ -232,6 +251,9 @@ export function buildAgentSystemPrompt(params: {
     channel: string;
   };
   memoryCitationsMode?: MemoryCitationsMode;
+  outboundContextScope?: "channel-isolated" | "shared";
+  /** Immutable system prompt preamble from agents.defaults.systemPrompt. Injected before SOUL.md, not subject to bootstrap limits. */
+  immutableSystemPrompt?: string;
 }) {
   const acpEnabled = params.acpEnabled !== false;
   const coreToolSummaries: Record<string, string> = {
@@ -567,6 +589,11 @@ export function buildAgentSystemPrompt(params: {
       messageToolHints: params.messageToolHints,
     }),
     ...buildVoiceSection({ isMinimal, ttsHint: params.ttsHint }),
+    ...buildChannelIsolationSection({
+      isMinimal,
+      outboundContextScope: params.outboundContextScope,
+      runtimeChannel,
+    }),
   ];
 
   if (extraSystemPrompt) {
@@ -600,6 +627,11 @@ export function buildAgentSystemPrompt(params: {
   }
   if (reasoningHint) {
     lines.push("## Reasoning Format", reasoningHint, "");
+  }
+
+  const immutablePreamble = params.immutableSystemPrompt?.trim();
+  if (immutablePreamble) {
+    lines.push("# System Preamble", "", immutablePreamble, "");
   }
 
   const contextFiles = params.contextFiles ?? [];

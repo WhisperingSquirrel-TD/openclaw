@@ -119,6 +119,7 @@ export type SessionConfig = {
    */
   parentForkMaxTokens?: number;
   mainKey?: string;
+  outboundContextScope?: "channel-isolated" | "shared";
   sendPolicy?: SessionSendPolicyConfig;
   agentToAgent?: {
     /** Max ping-pong turns between requester/target (0–5). Default: 5. */

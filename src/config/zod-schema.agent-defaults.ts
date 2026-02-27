@@ -160,6 +160,9 @@ export const AgentDefaultsSchema = z
       .strict()
       .optional(),
     sandbox: AgentSandboxSchema,
+    systemPrompt: z.string().optional(),
+    trustLevel: z.number().int().min(0).optional(),
+    requireApproval: z.array(z.string()).optional(),
   })
   .strict()
   .optional();

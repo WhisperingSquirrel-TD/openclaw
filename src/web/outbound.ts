@@ -1,5 +1,6 @@
 import { loadConfig } from "../config/config.js";
 import { resolveMarkdownTableMode } from "../config/markdown-tables.js";
+import { logOutboundAudit } from "../infra/outbound/audit-log.js";
 import { generateSecureUuid } from "../infra/secure-random.js";
 import { getChildLogger } from "../logging/logger.js";
 import { redactIdentifier } from "../logging/redact-identifier.js";
@@ -10,7 +11,7 @@ import { normalizePollInput, type PollInput } from "../polls.js";
 import { toWhatsappJid } from "../utils.js";
 import { type ActiveWebSendOptions, requireActiveWebListener } from "./active-listener.js";
 import { loadWebMedia } from "./media.js";
-import { assertNotWatchMode } from "./watch-mode.js";
+import { assertNotWatchMode, WatchModeBlockError } from "./watch-mode.js";
 
 const outboundLog = createSubsystemLogger("gateway/channels/whatsapp").child("outbound");
 
@@ -25,7 +26,20 @@ export async function sendMessageWhatsApp(
     accountId?: string;
   },
 ): Promise<{ messageId: string; toJid: string }> {
-  assertNotWatchMode(options.accountId);
+  try {
+    assertNotWatchMode(options.accountId);
+  } catch (err) {
+    if (err instanceof WatchModeBlockError) {
+      logOutboundAudit({
+        channel: "whatsapp",
+        recipient: to,
+        content: body,
+        blocked: true,
+        blockReason: "watch_mode",
+      });
+    }
+    throw err;
+  }
   let text = body;
   const correlationId = generateSecureUuid();
   const startedAt = Date.now();
@@ -117,7 +131,20 @@ export async function sendReactionWhatsApp(
     accountId?: string;
   },
 ): Promise<void> {
-  assertNotWatchMode(options.accountId);
+  try {
+    assertNotWatchMode(options.accountId);
+  } catch (err) {
+    if (err instanceof WatchModeBlockError) {
+      logOutboundAudit({
+        channel: "whatsapp",
+        recipient: chatJid,
+        content: `reaction:${emoji}`,
+        blocked: true,
+        blockReason: "watch_mode",
+      });
+    }
+    throw err;
+  }
   const correlationId = generateSecureUuid();
   const { listener: active } = requireActiveWebListener(options.accountId);
   const redactedChatJid = redactIdentifier(chatJid);
@@ -155,7 +182,20 @@ export async function sendPollWhatsApp(
   poll: PollInput,
   options: { verbose: boolean; accountId?: string },
 ): Promise<{ messageId: string; toJid: string }> {
-  assertNotWatchMode(options.accountId);
+  try {
+    assertNotWatchMode(options.accountId);
+  } catch (err) {
+    if (err instanceof WatchModeBlockError) {
+      logOutboundAudit({
+        channel: "whatsapp",
+        recipient: to,
+        content: `poll:${poll.question ?? ""}`,
+        blocked: true,
+        blockReason: "watch_mode",
+      });
+    }
+    throw err;
+  }
   const correlationId = generateSecureUuid();
   const startedAt = Date.now();
   const { listener: active } = requireActiveWebListener(options.accountId);

@@ -145,14 +145,35 @@ function normalizePlatformId(platform?: string, deviceFamily?: string): string {
   return "unknown";
 }
 
+export function resolveChannelDenyCommands(
+  cfg: OpenClawConfig,
+  channelId?: string,
+): string[] {
+  if (!channelId) {
+    return [];
+  }
+  const channelConfig = cfg.channels?.[channelId];
+  if (
+    channelConfig &&
+    typeof channelConfig === "object" &&
+    Array.isArray((channelConfig as Record<string, unknown>).denyCommands)
+  ) {
+    return (channelConfig as { denyCommands: string[] }).denyCommands;
+  }
+  return [];
+}
+
 export function resolveNodeCommandAllowlist(
   cfg: OpenClawConfig,
   node?: Pick<NodeSession, "platform" | "deviceFamily">,
+  opts?: { channelDenyCommands?: string[] },
 ): Set<string> {
   const platformId = normalizePlatformId(node?.platform, node?.deviceFamily);
   const base = PLATFORM_DEFAULTS[platformId] ?? PLATFORM_DEFAULTS.unknown;
   const extra = cfg.gateway?.nodes?.allowCommands ?? [];
-  const deny = new Set(cfg.gateway?.nodes?.denyCommands ?? []);
+  const globalDeny = cfg.gateway?.nodes?.denyCommands ?? [];
+  const channelDeny = opts?.channelDenyCommands ?? [];
+  const deny = new Set([...globalDeny, ...channelDeny]);
   const allow = new Set([...base, ...extra].map((cmd) => cmd.trim()).filter(Boolean));
   for (const blocked of deny) {
     const trimmed = blocked.trim();

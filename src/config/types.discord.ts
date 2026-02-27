@@ -295,6 +295,12 @@ export type DiscordAccountConfig = {
   activityType?: 0 | 1 | 2 | 3 | 4 | 5;
   /** Streaming URL (Twitch/YouTube). Required when activityType=1. */
   activityUrl?: string;
+  /** Maximum outbound messages allowed per minute. */
+  maxMessagesPerMinute?: number;
+  /** Maximum outbound messages allowed per hour. */
+  maxMessagesPerHour?: number;
+  /** Behavior when rate limit is exceeded: "queue" (default) or "drop". */
+  rateLimitOverflow?: "queue" | "drop";
 };
 
 export type DiscordConfig = {

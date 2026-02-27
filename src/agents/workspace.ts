@@ -7,6 +7,7 @@ import { resolveRequiredHomeDir } from "../infra/home-dir.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { isCronSessionKey, isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveUserPath } from "../utils.js";
+import { loadSoulContent } from "./soul-vault.js";
 import { resolveWorkspaceTemplateDir } from "./workspace-templates.js";
 
 export function resolveDefaultAgentWorkspaceDir(
@@ -536,6 +537,19 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
 
   const result: WorkspaceBootstrapFile[] = [];
   for (const entry of entries) {
+    if (entry.name === DEFAULT_SOUL_FILENAME) {
+      const vaultResult = await loadSoulContent({ plaintextPath: entry.filePath });
+      if (vaultResult) {
+        result.push({
+          name: entry.name,
+          path: entry.filePath,
+          content: vaultResult.content,
+          missing: false,
+        });
+        continue;
+      }
+    }
+
     const loaded = await readWorkspaceFileWithGuards({
       filePath: entry.filePath,
       workspaceDir: resolvedDir,

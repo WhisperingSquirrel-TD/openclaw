@@ -80,6 +80,14 @@ type WhatsAppSharedConfig = {
   debounceMs?: number;
   /** Heartbeat visibility settings. */
   heartbeat?: ChannelHeartbeatVisibilityConfig;
+  /** Commands to deny for this channel (merged with global gateway.nodes.denyCommands). */
+  denyCommands?: string[];
+  /** Maximum outbound messages allowed per minute. */
+  maxMessagesPerMinute?: number;
+  /** Maximum outbound messages allowed per hour. */
+  maxMessagesPerHour?: number;
+  /** Behavior when rate limit is exceeded: "queue" (default) or "drop". */
+  rateLimitOverflow?: "queue" | "drop";
 };
 
 type WhatsAppConfigCore = {

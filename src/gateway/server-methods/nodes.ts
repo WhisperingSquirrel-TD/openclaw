@@ -14,7 +14,11 @@ import {
   sendApnsAlert,
   sendApnsBackgroundWake,
 } from "../../infra/push-apns.js";
-import { isNodeCommandAllowed, resolveNodeCommandAllowlist } from "../node-command-policy.js";
+import {
+  isNodeCommandAllowed,
+  resolveChannelDenyCommands,
+  resolveNodeCommandAllowlist,
+} from "../node-command-policy.js";
 import { sanitizeNodeInvokeParamsForForwarding } from "../node-invoke-sanitize.js";
 import {
   ErrorCodes,
@@ -573,6 +577,7 @@ export const nodeHandlers: GatewayRequestHandlers = {
       params?: unknown;
       timeoutMs?: number;
       idempotencyKey: string;
+      channelId?: string;
     };
     const nodeId = String(p.nodeId ?? "").trim();
     const command = String(p.command ?? "").trim();
@@ -680,7 +685,8 @@ export const nodeHandlers: GatewayRequestHandlers = {
         );
       }
       const cfg = loadConfig();
-      const allowlist = resolveNodeCommandAllowlist(cfg, nodeSession);
+      const channelDenyCommands = resolveChannelDenyCommands(cfg, p.channelId);
+      const allowlist = resolveNodeCommandAllowlist(cfg, nodeSession, { channelDenyCommands });
       const allowed = isNodeCommandAllowed({
         command,
         declaredCommands: nodeSession.commands,

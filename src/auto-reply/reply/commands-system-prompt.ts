@@ -130,6 +130,8 @@ export async function resolveCommandsSystemPromptBundle(
     runtimeInfo,
     sandboxInfo,
     memoryCitationsMode: params.cfg?.memory?.citations,
+    outboundContextScope: params.cfg?.session?.outboundContextScope,
+    immutableSystemPrompt: params.cfg?.agents?.defaults?.systemPrompt,
   });
 
   return { systemPrompt, tools, skillsPrompt, bootstrapFiles, injectedFiles, sandboxRuntime };

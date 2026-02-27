@@ -103,6 +103,7 @@ export function buildSystemPrompt(params: {
     contextFiles: params.contextFiles,
     ttsHint,
     memoryCitationsMode: params.config?.memory?.citations,
+    immutableSystemPrompt: params.config?.agents?.defaults?.systemPrompt,
   });
 }
 
