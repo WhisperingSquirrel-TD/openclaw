@@ -45,7 +45,7 @@ if [ -d ~/openclaw ]; then
 else
     warn "Cloning fork from GitHub..."
     cd ~
-    git clone https://github.com/whisperingsquirrel-TD/openclaw.git || fail "Clone failed. Check your connection and repo name."
+    git clone https://github.com/WhisperingSquirrel-TD/openclaw.git || fail "Clone failed. Check your connection and repo name."
     cd ~/openclaw
     info "Fork cloned"
 fi
@@ -157,7 +157,7 @@ echo "========================================="
 echo "  DONE"
 echo "========================================="
 echo ""
-echo "  Fork installed from: github.com/whisperingsquirrel-TD/openclaw"
+echo "  Fork installed from: github.com/WhisperingSquirrel-TD/openclaw"
 echo "  WhatsApp: watch mode (read-only, silent)"
 echo "  Telegram: active (2-way with Tom)"
 echo "  Config: locked"
