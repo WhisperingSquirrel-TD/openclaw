@@ -12,6 +12,16 @@ vi.mock("./media.js", () => ({
   loadWebMedia: (...args: unknown[]) => loadWebMediaMock(...args),
 }));
 
+const assertNotWatchModeMock = vi.fn();
+vi.mock("./watch-mode.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./watch-mode.js")>();
+  return {
+    ...original,
+    assertNotWatchMode: (...args: unknown[]) => assertNotWatchModeMock(...args),
+  };
+});
+
+import { WatchModeBlockError } from "./watch-mode.js";
 import { sendMessageWhatsApp, sendPollWhatsApp, sendReactionWhatsApp } from "./outbound.js";
 
 describe("web outbound", () => {
@@ -196,5 +206,44 @@ describe("web outbound", () => {
       false,
       undefined,
     );
+  });
+
+  describe("watch mode send-block", () => {
+    beforeEach(() => {
+      assertNotWatchModeMock.mockImplementation(() => {
+        throw new WatchModeBlockError("default");
+      });
+    });
+
+    it("blocks sendMessageWhatsApp in watch mode", async () => {
+      await expect(
+        sendMessageWhatsApp("+1555", "hi", { verbose: false }),
+      ).rejects.toThrow(WatchModeBlockError);
+      await expect(
+        sendMessageWhatsApp("+1555", "hi", { verbose: false }),
+      ).rejects.toThrow(/watch mode/);
+      expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("blocks sendPollWhatsApp in watch mode", async () => {
+      await expect(
+        sendPollWhatsApp(
+          "+1555",
+          { question: "Q?", options: ["A", "B"], maxSelections: 1 },
+          { verbose: false },
+        ),
+      ).rejects.toThrow(WatchModeBlockError);
+      expect(sendPoll).not.toHaveBeenCalled();
+    });
+
+    it("blocks sendReactionWhatsApp in watch mode", async () => {
+      await expect(
+        sendReactionWhatsApp("1555@s.whatsapp.net", "msg123", "✅", {
+          verbose: false,
+          fromMe: false,
+        }),
+      ).rejects.toThrow(WatchModeBlockError);
+      expect(sendReaction).not.toHaveBeenCalled();
+    });
   });
 });

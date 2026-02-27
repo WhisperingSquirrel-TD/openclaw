@@ -3,6 +3,7 @@ import { ToolPolicySchema } from "./zod-schema.agent-runtime.js";
 import { ChannelHeartbeatVisibilitySchema } from "./zod-schema.channels.js";
 import {
   BlockStreamingCoalesceSchema,
+  ChannelModeSchema,
   DmConfigSchema,
   DmPolicySchema,
   GroupPolicySchema,
@@ -32,6 +33,7 @@ const WhatsAppAckReactionSchema = z
   .optional();
 
 const WhatsAppSharedSchema = z.object({
+  mode: ChannelModeSchema.optional().default("active"),
   enabled: z.boolean().optional(),
   capabilities: z.array(z.string()).optional(),
   markdown: MarkdownConfigSchema,

@@ -30,6 +30,7 @@ import { createEchoTracker } from "./monitor/echo.js";
 import { createWebOnMessageHandler } from "./monitor/on-message.js";
 import type { WebChannelStatus, WebInboundMsg, WebMonitorTuning } from "./types.js";
 import { isLikelyWhatsAppCryptoError } from "./util.js";
+import { appendWatchTranscript } from "./watch-transcript.js";
 
 function isNonRetryableWebCloseStatus(statusCode: unknown): boolean {
   // WhatsApp 440 = session conflict ("Unknown Stream Errored (conflict)").
@@ -165,6 +166,7 @@ export async function monitorWebChannel(
     const MESSAGE_TIMEOUT_MS = tuning.messageTimeoutMs ?? 30 * 60 * 1000; // 30m default
     const WATCHDOG_CHECK_MS = tuning.watchdogCheckMs ?? 60 * 1000; // 1m default
 
+    const isWatchMode = account.mode === "watch";
     const backgroundTasks = new Set<Promise<unknown>>();
     const onMessage = createWebOnMessageHandler({
       cfg,
@@ -182,8 +184,29 @@ export async function monitorWebChannel(
       account,
     });
 
+    const onWatchMessage = (msg: WebInboundMsg) => {
+      appendWatchTranscript(account.accountId, {
+        messageId: msg.id,
+        channel: "whatsapp",
+        chatType: msg.chatType,
+        chatName: msg.groupSubject ?? msg.from,
+        senderName: msg.senderName ?? msg.pushName,
+        senderNumber: msg.senderE164 ?? msg.from,
+        timestamp: msg.timestamp
+          ? new Date(msg.timestamp).toISOString()
+          : new Date().toISOString(),
+        body: msg.body,
+        mediaType: msg.mediaType,
+        quotedMessage: msg.replyToBody,
+        isFromMe: msg.isFromMe ?? false,
+      });
+    };
+
     const inboundDebounceMs = resolveInboundDebounceMs({ cfg, channel: "whatsapp" });
     const shouldDebounce = (msg: WebInboundMsg) => {
+      if (isWatchMode) {
+        return false;
+      }
       if (msg.mediaPath || msg.mediaType) {
         return false;
       }
@@ -201,9 +224,10 @@ export async function monitorWebChannel(
       accountId: account.accountId,
       authDir: account.authDir,
       mediaMaxMb: account.mediaMaxMb,
-      sendReadReceipts: account.sendReadReceipts,
-      debounceMs: inboundDebounceMs,
+      sendReadReceipts: isWatchMode ? false : account.sendReadReceipts,
+      debounceMs: isWatchMode ? 0 : inboundDebounceMs,
       shouldDebounce,
+      mode: account.mode,
       onMessage: async (msg: WebInboundMsg) => {
         handledMessages += 1;
         lastMessageAt = Date.now();
@@ -211,7 +235,11 @@ export async function monitorWebChannel(
         status.lastEventAt = lastMessageAt;
         emitStatus();
         _lastInboundMsg = msg;
-        await onMessage(msg);
+        if (isWatchMode) {
+          onWatchMessage(msg);
+        } else {
+          await onMessage(msg);
+        }
       },
     });
 
@@ -232,7 +260,9 @@ export async function monitorWebChannel(
       sessionKey: connectRoute.sessionKey,
     });
 
-    setActiveWebListener(account.accountId, listener);
+    if (!isWatchMode) {
+      setActiveWebListener(account.accountId, listener);
+    }
     unregisterUnhandled = registerUnhandledRejectionHandler((reason) => {
       if (!isLikelyWhatsAppCryptoError(reason)) {
         return false;
@@ -251,7 +281,9 @@ export async function monitorWebChannel(
     });
 
     const closeListener = async () => {
-      setActiveWebListener(account.accountId, null);
+      if (!isWatchMode) {
+        setActiveWebListener(account.accountId, null);
+      }
       if (unregisterUnhandled) {
         unregisterUnhandled();
         unregisterUnhandled = null;
@@ -331,7 +363,11 @@ export async function monitorWebChannel(
       }, WATCHDOG_CHECK_MS);
     }
 
-    whatsappLog.info("Listening for personal WhatsApp inbound messages.");
+    whatsappLog.info(
+      isWatchMode
+        ? "Listening for personal WhatsApp inbound messages (watch mode — read-only, no outbound)."
+        : "Listening for personal WhatsApp inbound messages.",
+    );
     if (process.stdout.isTTY || process.stderr.isTTY) {
       whatsappLog.raw("Ctrl+C to stop.");
     }

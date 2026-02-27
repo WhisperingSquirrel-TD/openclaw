@@ -8,6 +8,7 @@ import { getChildLogger } from "../../logging/logger.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { saveMediaBuffer } from "../../media/store.js";
 import { jidToE164, resolveJidToE164 } from "../../utils.js";
+import type { ChannelMode } from "../accounts.js";
 import { createWaSocket, getStatusCode, waitForWaConnection } from "../session.js";
 import { checkInboundAccessControl } from "./access-control.js";
 import { isRecentInboundMessage } from "./dedupe.js";
@@ -34,7 +35,10 @@ export async function monitorWebInbox(options: {
   debounceMs?: number;
   /** Optional debounce gating predicate. */
   shouldDebounce?: (msg: WebInboundMessage) => boolean;
+  /** Channel mode: "active" (default) or "watch" (read-only, no outbound signals). */
+  mode?: ChannelMode;
 }) {
+  const isWatchMode = options.mode === "watch";
   const inboundLogger = getChildLogger({ module: "web-inbound" });
   const inboundConsoleLog = createSubsystemLogger("gateway/channels/whatsapp").child("inbound");
   const sock = await createWaSocket(false, options.verbose, {
@@ -56,13 +60,17 @@ export async function monitorWebInbox(options: {
     resolver(reason);
   };
 
-  try {
-    await sock.sendPresenceUpdate("available");
-    if (shouldLogVerbose()) {
-      logVerbose("Sent global 'available' presence on connect");
+  if (!isWatchMode) {
+    try {
+      await sock.sendPresenceUpdate("available");
+      if (shouldLogVerbose()) {
+        logVerbose("Sent global 'available' presence on connect");
+      }
+    } catch (err) {
+      logVerbose(`Failed to send 'available' presence on connect: ${String(err)}`);
     }
-  } catch (err) {
-    logVerbose(`Failed to send 'available' presence on connect: ${String(err)}`);
+  } else if (shouldLogVerbose()) {
+    logVerbose("Watch mode: skipping presence update on connect");
   }
 
   const selfJid = sock.user?.id;
@@ -199,24 +207,32 @@ export async function monitorWebInbox(options: {
         ? Number(msg.messageTimestamp) * 1000
         : undefined;
 
-      const access = await checkInboundAccessControl({
-        accountId: options.accountId,
-        from,
-        selfE164,
-        senderE164,
-        group,
-        pushName: msg.pushName ?? undefined,
-        isFromMe: Boolean(msg.key?.fromMe),
-        messageTimestampMs,
-        connectedAtMs,
-        sock: { sendMessage: (jid, content) => sock.sendMessage(jid, content) },
-        remoteJid,
-      });
-      if (!access.allowed) {
-        continue;
+      let access: { allowed: boolean; shouldMarkRead: boolean; isSelfChat: boolean; resolvedAccountId: string };
+      if (isWatchMode) {
+        access = { allowed: true, shouldMarkRead: false, isSelfChat: false, resolvedAccountId: options.accountId };
+        if (shouldLogVerbose()) {
+          logVerbose(`Watch mode: bypassing access control for ${from}`);
+        }
+      } else {
+        access = await checkInboundAccessControl({
+          accountId: options.accountId,
+          from,
+          selfE164,
+          senderE164,
+          group,
+          pushName: msg.pushName ?? undefined,
+          isFromMe: Boolean(msg.key?.fromMe),
+          messageTimestampMs,
+          connectedAtMs,
+          sock: { sendMessage: (jid, content) => sock.sendMessage(jid, content) },
+          remoteJid,
+        });
+        if (!access.allowed) {
+          continue;
+        }
       }
 
-      if (id && !access.isSelfChat && options.sendReadReceipts !== false) {
+      if (!isWatchMode && id && !access.isSelfChat && options.sendReadReceipts !== false) {
         const participant = msg.key?.participant;
         try {
           await sock.readMessages([{ remoteJid, id, participant, fromMe: false }]);
@@ -227,9 +243,10 @@ export async function monitorWebInbox(options: {
         } catch (err) {
           logVerbose(`Failed to mark message ${id} read: ${String(err)}`);
         }
-      } else if (id && access.isSelfChat && shouldLogVerbose()) {
-        // Self-chat mode: never auto-send read receipts (blue ticks) on behalf of the owner.
+      } else if (!isWatchMode && id && access.isSelfChat && shouldLogVerbose()) {
         logVerbose(`Self-chat mode: skipping read receipt for ${id}`);
+      } else if (isWatchMode && shouldLogVerbose()) {
+        logVerbose(`Watch mode: skipping read receipt for ${id}`);
       }
 
       // If this is history/offline catch-up, mark read above but skip auto-reply.
@@ -278,19 +295,25 @@ export async function monitorWebInbox(options: {
       }
 
       const chatJid = remoteJid;
-      const sendComposing = async () => {
-        try {
-          await sock.sendPresenceUpdate("composing", chatJid);
-        } catch (err) {
-          logVerbose(`Presence update failed: ${String(err)}`);
-        }
-      };
-      const reply = async (text: string) => {
-        await sock.sendMessage(chatJid, { text });
-      };
-      const sendMedia = async (payload: AnyMessageContent) => {
-        await sock.sendMessage(chatJid, payload);
-      };
+      const sendComposing = isWatchMode
+        ? async () => {}
+        : async () => {
+            try {
+              await sock.sendPresenceUpdate("composing", chatJid);
+            } catch (err) {
+              logVerbose(`Presence update failed: ${String(err)}`);
+            }
+          };
+      const reply = isWatchMode
+        ? async (_text: string) => {}
+        : async (text: string) => {
+            await sock.sendMessage(chatJid, { text });
+          };
+      const sendMedia = isWatchMode
+        ? async (_payload: AnyMessageContent) => {}
+        : async (payload: AnyMessageContent) => {
+            await sock.sendMessage(chatJid, payload);
+          };
       const timestamp = messageTimestampMs;
       const mentionedJids = extractMentionedJids(msg.message as proto.IMessage | undefined);
       const senderName = msg.pushName ?? undefined;
@@ -330,6 +353,7 @@ export async function monitorWebInbox(options: {
         mediaPath,
         mediaType,
         mediaFileName,
+        isFromMe: Boolean(msg.key?.fromMe),
       };
       try {
         const task = Promise.resolve(debouncer.enqueue(inboundMessage));

@@ -10,6 +10,7 @@ import { normalizePollInput, type PollInput } from "../polls.js";
 import { toWhatsappJid } from "../utils.js";
 import { type ActiveWebSendOptions, requireActiveWebListener } from "./active-listener.js";
 import { loadWebMedia } from "./media.js";
+import { assertNotWatchMode } from "./watch-mode.js";
 
 const outboundLog = createSubsystemLogger("gateway/channels/whatsapp").child("outbound");
 
@@ -24,6 +25,7 @@ export async function sendMessageWhatsApp(
     accountId?: string;
   },
 ): Promise<{ messageId: string; toJid: string }> {
+  assertNotWatchMode(options.accountId);
   let text = body;
   const correlationId = generateSecureUuid();
   const startedAt = Date.now();
@@ -115,6 +117,7 @@ export async function sendReactionWhatsApp(
     accountId?: string;
   },
 ): Promise<void> {
+  assertNotWatchMode(options.accountId);
   const correlationId = generateSecureUuid();
   const { listener: active } = requireActiveWebListener(options.accountId);
   const redactedChatJid = redactIdentifier(chatJid);
@@ -152,6 +155,7 @@ export async function sendPollWhatsApp(
   poll: PollInput,
   options: { verbose: boolean; accountId?: string },
 ): Promise<{ messageId: string; toJid: string }> {
+  assertNotWatchMode(options.accountId);
   const correlationId = generateSecureUuid();
   const startedAt = Date.now();
   const { listener: active } = requireActiveWebListener(options.accountId);

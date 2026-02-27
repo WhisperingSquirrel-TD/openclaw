@@ -40,4 +40,5 @@ export type WebInboundMessage = {
   mediaFileName?: string;
   mediaUrl?: string;
   wasMentioned?: boolean;
+  isFromMe?: boolean;
 };

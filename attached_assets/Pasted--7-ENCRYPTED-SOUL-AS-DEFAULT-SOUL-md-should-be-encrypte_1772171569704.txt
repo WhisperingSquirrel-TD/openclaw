@@ -1,0 +1,63 @@
+```
+7. ENCRYPTED SOUL AS DEFAULT
+SOUL.md should be encrypted at rest as standard behaviour, not a manual setup step. On first run or when a SOUL.md is placed in the workspace, OpenClaw should:
+- Prompt for a GPG key or passphrase
+- Encrypt SOUL.md into a vault directory
+- Decrypt into a tmpfs RAM mount on gateway start
+- Wipe the RAM mount on gateway stop
+- Never store the decrypted SOUL.md on disk
+The plaintext SOUL.md should only exist in RAM while the gateway is running. This should be a core feature, not a user-built script.
+
+8. CHANNEL-LEVEL SEND PERMISSIONS IN CONFIG
+Extend denyCommands to support per-channel scoping:
+  "channels": {
+    "whatsapp": {
+      "denyCommands": ["message.send", "message.react"]
+    }
+  }
+Currently denyCommands is global only, which means blocking message.send kills all channels. Per-channel deny is essential for mixed read/write architectures.
+
+9. SOUL.MD INTEGRITY VERIFICATION
+On gateway start, compute and store a hash of the decrypted SOUL.md. Before every agent session, verify the hash matches. If it doesn't, refuse to start the session and alert via the active channel. This prevents runtime tampering with identity files.
+
+10. IMMUTABLE SYSTEM PROMPT INJECTION
+Add support for a systemPrompt field in openclaw.json that is:
+- Injected before SOUL.md in every session
+- Not visible to or editable by the agent
+- Not subject to the SOUL.md character limit
+- Cannot be overridden by any agent-level instruction
+Currently "agents.defaults.systemPrompt" is rejected as an unrecognised key. This should be a first-class feature.
+
+11. SESSION ISOLATION BETWEEN CHANNELS
+Ensure the agent cannot leak context between channels inadvertently. When responding on Telegram, the agent should be able to reference WhatsApp content it has observed. But the agent must never include Telegram conversation content in any WhatsApp output (if watch mode is ever toggled to active). Each channel's outbound context should be sandboxed.
+
+12. OUTBOUND MESSAGE AUDIT LOG
+Every message the agent sends (or attempts to send) should be logged to a tamper-evident audit file with:
+- timestamp
+- target channel
+- recipient
+- message content
+- whether it was blocked by watch mode or denyCommands
+- session ID
+This log should be append-only and not writable by the agent.
+
+13. RATE LIMITING ON AGENT OUTPUT
+Add configurable rate limits per channel:
+  "channels": {
+    "telegram": {
+      "maxMessagesPerMinute": 10,
+      "maxMessagesPerHour": 60
+    }
+  }
+This prevents runaway agent behaviour even on active channels. If the agent exceeds the limit, queue messages and alert the owner.
+
+14. TRUST LEVEL ENFORCEMENT IN CONFIG
+Add a configurable trust level that enforces HITL approval at the gateway level, not just in the SOUL.md:
+  "agents": {
+    "defaults": {
+      "trustLevel": 1,
+      "requireApproval": ["message.send", "exec.run"]
+    }
+  }
+At trust level 1, any message.send call should be held in a queue and presented to the owner for approval before being sent. This moves the trust ladder from a behavioural instruction into a structural enforcement.
+```

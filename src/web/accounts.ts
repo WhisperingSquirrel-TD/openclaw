@@ -9,9 +9,12 @@ import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../routing/session-key.j
 import { resolveUserPath } from "../utils.js";
 import { hasWebCredsSync } from "./auth-store.js";
 
+export type ChannelMode = "active" | "watch";
+
 export type ResolvedWhatsAppAccount = {
   accountId: string;
   name?: string;
+  mode: ChannelMode;
   enabled: boolean;
   sendReadReceipts: boolean;
   messagePrefix?: string;
@@ -126,6 +129,7 @@ export function resolveWhatsAppAccount(params: {
   return {
     accountId,
     name: accountCfg?.name?.trim() || undefined,
+    mode: (accountCfg?.mode ?? rootCfg?.mode ?? "active") as ChannelMode,
     enabled,
     sendReadReceipts: accountCfg?.sendReadReceipts ?? rootCfg?.sendReadReceipts ?? true,
     messagePrefix:

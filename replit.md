@@ -29,6 +29,28 @@ This installs dependencies then launches the Vite dev server at **port 5000**.
 - **Build command**: `pnpm run build` (builds to `dist/control-ui/`)
 - **Public directory**: `dist/control-ui`
 
+## WhatsApp Watch Mode
+The WhatsApp channel supports a `mode` config field (`"active"` or `"watch"`):
+- **`active`** (default): Normal two-way messaging
+- **`watch`**: Read-only mode — all outbound is hard-blocked (messages, reactions, polls, read receipts, typing indicators, presence, pairing replies). Inbound messages from all senders (including own) are captured to a structured JSONL transcript at `<state-dir>/credentials/whatsapp/watch-transcripts/whatsapp-watch-<accountId>.jsonl`
+
+### Config
+Set at root or per-account level:
+```json
+{ "channels": { "whatsapp": { "mode": "watch" } } }
+```
+or per-account:
+```json
+{ "channels": { "whatsapp": { "accounts": { "personal": { "mode": "watch" } } } } }
+```
+
+### Key files
+- `src/web/watch-mode.ts` — `WatchModeBlockError`, `assertNotWatchMode()` helper
+- `src/web/auto-reply/watch-transcript.ts` — JSONL transcript writer
+- `src/web/outbound.ts` — Send-block guards on all outbound functions
+- `src/web/inbound/monitor.ts` — Presence/read-receipt/composing suppression, access control bypass in watch mode
+- `src/web/auto-reply/monitor.ts` — Routes messages to transcript writer instead of agent in watch mode
+
 ## Environment Variables
 See `.env.example` for all options. Key variables:
 - `OPENCLAW_GATEWAY_TOKEN` — auth token for the gateway

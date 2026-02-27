@@ -36,6 +36,8 @@ export type WhatsAppAckReactionConfig = {
 };
 
 type WhatsAppSharedConfig = {
+  /** Channel operating mode: "active" (default, two-way) or "watch" (read-only transcript). */
+  mode?: "active" | "watch";
   /** Whether the WhatsApp channel is enabled. */
   enabled?: boolean;
   /** Direct message access policy (default: pairing). */
