@@ -163,6 +163,8 @@ export const AgentDefaultsSchema = z
     systemPrompt: z.string().optional(),
     trustLevel: z.number().int().min(0).optional(),
     requireApproval: z.array(z.string()).optional(),
+    approvalMode: z.enum(["socket", "totp"]).optional(),
+    totpWindowMinutes: z.number().int().min(1).max(60).optional(),
   })
   .strict()
   .optional();

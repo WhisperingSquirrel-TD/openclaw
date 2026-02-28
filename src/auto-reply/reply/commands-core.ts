@@ -7,6 +7,12 @@ import { shouldHandleTextCommands } from "../commands-registry.js";
 import { handleAcpCommand } from "./commands-acp.js";
 import { handleAllowlistCommand } from "./commands-allowlist.js";
 import { handleApproveCommand } from "./commands-approve.js";
+import {
+  handleTotpCodeInput,
+  handleTotpLockCommand,
+  handleTotpSetupCommand,
+  handleTotpStatusCommand,
+} from "./commands-totp.js";
 import { handleBashCommand } from "./commands-bash.js";
 import { handleCompactCommand } from "./commands-compact.js";
 import { handleConfigCommand, handleDebugCommand } from "./commands-config.js";
@@ -147,6 +153,10 @@ export async function handleCommands(params: HandleCommandsParams): Promise<Comm
       handleStatusCommand,
       handleAllowlistCommand,
       handleApproveCommand,
+      handleTotpSetupCommand,
+      handleTotpStatusCommand,
+      handleTotpLockCommand,
+      handleTotpCodeInput,
       handleContextCommand,
       handleExportSessionCommand,
       handleWhoamiCommand,

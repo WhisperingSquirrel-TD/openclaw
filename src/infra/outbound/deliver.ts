@@ -37,7 +37,11 @@ import { normalizeReplyPayloadsForDelivery } from "./payloads.js";
 import { checkChannelRateLimit, recordMessage } from "./rate-limiter.js";
 import type { OutboundSessionContext } from "./session-context.js";
 import type { OutboundChannel } from "./targets.js";
-import { requestMessageSendApproval, shouldInterceptAction } from "./trust-gate.js";
+import {
+  requestMessageSendApproval,
+  setTotpPromptCallback,
+  shouldInterceptAction,
+} from "./trust-gate.js";
 
 export type { NormalizedOutboundPayload } from "./payloads.js";
 export { normalizeOutboundPayloads } from "./payloads.js";
@@ -501,6 +505,16 @@ async function deliverOutboundPayloadsCore(
     }
     if (shouldInterceptAction(cfg, "message.send")) {
       const auditSessionId = params.session?.key ?? params.mirror?.sessionKey ?? null;
+      if (sessionKeyForInternalHooks) {
+        const hookSessionKey = sessionKeyForInternalHooks;
+        setTotpPromptCallback((promptText) => {
+          void triggerInternalHook(
+            createInternalHookEvent("message", "totp_prompt", hookSessionKey, {
+              text: promptText,
+            }),
+          ).catch(() => {});
+        });
+      }
       const trustResult = await requestMessageSendApproval({
         cfg,
         channel,
@@ -508,6 +522,7 @@ async function deliverOutboundPayloadsCore(
         content: payloadSummary.text,
         sessionId: auditSessionId,
       });
+      setTotpPromptCallback(null);
       if (!trustResult.allowed) {
         const trustError = new Error("Message held: owner denied or approval timed out");
         trustError.name = "TrustGateError";

@@ -93,6 +93,40 @@ AES-256-GCM encryption for SOUL.md using a passphrase (via `OPENCLAW_VAULT_PASSP
 - Env: `OPENCLAW_VAULT_PASSPHRASE`
 - Files: `src/agents/soul-vault.ts`, `src/agents/workspace.ts`
 
+### TOTP-Based Approval System
+When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator code (RFC 6238 TOTP) instead of macOS socket-based approval. This is the Pi-compatible alternative for gated actions.
+
+**How it works:**
+1. Agent attempts a gated action (e.g. `message.send` at `trustLevel >= 1`)
+2. Trust gate checks for an active approval window — if open, action proceeds immediately
+3. If no window: owner is prompted to send their 6-digit code on Telegram
+4. Owner sends code → window opens for `totpWindowMinutes` (default 5) → all queued and future gated actions proceed
+5. Window expires → new code required
+
+**Setup:**
+1. Set config: `agents.defaults.approvalMode: "totp"`, optionally `totpWindowMinutes: 5`
+2. Send `/totp-setup` on Telegram → get `otpauth://` URI to scan in Google Authenticator/Authy
+3. When prompted, send 6-digit code to approve
+
+**Commands:**
+- `/totp-setup [accountName]` — Generate new TOTP secret, returns URI for authenticator app
+- `/totp-status` — Show whether TOTP is configured and window status
+- `/totp-lock` — Manually close the approval window immediately
+- `123456` (any 6-digit number) — Automatically checked as TOTP code when `approvalMode: "totp"`
+
+**Config:**
+- `agents.defaults.approvalMode: "socket" | "totp"` (default: `"socket"`)
+- `agents.defaults.totpWindowMinutes: 1–60` (default: `5`)
+
+**Secret storage:** `<state-dir>/totp/totp-secret.enc` (AES-256-GCM, encrypted with `OPENCLAW_VAULT_PASSPHRASE`) or `totp-secret.txt` (plaintext fallback)
+
+**Files:**
+- `src/infra/totp/totp.ts` — RFC 6238 TOTP core (generate, verify, URI)
+- `src/infra/totp/totp-setup.ts` — Secret generation, encrypted storage, setup helper
+- `src/infra/totp/totp-session.ts` — In-memory approval window manager
+- `src/infra/outbound/trust-gate.ts` — Trust gate with TOTP mode support
+- `src/auto-reply/reply/commands-totp.ts` — Telegram command handlers
+
 ## Environment Variables
 See `.env.example` for all options. Key variables:
 - `OPENCLAW_GATEWAY_TOKEN` — auth token for the gateway

@@ -272,6 +272,10 @@ export type AgentDefaultsConfig = {
   trustLevel?: number;
   /** Actions that require owner approval when trustLevel >= 1 (e.g. ["message.send"]). */
   requireApproval?: string[];
+  /** Approval mode: "socket" (macOS exec approval UI, default) or "totp" (6-digit authenticator code via Telegram). */
+  approvalMode?: "socket" | "totp";
+  /** Duration in minutes for a TOTP approval window (1–60, default 5). Only used when approvalMode is "totp". */
+  totpWindowMinutes?: number;
 };
 
 export type AgentCompactionMode = "default" | "safeguard";
