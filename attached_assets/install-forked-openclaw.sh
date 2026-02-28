@@ -65,14 +65,30 @@ info "Build complete"
 # Step 7: Link globally with pnpm (not npm — must match the package manager)
 warn "Linking openclaw globally..."
 cd ~/openclaw
-sudo pnpm link --global || fail "pnpm link failed"
-info "OpenClaw linked — your fork is now the active version"
+
+# Ensure pnpm global bin directory exists and is configured
+export PNPM_HOME="${PNPM_HOME:-$HOME/.local/share/pnpm}"
+mkdir -p "$PNPM_HOME"
+if ! echo "$PATH" | grep -q "$PNPM_HOME"; then
+    export PATH="$PNPM_HOME:$PATH"
+fi
+# Add to .bashrc if not already there
+if ! grep -q 'PNPM_HOME' ~/.bashrc 2>/dev/null; then
+    echo "" >> ~/.bashrc
+    echo "# pnpm global bin" >> ~/.bashrc
+    echo "export PNPM_HOME=\"\$HOME/.local/share/pnpm\"" >> ~/.bashrc
+    echo "export PATH=\"\$PNPM_HOME:\$PATH\"" >> ~/.bashrc
+    info "Added PNPM_HOME to ~/.bashrc"
+fi
+
+pnpm link --global || sudo npm link || warn "Global link failed — L1 will still work via l1-start.sh"
+info "OpenClaw linked"
 
 # Step 8: Verify
 if command -v openclaw &> /dev/null; then
     info "OpenClaw available: $(openclaw --version 2>/dev/null || echo 'installed')"
 else
-    fail "OpenClaw not found after link. Check: sudo pnpm link --global"
+    warn "openclaw command not in PATH — use ~/l1-start.sh to run instead"
 fi
 
 # Step 9: Update config — set WhatsApp to watch mode
