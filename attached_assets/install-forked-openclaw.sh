@@ -128,6 +128,17 @@ if 'message.send' in deny:
     deny.remove('message.send')
     print('Removed message.send from denyCommands — watch mode enforces this now')
 
+# Set up TOTP approval mode for trust gate (Pi-compatible, replaces socket-based approval)
+agents = c.setdefault('agents', {}).setdefault('defaults', {})
+if 'approvalMode' not in agents:
+    agents['approvalMode'] = 'totp'
+    agents.setdefault('totpWindowMinutes', 5)
+    agents.setdefault('trustLevel', 1)
+    agents.setdefault('requireApproval', ['message.send'])
+    print('TOTP approval mode configured (trustLevel=1, window=5min)')
+else:
+    print(f'Approval mode already set: {agents[\"approvalMode\"]}')
+
 # Ensure restart is still disabled (safe setdefault)
 c.setdefault('commands', {})['restart'] = False
 
@@ -160,7 +171,12 @@ echo ""
 echo "  Fork installed from: github.com/WhisperingSquirrel-TD/openclaw"
 echo "  WhatsApp: watch mode (read-only, silent)"
 echo "  Telegram: active (2-way with Tom)"
+echo "  Trust gate: TOTP approval (5-min window)"
 echo "  Config: locked"
+echo ""
+echo "  TOTP setup (first time only):"
+echo "    Send /totp-setup on Telegram"
+echo "    Scan the URI with Google Authenticator or Authy"
 echo ""
 echo "  To pull future updates:"
 echo "    cd ~/openclaw && git pull && pnpm run build && openclaw gateway restart"
