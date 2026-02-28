@@ -10,7 +10,7 @@ import { logOutboundAudit } from "./audit-log.js";
 
 const log = createSubsystemLogger("outbound/trust-gate");
 
-const DEFAULT_REQUIRE_APPROVAL = ["message.send"];
+const DEFAULT_REQUIRE_APPROVAL = ["message.send", "exec.run"];
 const DEFAULT_TOTP_WAIT_MS = 120_000;
 
 type TotpPromptCallback = (message: string) => void;
@@ -194,4 +194,65 @@ export async function requestMessageSendApproval(params: {
   }
 
   return requestApprovalViaSocket(params);
+}
+
+export async function requestExecApproval(params: {
+  cfg: OpenClawConfig;
+  command: string;
+  sessionId?: string | null;
+}): Promise<TrustGateResult> {
+  if (!shouldInterceptAction(params.cfg, "exec.run")) {
+    return { allowed: true };
+  }
+
+  const mode = resolveApprovalMode(params.cfg);
+  if (mode !== "totp") {
+    return { allowed: true };
+  }
+
+  const { cfg, command, sessionId } = params;
+  const windowMinutes = resolveTotpWindowMinutes(cfg);
+
+  if (isActionApproved("exec.run")) {
+    log.info("Trust gate (TOTP): active approval window — exec allowed", {
+      command: command.slice(0, 120),
+    });
+    return { allowed: true, decision: "allow-once" };
+  }
+
+  log.info("Trust gate (TOTP): no active approval window — exec blocked", {
+    command: command.slice(0, 120),
+  });
+
+  const commandPreview =
+    command.length > 120 ? command.slice(0, 120) + "…" : command;
+
+  const promptMessage =
+    `🔐 Exec requires approval:\n` +
+    `\`${commandPreview}\`\n\n` +
+    `Send your 6-digit authenticator code to approve (window: ${windowMinutes} min).`;
+
+  void emitPromptBeforeWait(promptMessage);
+
+  const approved = await waitForApprovalWindow("exec.run", DEFAULT_TOTP_WAIT_MS);
+
+  if (approved) {
+    log.info("Trust gate (TOTP): exec approved via code", {
+      command: command.slice(0, 120),
+    });
+    return { allowed: true, decision: "allow-once" };
+  }
+
+  log.info("Trust gate (TOTP): exec approval timed out", {
+    command: command.slice(0, 120),
+  });
+  logOutboundAudit({
+    channel: "exec",
+    recipient: "gateway",
+    content: command,
+    blocked: true,
+    blockReason: "trust_gate",
+    sessionId: sessionId ?? null,
+  });
+  return { allowed: false, decision: "deny", pendingTotp: true };
 }

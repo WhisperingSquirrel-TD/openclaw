@@ -97,11 +97,15 @@ AES-256-GCM encryption for SOUL.md using a passphrase (via `OPENCLAW_VAULT_PASSP
 When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator code (RFC 6238 TOTP) instead of macOS socket-based approval. This is the Pi-compatible alternative for gated actions.
 
 **How it works:**
-1. Agent attempts a gated action (e.g. `message.send` at `trustLevel >= 1`)
+1. Agent attempts a gated action (`message.send` or `exec.run` at `trustLevel >= 1`)
 2. Trust gate checks for an active approval window — if open, action proceeds immediately
 3. If no window: owner is prompted to send their 6-digit code on Telegram
 4. Owner sends code → window opens for `totpWindowMinutes` (default 5) → all queued and future gated actions proceed
 5. Window expires → new code required
+
+**Gated actions:**
+- `message.send` — outbound messages to any channel (email, WhatsApp, Discord, etc.)
+- `exec.run` — shell command execution on the gateway host (closes the exec bypass gap where scripts could send emails via `exec` without TOTP)
 
 **Setup:**
 1. Set config: `agents.defaults.approvalMode: "totp"`, optionally `totpWindowMinutes: 5`

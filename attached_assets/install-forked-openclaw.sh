@@ -150,7 +150,7 @@ if 'approvalMode' not in agents:
     agents['approvalMode'] = 'totp'
     agents.setdefault('totpWindowMinutes', 5)
     agents.setdefault('trustLevel', 1)
-    agents.setdefault('requireApproval', ['message.send'])
+    agents.setdefault('requireApproval', ['message.send', 'exec.run'])
     print('TOTP approval mode configured (trustLevel=1, window=5min)')
 else:
     print(f'Approval mode already set: {agents[\"approvalMode\"]}')

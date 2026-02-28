@@ -47,7 +47,7 @@ export function startApprovalWindow(params: {
 
   activeWindow = {
     expiresAt,
-    approvedActions: new Set(params.actions ?? ["message.send"]),
+    approvedActions: new Set(params.actions ?? ["message.send", "exec.run"]),
     channel: params.channel ?? "all",
     accountId: params.accountId,
   };

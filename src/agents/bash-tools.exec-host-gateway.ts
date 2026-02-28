@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
+import { loadConfig } from "../config/config.js";
 import {
   addAllowlistEntry,
   type ExecAsk,
@@ -14,6 +15,7 @@ import {
   resolveExecApprovals,
 } from "../infra/exec-approvals.js";
 import { detectCommandObfuscation } from "../infra/exec-obfuscation-detect.js";
+import { requestExecApproval } from "../infra/outbound/trust-gate.js";
 import type { SafeBinProfile } from "../infra/exec-safe-bin-policy.js";
 import { logInfo } from "../logger.js";
 import { markBackgrounded, tail } from "./bash-process-registry.js";
@@ -65,6 +67,25 @@ export type ProcessGatewayAllowlistResult = {
 export async function processGatewayAllowlist(
   params: ProcessGatewayAllowlistParams,
 ): Promise<ProcessGatewayAllowlistResult> {
+  try {
+    const cfg = loadConfig();
+    if (cfg.agents?.defaults?.approvalMode === "totp") {
+      const totpResult = await requestExecApproval({
+        cfg,
+        command: params.command,
+        sessionId: params.sessionKey ?? null,
+      });
+      if (!totpResult.allowed) {
+        throw new Error("exec denied: TOTP approval required. Send your 6-digit code on Telegram.");
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("exec denied: TOTP")) {
+      throw err;
+    }
+    logInfo(`exec: TOTP gate check skipped (${String(err)})`);
+  }
+
   const approvals = resolveExecApprovals(params.agentId, {
     security: params.security,
     ask: params.ask,
