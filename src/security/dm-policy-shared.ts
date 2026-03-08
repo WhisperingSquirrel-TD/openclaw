@@ -300,3 +300,21 @@ export async function resolveDmAllowState(params: {
     isMultiUserDm: hasWildcard || allowCount > 1,
   };
 }
+
+export function resolvePinnedMainDmOwnerFromAllowlist(params: {
+  dmScope?: string | null;
+  allowFrom?: Array<string | number> | null;
+  normalizeEntry?: (entry: string) => string;
+}): string | null {
+  if (params.dmScope && params.dmScope !== "main") return null;
+  const raw = Array.isArray(params.allowFrom) ? params.allowFrom : [];
+  const normalize = params.normalizeEntry ?? ((v: string) => v);
+  const entries = raw
+    .map((e) => String(e))
+    .filter((e) => e !== "*")
+    .map((e) => normalize(e))
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const unique = Array.from(new Set(entries));
+  return unique.length === 1 ? unique[0] : null;
+}

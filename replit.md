@@ -230,8 +230,10 @@ These exist in upstream code (not our files) and should not be fixed by us. They
 
 **Build fix**: `tsconfig.plugin-sdk.dts.json` has `noEmitOnError: false` (upstream has `true`) so the `build:plugin-sdk:dts` step emits declarations despite these upstream errors. Without this, the build fails on the Pi.
 
-### Recreated upstream files
+### Recreated/restored upstream exports
 - `src/plugin-sdk/root-alias.cjs` — CJS-to-ESM proxy shim for legacy plugin `require()` support. Was missing after upstream sync (`.cjs` files not captured in tarball extraction). Recreated based on test expectations and upstream plugin-sdk loader behavior. Inlines `emptyPluginConfigSchema` for fast access; lazily loads full ESM index via `require("./index.js")` (works in Node 22.12+ which supports `require()` of ESM modules).
+- `resolvePinnedMainDmOwnerFromAllowlist` in `src/security/dm-policy-shared.ts` — Function removed by upstream refactor but still imported by Telegram, WhatsApp, Discord, Signal, Slack, iMessage, and Line channel handlers. Without it, all inbound DM message processing crashes with `ReferenceError`. Re-implemented: returns the single pinned DM owner from the allowlist when `dmScope` is `"main"` and exactly one non-wildcard entry exists; returns `null` otherwise.
+- `testRegexWithBoundedInput` in `src/security/safe-regex.ts` — Still missing (only used by Discord exec-approvals and exec-approval-forwarder, neither of which we use). Will cause runtime error if Discord channel is enabled.
 
 ## Custom Files Index
 All files unique to our fork (not present in upstream):
