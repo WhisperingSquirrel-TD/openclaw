@@ -32,9 +32,9 @@ This installs dependencies then launches the Vite dev server at **port 5000**.
 
 ## Raspberry Pi Deployment
 
-### Prerequisites
-- **Node.js >= 22.12.0** (required by upstream since 2026.3.8 — verify with `node -v` on Pi)
-- **pnpm** (installed automatically by install script if missing)
+### Prerequisites (all handled automatically by the install script)
+- **Node.js >= 22.12.0** (required by upstream since 2026.3.8 — auto-upgraded via `n`, `nvm`, or `fnm`; installs `n` if no version manager found)
+- **pnpm** (installed automatically if missing)
 - **Git** access to `https://github.com/WhisperingSquirrel-TD/openclaw.git`
 
 ### Install / Update

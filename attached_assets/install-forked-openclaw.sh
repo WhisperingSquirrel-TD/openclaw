@@ -27,7 +27,52 @@ sudo npm uninstall -g openclaw 2>/dev/null || true
 sudo pnpm unlink --global 2>/dev/null || true
 info "Old OpenClaw removed"
 
-# Step 3: Install pnpm if not present
+# Step 3: Ensure Node.js >= 22.12.0 (required by upstream since 2026.3.8)
+REQUIRED_NODE_MAJOR=22
+REQUIRED_NODE_MINOR=12
+CURRENT_NODE_VERSION=$(node -v 2>/dev/null | sed 's/^v//')
+CURRENT_NODE_MAJOR=$(echo "$CURRENT_NODE_VERSION" | cut -d. -f1)
+CURRENT_NODE_MINOR=$(echo "$CURRENT_NODE_VERSION" | cut -d. -f2)
+
+node_needs_update() {
+    if [ -z "$CURRENT_NODE_VERSION" ]; then return 0; fi
+    if [ "$CURRENT_NODE_MAJOR" -lt "$REQUIRED_NODE_MAJOR" ] 2>/dev/null; then return 0; fi
+    if [ "$CURRENT_NODE_MAJOR" -eq "$REQUIRED_NODE_MAJOR" ] && [ "$CURRENT_NODE_MINOR" -lt "$REQUIRED_NODE_MINOR" ] 2>/dev/null; then return 0; fi
+    return 1
+}
+
+if node_needs_update; then
+    warn "Node.js ${CURRENT_NODE_VERSION:-not found} is below required v${REQUIRED_NODE_MAJOR}.${REQUIRED_NODE_MINOR}.0 — upgrading..."
+    if command -v n &> /dev/null; then
+        sudo n install $REQUIRED_NODE_MAJOR || fail "Node.js upgrade via n failed"
+        hash -r
+    elif command -v nvm &> /dev/null; then
+        nvm install $REQUIRED_NODE_MAJOR || fail "Node.js upgrade via nvm failed"
+        nvm use $REQUIRED_NODE_MAJOR
+    elif command -v fnm &> /dev/null; then
+        fnm install $REQUIRED_NODE_MAJOR || fail "Node.js upgrade via fnm failed"
+        fnm use $REQUIRED_NODE_MAJOR
+    else
+        warn "No version manager (n, nvm, fnm) found — installing n..."
+        sudo npm install -g n || fail "Failed to install n"
+        sudo n install $REQUIRED_NODE_MAJOR || fail "Node.js upgrade via n failed"
+        hash -r
+    fi
+    export PATH="/usr/local/bin:$PATH"
+    hash -r 2>/dev/null
+    NEW_NODE=$(node -v 2>/dev/null | sed 's/^v//')
+    NEW_MAJOR=$(echo "$NEW_NODE" | cut -d. -f1)
+    NEW_MINOR=$(echo "$NEW_NODE" | cut -d. -f2)
+    if [ "$NEW_MAJOR" -lt "$REQUIRED_NODE_MAJOR" ] 2>/dev/null || \
+       { [ "$NEW_MAJOR" -eq "$REQUIRED_NODE_MAJOR" ] && [ "$NEW_MINOR" -lt "$REQUIRED_NODE_MINOR" ]; } 2>/dev/null; then
+        fail "Node.js upgrade produced v${NEW_NODE} but v${REQUIRED_NODE_MAJOR}.${REQUIRED_NODE_MINOR}.0+ is required. Check PATH or upgrade manually."
+    fi
+    info "Node.js upgraded to v$NEW_NODE"
+else
+    info "Node.js $CURRENT_NODE_VERSION (meets >= v${REQUIRED_NODE_MAJOR}.${REQUIRED_NODE_MINOR}.0)"
+fi
+
+# Step 4: Install pnpm if not present
 if ! command -v pnpm &> /dev/null; then
     warn "Installing pnpm..."
     sudo npm install -g pnpm || fail "pnpm install failed"
@@ -36,7 +81,7 @@ else
     info "pnpm already installed: $(pnpm --version)"
 fi
 
-# Step 4: Clone or pull the fork
+# Step 5: Clone or pull the fork
 if [ -d ~/openclaw ]; then
     warn "Fork already cloned — pulling latest changes..."
     cd ~/openclaw
@@ -52,13 +97,13 @@ else
     info "Fork cloned"
 fi
 
-# Step 5: Install dependencies with pnpm
+# Step 6: Install dependencies with pnpm
 warn "Installing dependencies with pnpm (this may take a few minutes on Pi)..."
 cd ~/openclaw
 pnpm install || fail "pnpm install failed"
 info "Dependencies installed"
 
-# Step 6: Build TypeScript
+# Step 7: Build TypeScript
 warn "Building from TypeScript source (this may take a while on Pi)..."
 cd ~/openclaw
 rm -rf dist 2>/dev/null || true
@@ -66,7 +111,7 @@ pnpm run build || fail "Build failed — check for TypeScript errors"
 COMMIT_SHORT=$(cd ~/openclaw && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 info "Build complete (commit: $COMMIT_SHORT)"
 
-# Step 7: Link globally with pnpm (not npm — must match the package manager)
+# Step 8: Link globally with pnpm (not npm — must match the package manager)
 warn "Linking openclaw globally..."
 cd ~/openclaw
 
@@ -88,7 +133,7 @@ fi
 pnpm link --global || sudo npm link || warn "Global link failed — L1 will still work via l1-start.sh"
 info "OpenClaw linked"
 
-# Step 8: Verify + keep install script up to date
+# Step 9: Verify + keep install script up to date
 if command -v openclaw &> /dev/null; then
     info "OpenClaw available: $(openclaw --version 2>/dev/null || echo 'installed')"
 else
@@ -101,7 +146,7 @@ if [ -f ~/openclaw/attached_assets/install-forked-openclaw.sh ]; then
     info "Install script updated at ~/install-forked-openclaw.sh"
 fi
 
-# Step 9: Update config — set WhatsApp to watch mode
+# Step 10: Update config — set WhatsApp to watch mode
 echo ""
 warn "Updating openclaw.json — setting WhatsApp to watch mode..."
 
@@ -180,7 +225,7 @@ print('Config updated successfully')
 sudo chattr +i "$CONFIG_FILE"
 info "Config updated and locked"
 
-# Step 10: Set audit log append-only (tamper protection)
+# Step 11: Set audit log append-only (tamper protection)
 AUDIT_DIR="$HOME/.openclaw/audit"
 if [ -d "$AUDIT_DIR" ]; then
     sudo chattr +a "$AUDIT_DIR/outbound-audit.jsonl" 2>/dev/null && info "Audit log set append-only" || true
@@ -192,12 +237,12 @@ if [ -d "$TOTP_DIR" ]; then
     info "TOTP secret files protected"
 fi
 
-# Step 11: Start L1
+# Step 12: Start L1
 echo ""
 warn "Starting L1..."
 ~/l1-start.sh
 
-# Step 12: Update hashes
+# Step 13: Update hashes
 md5sum /mnt/l1-secure/*.md > ~/l1-hashes.txt 2>/dev/null || true
 info "Hashes updated"
 
