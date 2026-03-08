@@ -115,12 +115,17 @@ export const handleTotpLockCommand: CommandHandler = async (params, allowTextCom
 };
 
 export const handleTotpCodeInput: CommandHandler = async (params, allowTextCommands) => {
+  const normalized = params.command.commandBodyNormalized.trim();
+  const looksLikeTotpCode = /^\d{6}$/.test(normalized);
+
   if (!allowTextCommands) {
+    if (looksLikeTotpCode) {
+      logVerbose(`TOTP code input skipped: text commands not allowed for this channel`);
+    }
     return null;
   }
-  const normalized = params.command.commandBodyNormalized.trim();
 
-  if (!/^\d{6}$/.test(normalized)) {
+  if (!looksLikeTotpCode) {
     return null;
   }
 
@@ -134,6 +139,9 @@ export const handleTotpCodeInput: CommandHandler = async (params, allowTextComma
   const cfg = loadConfig();
   const approvalMode = cfg.agents?.defaults?.approvalMode;
   if (approvalMode !== "totp") {
+    logVerbose(
+      `TOTP code input ignored: approvalMode is "${approvalMode ?? "socket"}", not "totp"`,
+    );
     return null;
   }
 
