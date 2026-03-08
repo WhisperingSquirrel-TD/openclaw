@@ -1,0 +1,51 @@
+
+32 import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/telegram/bot-message-context.session.ts:20:10 - error TS2305: Module '"../security/dm-policy-shared.js"' has no exported member 'resolvePinnedMainDmOwnerFromAllowlist'.
+
+20 import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/telegram/bot-message-context.session.ts:252:26 - error TS7006: Parameter 'entry' implicitly has an 'any' type.
+
+252         normalizeEntry: (entry) => normalizeAllowFrom([entry]).entries[0],
+                             ~~~~~
+
+src/web/auto-reply/monitor/process-message.ts:28:3 - error TS2305: Module '"../../../security/dm-policy-shared.js"' has no exported member 'resolvePinnedMainDmOwnerFromAllowlist'.
+
+28   resolvePinnedMainDmOwnerFromAllowlist,
+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/web/auto-reply/monitor/process-message.ts:122:22 - error TS7006: Parameter 'entry' implicitly has an 'any' type.
+
+122     normalizeEntry: (entry) => normalizeE164(entry),
+                         ~~~~~
+
+
+Found 29 errors in 19 files.
+
+Errors  Files
+     1  src/agents/compaction.ts:4
+     1  src/agents/pi-embedded-helpers/bootstrap.ts:118
+     4  src/agents/pi-embedded-runner/extensions.ts:74
+     1  src/agents/pi-extensions/compaction-safeguard-runtime.ts:2
+     2  src/agents/tools/pdf-tool.helpers.ts:85
+     3  src/auto-reply/reply/commands-core.ts:253
+     1  src/auto-reply/reply/get-reply-inline-actions.ts:336
+     1  src/auto-reply/reply/memory-flush.ts:91
+     1  src/auto-reply/reply/post-compaction-context.ts:89
+     2  src/discord/monitor/agent-components.ts:44
+     1  src/discord/monitor/exec-approvals.ts:28
+     1  src/imessage/monitor/monitor-provider.ts:38
+     1  src/infra/heartbeat-runner.ts:763
+     2  src/line/bot-message-context.ts:12
+     1  src/signal/monitor/event-handler.ts:36
+     1  src/slack/monitor/message-handler/dispatch.ts:13
+     1  src/slack/monitor/message-handler/prepare.ts:32
+     2  src/telegram/bot-message-context.session.ts:20
+     2  src/web/auto-reply/monitor/process-message.ts:28
+ ELIFECYCLE  Command failed with exit code 1.
+ ELIFECYCLE  Command failed with exit code 1.
+[✗] Build failed — check for TypeScript errors
+tomdean88@raspberrypi:~$
