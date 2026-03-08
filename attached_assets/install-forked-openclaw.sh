@@ -40,7 +40,9 @@ fi
 if [ -d ~/openclaw ]; then
     warn "Fork already cloned — pulling latest changes..."
     cd ~/openclaw
+    git stash 2>/dev/null || true
     git pull || fail "Git pull failed. Check your connection."
+    git stash pop 2>/dev/null || true
     info "Code updated"
 else
     warn "Cloning fork from GitHub..."
@@ -59,8 +61,10 @@ info "Dependencies installed"
 # Step 6: Build TypeScript
 warn "Building from TypeScript source (this may take a while on Pi)..."
 cd ~/openclaw
+find dist -name '*.js' -newer package.json -delete 2>/dev/null || true
 pnpm run build || fail "Build failed — check for TypeScript errors"
-info "Build complete"
+COMMIT_SHORT=$(cd ~/openclaw && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+info "Build complete (commit: $COMMIT_SHORT)"
 
 # Step 7: Link globally with pnpm (not npm — must match the package manager)
 warn "Linking openclaw globally..."
@@ -84,11 +88,17 @@ fi
 pnpm link --global || sudo npm link || warn "Global link failed — L1 will still work via l1-start.sh"
 info "OpenClaw linked"
 
-# Step 8: Verify
+# Step 8: Verify + keep install script up to date
 if command -v openclaw &> /dev/null; then
     info "OpenClaw available: $(openclaw --version 2>/dev/null || echo 'installed')"
 else
     warn "openclaw command not in PATH — use ~/l1-start.sh to run instead"
+fi
+
+if [ -f ~/openclaw/attached_assets/install-forked-openclaw.sh ]; then
+    cp ~/openclaw/attached_assets/install-forked-openclaw.sh ~/install-forked-openclaw.sh
+    chmod +x ~/install-forked-openclaw.sh
+    info "Install script updated at ~/install-forked-openclaw.sh"
 fi
 
 # Step 9: Update config — set WhatsApp to watch mode
@@ -185,6 +195,7 @@ echo "  DONE"
 echo "========================================="
 echo ""
 echo "  Fork installed from: github.com/WhisperingSquirrel-TD/openclaw"
+echo "  Commit: ${COMMIT_SHORT:-unknown}"
 echo "  WhatsApp: watch mode (read-only, silent)"
 echo "  Telegram: active (2-way with Tom)"
 echo "  Trust gate: TOTP approval (5-min window)"
@@ -195,7 +206,12 @@ echo "    Send /totp-setup on Telegram"
 echo "    Scan the URI with Google Authenticator or Authy"
 echo ""
 echo "  To pull future updates:"
-echo "    cd ~/openclaw && git pull && pnpm run build && openclaw gateway restart"
+echo "    bash ~/install-forked-openclaw.sh"
+echo ""
+echo "  Quick manual update (if you know there are no config changes):"
+echo "    ~/l1-stop.sh"
+echo "    cd ~/openclaw && git pull && pnpm install && pnpm run build"
+echo "    ~/l1-start.sh"
 echo ""
 echo "  To check status:"
 echo "    openclaw doctor"
