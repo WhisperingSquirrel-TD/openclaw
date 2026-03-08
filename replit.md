@@ -221,10 +221,14 @@ Upstream removed the `ChannelMode` type and `mode` field from `src/web/accounts.
 - **Config schema**: `mode: z.enum(["active", "watch"]).optional().default("active")` added to `WhatsAppSharedSchema` in `src/config/zod-schema.providers-whatsapp.ts` — inherited by both `WhatsAppConfigSchema` (root level) and `WhatsAppAccountSchema` (per-account). Required because both schemas use `.strict()` which rejects unknown keys.
 
 ### Pre-existing upstream TypeScript errors
-These exist in upstream code (not our files) and should not be fixed by us:
+These exist in upstream code (not our files) and should not be fixed by us. They cause 29 errors in 19 files during `tsc`:
+- `dm-policy-shared.ts` — `resolvePinnedMainDmOwnerFromAllowlist` missing export (referenced by iMessage, Signal, Slack, Discord, Telegram, Line, WhatsApp monitors)
+- `safe-regex.ts` — `testRegexWithBoundedInput` missing export (referenced by Discord exec-approvals, exec-approval-forwarder)
 - `rate-limiter.ts` — `maxMessagesPerMinute`/`maxMessagesPerHour` on Discord config
-- `dm-policy-shared.js` consumers — `resolvePinnedMainDmOwnerFromAllowlist` missing export
 - `vite.config.ts` — `allowedHosts` type mismatch
+- Various `TS7006` implicit-any errors in `compaction.ts`, `pi-embedded-helpers`, `pi-embedded-runner`, `pdf-tool.helpers.ts`, `commands-core.ts`, `get-reply-inline-actions.ts`, `memory-flush.ts`, `post-compaction-context.ts`, `heartbeat-runner.ts`, `process-message.ts`
+
+**Build fix**: `tsconfig.plugin-sdk.dts.json` has `noEmitOnError: false` (upstream has `true`) so the `build:plugin-sdk:dts` step emits declarations despite these upstream errors. Without this, the build fails on the Pi.
 
 ### Recreated upstream files
 - `src/plugin-sdk/root-alias.cjs` — CJS-to-ESM proxy shim for legacy plugin `require()` support. Was missing after upstream sync (`.cjs` files not captured in tarball extraction). Recreated based on test expectations and upstream plugin-sdk loader behavior. Inlines `emptyPluginConfigSchema` for fast access; lazily loads full ESM index via `require("./index.js")` (works in Node 22.12+ which supports `require()` of ESM modules).
