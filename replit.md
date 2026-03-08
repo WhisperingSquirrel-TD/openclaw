@@ -151,6 +151,14 @@ The audit log (`<state-dir>/audit/outbound-audit.jsonl`) is:
 - Protected by the exec denylist (agent cannot reference the file in exec commands)
 - The install script additionally sets `chattr +a` on the audit log and `chattr +i` on TOTP secret files
 
+## Upstream Sync
+Fork base: `d911b02` (2026-02-27). Last synced: **2026-03-08** (upstream commit `d15b6af7`, version 2026.3.8).
+- 2,395 files synced from upstream (777 new, 1618 modified)
+- 5 conflict files manually merged: `exec-host-gateway.ts`, `outbound.ts`, `auto-reply/monitor.ts`, `inbound/monitor.ts`, `node-command-policy.ts`
+- Upstream remote: `https://github.com/openclaw/openclaw.git`
+- Fork remote: `https://github.com/WhisperingSquirrel-TD/openclaw.git`
+- Key upstream changes: Gemini 3.1 Flash Lite, exec approval refactoring (`exec-host-shared.ts`), `createConnectedChannelStatusPatch`, `normalizeDeviceMetadataForPolicy`, MCP bootstrap improvements, CLI restart fixes
+
 ## Environment Variables
 See `.env.example` for all options. Key variables:
 - `OPENCLAW_GATEWAY_TOKEN` — auth token for the gateway

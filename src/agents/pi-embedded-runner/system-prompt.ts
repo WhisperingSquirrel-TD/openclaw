@@ -51,9 +51,8 @@ export function buildEmbeddedSystemPrompt(params: {
   userTime?: string;
   userTimeFormat?: ResolvedTimeFormat;
   contextFiles?: EmbeddedContextFile[];
+  bootstrapTruncationWarningLines?: string[];
   memoryCitationsMode?: MemoryCitationsMode;
-  immutableSystemPrompt?: string;
-  outboundContextScope?: "channel-isolated" | "shared";
 }): string {
   return buildAgentSystemPrompt({
     workspaceDir: params.workspaceDir,
@@ -82,9 +81,8 @@ export function buildEmbeddedSystemPrompt(params: {
     userTime: params.userTime,
     userTimeFormat: params.userTimeFormat,
     contextFiles: params.contextFiles,
+    bootstrapTruncationWarningLines: params.bootstrapTruncationWarningLines,
     memoryCitationsMode: params.memoryCitationsMode,
-    immutableSystemPrompt: params.immutableSystemPrompt,
-    outboundContextScope: params.outboundContextScope,
   });
 }
 

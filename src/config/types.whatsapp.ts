@@ -36,8 +36,6 @@ export type WhatsAppAckReactionConfig = {
 };
 
 type WhatsAppSharedConfig = {
-  /** Channel operating mode: "active" (default, two-way) or "watch" (read-only transcript). */
-  mode?: "active" | "watch";
   /** Whether the WhatsApp channel is enabled. */
   enabled?: boolean;
   /** Direct message access policy (default: pairing). */
@@ -80,14 +78,6 @@ type WhatsAppSharedConfig = {
   debounceMs?: number;
   /** Heartbeat visibility settings. */
   heartbeat?: ChannelHeartbeatVisibilityConfig;
-  /** Commands to deny for this channel (merged with global gateway.nodes.denyCommands). */
-  denyCommands?: string[];
-  /** Maximum outbound messages allowed per minute. */
-  maxMessagesPerMinute?: number;
-  /** Maximum outbound messages allowed per hour. */
-  maxMessagesPerHour?: number;
-  /** Behavior when rate limit is exceeded: "queue" (default) or "drop". */
-  rateLimitOverflow?: "queue" | "drop";
 };
 
 type WhatsAppConfigCore = {
@@ -109,6 +99,8 @@ export type WhatsAppConfig = WhatsAppConfigCore &
   WhatsAppSharedConfig & {
     /** Optional per-account WhatsApp configuration (multi-account). */
     accounts?: Record<string, WhatsAppAccountConfig>;
+    /** Optional default account id when multiple accounts are configured. */
+    defaultAccount?: string;
     /** Per-action tool gating (default: true for all). */
     actions?: WhatsAppActionConfig;
   };

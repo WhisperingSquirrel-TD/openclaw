@@ -14,7 +14,6 @@ export type ChannelMode = "active" | "watch";
 export type ResolvedWhatsAppAccount = {
   accountId: string;
   name?: string;
-  mode: ChannelMode;
   enabled: boolean;
   sendReadReceipts: boolean;
   messagePrefix?: string;
@@ -32,7 +31,10 @@ export type ResolvedWhatsAppAccount = {
   ackReaction?: WhatsAppAccountConfig["ackReaction"];
   groups?: WhatsAppAccountConfig["groups"];
   debounceMs?: number;
+  mode?: ChannelMode;
 };
+
+export const DEFAULT_WHATSAPP_MEDIA_MAX_MB = 50;
 
 const { listConfiguredAccountIds, listAccountIds, resolveDefaultAccountId } =
   createAccountListHelpers("whatsapp");
@@ -129,7 +131,6 @@ export function resolveWhatsAppAccount(params: {
   return {
     accountId,
     name: accountCfg?.name?.trim() || undefined,
-    mode: (accountCfg?.mode ?? rootCfg?.mode ?? "active") as ChannelMode,
     enabled,
     sendReadReceipts: accountCfg?.sendReadReceipts ?? rootCfg?.sendReadReceipts ?? true,
     messagePrefix:
@@ -148,7 +149,19 @@ export function resolveWhatsAppAccount(params: {
     ackReaction: accountCfg?.ackReaction ?? rootCfg?.ackReaction,
     groups: accountCfg?.groups ?? rootCfg?.groups,
     debounceMs: accountCfg?.debounceMs ?? rootCfg?.debounceMs,
+    mode: ((accountCfg as Record<string, unknown> | undefined)?.mode ??
+      (rootCfg as Record<string, unknown> | undefined)?.mode) as ChannelMode | undefined,
   };
+}
+
+export function resolveWhatsAppMediaMaxBytes(
+  account: Pick<ResolvedWhatsAppAccount, "mediaMaxMb">,
+): number {
+  const mediaMaxMb =
+    typeof account.mediaMaxMb === "number" && account.mediaMaxMb > 0
+      ? account.mediaMaxMb
+      : DEFAULT_WHATSAPP_MEDIA_MAX_MB;
+  return mediaMaxMb * 1024 * 1024;
 }
 
 export function listEnabledWhatsAppAccounts(cfg: OpenClawConfig): ResolvedWhatsAppAccount[] {

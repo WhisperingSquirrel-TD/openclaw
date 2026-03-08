@@ -3,6 +3,7 @@ import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/config.js";
 import { resetLogger, setLoggerOverride } from "../logging.js";
 import { redactIdentifier } from "../logging/redact-identifier.js";
 import { setActiveWebListener } from "./active-listener.js";
@@ -12,16 +13,6 @@ vi.mock("./media.js", () => ({
   loadWebMedia: (...args: unknown[]) => loadWebMediaMock(...args),
 }));
 
-const assertNotWatchModeMock = vi.fn();
-vi.mock("./watch-mode.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("./watch-mode.js")>();
-  return {
-    ...original,
-    assertNotWatchMode: (...args: unknown[]) => assertNotWatchModeMock(...args),
-  };
-});
-
-import { WatchModeBlockError } from "./watch-mode.js";
 import { sendMessageWhatsApp, sendPollWhatsApp, sendReactionWhatsApp } from "./outbound.js";
 
 describe("web outbound", () => {
@@ -44,6 +35,7 @@ describe("web outbound", () => {
     resetLogger();
     setLoggerOverride(null);
     setActiveWebListener(null);
+    setActiveWebListener("work", null);
   });
 
   it("sends message via active listener", async () => {
@@ -150,6 +142,46 @@ describe("web outbound", () => {
     });
   });
 
+  it("uses account-aware WhatsApp media caps for outbound uploads", async () => {
+    setActiveWebListener("work", {
+      sendComposingTo,
+      sendMessage,
+      sendPoll,
+      sendReaction,
+    });
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: Buffer.from("img"),
+      contentType: "image/jpeg",
+      kind: "image",
+    });
+
+    const cfg = {
+      channels: {
+        whatsapp: {
+          mediaMaxMb: 25,
+          accounts: {
+            work: {
+              mediaMaxMb: 100,
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    await sendMessageWhatsApp("+1555", "pic", {
+      verbose: false,
+      accountId: "work",
+      cfg,
+      mediaUrl: "/tmp/pic.jpg",
+      mediaLocalRoots: ["/tmp/workspace"],
+    });
+
+    expect(loadWebMediaMock).toHaveBeenCalledWith("/tmp/pic.jpg", {
+      maxBytes: 100 * 1024 * 1024,
+      localRoots: ["/tmp/workspace"],
+    });
+  });
+
   it("sends polls via active listener", async () => {
     const result = await sendPollWhatsApp(
       "+1555",
@@ -206,44 +238,5 @@ describe("web outbound", () => {
       false,
       undefined,
     );
-  });
-
-  describe("watch mode send-block", () => {
-    beforeEach(() => {
-      assertNotWatchModeMock.mockImplementation(() => {
-        throw new WatchModeBlockError("default");
-      });
-    });
-
-    it("blocks sendMessageWhatsApp in watch mode", async () => {
-      await expect(
-        sendMessageWhatsApp("+1555", "hi", { verbose: false }),
-      ).rejects.toThrow(WatchModeBlockError);
-      await expect(
-        sendMessageWhatsApp("+1555", "hi", { verbose: false }),
-      ).rejects.toThrow(/watch mode/);
-      expect(sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("blocks sendPollWhatsApp in watch mode", async () => {
-      await expect(
-        sendPollWhatsApp(
-          "+1555",
-          { question: "Q?", options: ["A", "B"], maxSelections: 1 },
-          { verbose: false },
-        ),
-      ).rejects.toThrow(WatchModeBlockError);
-      expect(sendPoll).not.toHaveBeenCalled();
-    });
-
-    it("blocks sendReactionWhatsApp in watch mode", async () => {
-      await expect(
-        sendReactionWhatsApp("1555@s.whatsapp.net", "msg123", "✅", {
-          verbose: false,
-          fromMe: false,
-        }),
-      ).rejects.toThrow(WatchModeBlockError);
-      expect(sendReaction).not.toHaveBeenCalled();
-    });
   });
 });

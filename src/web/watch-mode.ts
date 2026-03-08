@@ -15,7 +15,7 @@ export class WatchModeBlockError extends Error {
 export function resolveWhatsAppMode(accountId?: string | null): ChannelMode {
   const cfg = loadConfig();
   const account = resolveWhatsAppAccount({ cfg, accountId });
-  return account.mode;
+  return account.mode ?? "active";
 }
 
 export function assertNotWatchMode(accountId?: string | null): void {
