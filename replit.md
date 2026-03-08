@@ -216,10 +216,9 @@ These files had both upstream refactoring and our security customizations. In ea
 5. **`src/gateway/node-command-policy.ts`** — Upstream added `PlatformId` type system and `normalizeDeviceMetadataForPolicy`. Our `resolveChannelDenyCommands` function preserved.
 
 ### `ChannelMode` type (our addition)
-Upstream removed the `ChannelMode` type and `mode` field from `src/web/accounts.ts` — these are our additions for watch mode. Re-added as:
-- `export type ChannelMode = "active" | "watch"`
-- `mode?: ChannelMode` on `ResolvedWhatsAppAccount`
-- Safe cast from config with `resolveWhatsAppMode()` returning `"active"` as default
+Upstream removed the `ChannelMode` type and `mode` field from `src/web/accounts.ts` — these are our additions for watch mode. Re-added in two places:
+- **Runtime type**: `export type ChannelMode = "active" | "watch"` and `mode?: ChannelMode` on `ResolvedWhatsAppAccount` in `src/web/accounts.ts`, with safe cast from config via `resolveWhatsAppMode()` returning `"active"` as default
+- **Config schema**: `mode: z.enum(["active", "watch"]).optional().default("active")` added to `WhatsAppSharedSchema` in `src/config/zod-schema.providers-whatsapp.ts` — inherited by both `WhatsAppConfigSchema` (root level) and `WhatsAppAccountSchema` (per-account). Required because both schemas use `.strict()` which rejects unknown keys.
 
 ### Pre-existing upstream TypeScript errors
 These exist in upstream code (not our files) and should not be fixed by us:

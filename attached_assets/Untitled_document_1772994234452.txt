@@ -1,0 +1,619 @@
+﻿tomdean88@raspberrypi:~$ bash ~/install-forked-openclaw.sh
+
+
+=========================================
+  L1 — Install Forked OpenClaw
+=========================================
+
+
+[!] Stopping L1...
+
+
+🦞 OpenClaw 2026.3.8 (unknown)
+   Gateway online—please keep hands, feet, and appendages inside the shell at all times.
+
+
+│
+◇  Config ───────────────────────────────────────────────────╮
+│                                                            │
+│  Config invalid; doctor will run with best-effort config.  │
+│                                                            │
+├────────────────────────────────────────────────────────────╯
+│
+◇  Unknown config keys ──────╮
+│                            │
+│  - channels.whatsapp.mode  │
+│                            │
+├────────────────────────────╯
+│
+◇  Doctor ────────────────────────────────────────────╮
+│                                                     │
+│  Run "openclaw doctor --fix" to remove these keys.  │
+│                                                     │
+├─────────────────────────────────────────────────────╯
+Stopped systemd service: openclaw-gateway.service
+=== L1 shutdown. Decrypted files wiped. ===
+[✓] L1 stopped
+[!] Uninstalling current OpenClaw...
+
+
+up to date in 2s
+Nothing to unlink
+[✓] Old OpenClaw removed
+[✓] pnpm already installed: 10.30.3
+[!] Fork already cloned — pulling latest changes...
+Already up to date.
+[✓] Code updated
+[!] Installing dependencies with pnpm (this may take a few minutes on Pi)...
+Scope: all 36 workspace projects
+Lockfile is up to date, resolution step is skipped
+Already up to date
+. prepare$ command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-t…
+└─ Done in 59ms
+╭ Warning ─────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│   Ignored build scripts: @discordjs/opus@0.10.0.                             │
+│   Run "pnpm approve-builds" to pick which dependencies should be allowed     │
+│   to run scripts.                                                            │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Done in 7.9s using pnpm v10.30.3
+[✓] Dependencies installed
+[!] Building from TypeScript source (this may take a while on Pi)...
+
+
+> openclaw@2026.3.8 build /home/tomdean88/openclaw
+> pnpm canvas:a2ui:bundle && node scripts/tsdown-build.mjs && node scripts/copy-plugin-sdk-root-alias.mjs && pnpm build:plugin-sdk:dts && node --import tsx scripts/write-plugin-sdk-entry-dts.ts && node --import tsx scripts/canvas-a2ui-copy.ts && node --import tsx scripts/copy-hook-metadata.ts && node --import tsx scripts/copy-export-html-templates.ts && node --import tsx scripts/write-build-info.ts && node --import tsx scripts/write-cli-startup-metadata.ts && node --import tsx scripts/write-cli-compat.ts
+
+
+
+
+> openclaw@2026.3.8 canvas:a2ui:bundle /home/tomdean88/openclaw
+> bash scripts/bundle-a2ui.sh
+
+
+<DIR>/a2ui.bundle.js  chunk │ size: 457.10 kB                                
+                                                                             
+✔ rolldown v1.0.0-rc.7 Finished in 515.37 ms                                
+[PLUGIN_TIMINGS] Warning: Your build spent significant time in plugin `tsdown:external`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+
+src/imessage/monitor/monitor-provider.ts (38:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/imessage/monitor/monitor-provider.ts:38:10 ]
+    │
+ 38 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/web/auto-reply/monitor/process-message.ts (28:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/web/auto-reply/monitor/process-message.ts:28:3 ]
+    │
+ 28 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/imessage/monitor/monitor-provider.ts (38:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/imessage/monitor/monitor-provider.ts:38:10 ]
+    │
+ 38 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/signal/monitor/event-handler.ts (36:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/signal/monitor/event-handler.ts:36:3 ]
+    │
+ 36 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/signal/monitor/event-handler.ts (36:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/signal/monitor/event-handler.ts:36:3 ]
+    │
+ 36 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/dispatch.ts (13:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/dispatch.ts:13:10 ]
+    │
+ 13 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/discord/monitor/agent-components.ts (44:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/discord/monitor/agent-components.ts:44:3 ]
+    │
+ 44 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/discord/monitor/exec-approvals.ts (28:27) [MISSING_EXPORT] Warning: "testRegexWithBoundedInput" is not exported by "src/security/safe-regex.ts".
+    ╭─[ src/discord/monitor/exec-approvals.ts:28:28 ]
+    │
+ 28 │ import { compileSafeRegex, testRegexWithBoundedInput } from "../../security/safe-regex.js";
+    │                            ────────────┬────────────  
+    │                                        ╰────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/safe-regex.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/prepare.ts (32:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/prepare.ts:32:10 ]
+    │
+ 32 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/line/bot-message-context.ts (12:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/line/bot-message-context.ts:12:10 ]
+    │
+ 12 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+src/line/bot-message-context.ts (12:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/line/bot-message-context.ts:12:10 ]
+    │
+ 12 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/dispatch.ts (13:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/dispatch.ts:13:10 ]
+    │
+ 13 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/discord/monitor/agent-components.ts (44:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/discord/monitor/agent-components.ts:44:3 ]
+    │
+ 44 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/prepare.ts (32:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/prepare.ts:32:10 ]
+    │
+ 32 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/discord/monitor/exec-approvals.ts (28:27) [MISSING_EXPORT] Warning: "testRegexWithBoundedInput" is not exported by "src/security/safe-regex.ts".
+    ╭─[ src/discord/monitor/exec-approvals.ts:28:28 ]
+    │
+ 28 │ import { compileSafeRegex, testRegexWithBoundedInput } from "../../security/safe-regex.js";
+    │                            ────────────┬────────────  
+    │                                        ╰────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/safe-regex.js'`).
+────╯
+
+
+src/telegram/bot-message-context.session.ts (20:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/telegram/bot-message-context.session.ts:20:10 ]
+    │
+ 20 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+src/web/auto-reply/monitor/process-message.ts (28:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/web/auto-reply/monitor/process-message.ts:28:3 ]
+    │
+ 28 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/telegram/bot-message-context.session.ts (20:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/telegram/bot-message-context.session.ts:20:10 ]
+    │
+ 20 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+src/web/auto-reply/monitor/process-message.ts (28:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/web/auto-reply/monitor/process-message.ts:28:3 ]
+    │
+ 28 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/imessage/monitor/monitor-provider.ts (38:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/imessage/monitor/monitor-provider.ts:38:10 ]
+    │
+ 38 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/signal/monitor/event-handler.ts (36:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/signal/monitor/event-handler.ts:36:3 ]
+    │
+ 36 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/line/bot-message-context.ts (12:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/line/bot-message-context.ts:12:10 ]
+    │
+ 12 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+src/discord/monitor/agent-components.ts (44:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/discord/monitor/agent-components.ts:44:3 ]
+    │
+ 44 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/discord/monitor/exec-approvals.ts (28:27) [MISSING_EXPORT] Warning: "testRegexWithBoundedInput" is not exported by "src/security/safe-regex.ts".
+    ╭─[ src/discord/monitor/exec-approvals.ts:28:28 ]
+    │
+ 28 │ import { compileSafeRegex, testRegexWithBoundedInput } from "../../security/safe-regex.js";
+    │                            ────────────┬────────────  
+    │                                        ╰────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/safe-regex.js'`).
+────╯
+
+
+src/telegram/bot-message-context.session.ts (20:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/telegram/bot-message-context.session.ts:20:10 ]
+    │
+ 20 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/dispatch.ts (13:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/dispatch.ts:13:10 ]
+    │
+ 13 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/prepare.ts (32:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/prepare.ts:32:10 ]
+    │
+ 32 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/imessage/monitor/monitor-provider.ts (38:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/imessage/monitor/monitor-provider.ts:38:10 ]
+    │
+ 38 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/infra/exec-approval-forwarder.ts (10:27) [MISSING_EXPORT] Warning: "testRegexWithBoundedInput" is not exported by "src/security/safe-regex.ts".
+    ╭─[ src/infra/exec-approval-forwarder.ts:10:28 ]
+    │
+ 10 │ import { compileSafeRegex, testRegexWithBoundedInput } from "../security/safe-regex.js";
+    │                            ────────────┬────────────  
+    │                                        ╰────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/safe-regex.js'`).
+────╯
+
+
+src/web/auto-reply/monitor/process-message.ts (28:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/web/auto-reply/monitor/process-message.ts:28:3 ]
+    │
+ 28 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/signal/monitor/event-handler.ts (36:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/signal/monitor/event-handler.ts:36:3 ]
+    │
+ 36 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/imessage/monitor/monitor-provider.ts (38:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/imessage/monitor/monitor-provider.ts:38:10 ]
+    │
+ 38 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/line/bot-message-context.ts (12:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/line/bot-message-context.ts:12:10 ]
+    │
+ 12 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+src/infra/exec-approval-forwarder.ts (10:27) [MISSING_EXPORT] Warning: "testRegexWithBoundedInput" is not exported by "src/security/safe-regex.ts".
+    ╭─[ src/infra/exec-approval-forwarder.ts:10:28 ]
+    │
+ 10 │ import { compileSafeRegex, testRegexWithBoundedInput } from "../security/safe-regex.js";
+    │                            ────────────┬────────────  
+    │                                        ╰────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/safe-regex.js'`).
+────╯
+
+
+src/discord/monitor/agent-components.ts (44:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/discord/monitor/agent-components.ts:44:3 ]
+    │
+ 44 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/discord/monitor/exec-approvals.ts (28:27) [MISSING_EXPORT] Warning: "testRegexWithBoundedInput" is not exported by "src/security/safe-regex.ts".
+    ╭─[ src/discord/monitor/exec-approvals.ts:28:28 ]
+    │
+ 28 │ import { compileSafeRegex, testRegexWithBoundedInput } from "../../security/safe-regex.js";
+    │                            ────────────┬────────────  
+    │                                        ╰────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/safe-regex.js'`).
+────╯
+
+
+src/web/auto-reply/monitor/process-message.ts (28:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/web/auto-reply/monitor/process-message.ts:28:3 ]
+    │
+ 28 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/dispatch.ts (13:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/dispatch.ts:13:10 ]
+    │
+ 13 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/prepare.ts (32:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/prepare.ts:32:10 ]
+    │
+ 32 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/signal/monitor/event-handler.ts (36:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/signal/monitor/event-handler.ts:36:3 ]
+    │
+ 36 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/discord/monitor/agent-components.ts (44:2) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/discord/monitor/agent-components.ts:44:3 ]
+    │
+ 44 │   resolvePinnedMainDmOwnerFromAllowlist,
+    │   ──────────────────┬──────────────────  
+    │                     ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/discord/monitor/exec-approvals.ts (28:27) [MISSING_EXPORT] Warning: "testRegexWithBoundedInput" is not exported by "src/security/safe-regex.ts".
+    ╭─[ src/discord/monitor/exec-approvals.ts:28:28 ]
+    │
+ 28 │ import { compileSafeRegex, testRegexWithBoundedInput } from "../../security/safe-regex.js";
+    │                            ────────────┬────────────  
+    │                                        ╰────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../security/safe-regex.js'`).
+────╯
+
+
+src/line/bot-message-context.ts (12:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/line/bot-message-context.ts:12:10 ]
+    │
+ 12 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/dispatch.ts (13:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/dispatch.ts:13:10 ]
+    │
+ 13 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/telegram/bot-message-context.session.ts (20:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/telegram/bot-message-context.session.ts:20:10 ]
+    │
+ 20 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+src/slack/monitor/message-handler/prepare.ts (32:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/slack/monitor/message-handler/prepare.ts:32:10 ]
+    │
+ 32 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../../../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../../../security/dm-policy-shared.js'`).
+────╯
+
+
+src/telegram/bot-message-context.session.ts (20:9) [MISSING_EXPORT] Warning: "resolvePinnedMainDmOwnerFromAllowlist" is not exported by "src/security/dm-policy-shared.ts".
+    ╭─[ src/telegram/bot-message-context.session.ts:20:10 ]
+    │
+ 20 │ import { resolvePinnedMainDmOwnerFromAllowlist } from "../security/dm-policy-shared.js";
+    │          ──────────────────┬──────────────────  
+    │                            ╰──────────────────── Missing export
+    │
+    │ Note: If you meant to import a type rather than a value, make sure to add the `type` modifier (e.g. `import { type Foo } from '../security/dm-policy-shared.js'`).
+────╯
+
+
+node:fs:3097
+  binding.copyFile(
+          ^
+
+
+Error: ENOENT: no such file or directory, copyfile '/home/tomdean88/openclaw/src/plugin-sdk/root-alias.cjs' -> '/home/tomdean88/openclaw/dist/plugin-sdk/root-alias.cjs'
+    at copyFileSync (node:fs:3097:11)
+    at file:///home/tomdean88/openclaw/scripts/copy-plugin-sdk-root-alias.mjs:10:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'copyfile',
+  path: '/home/tomdean88/openclaw/src/plugin-sdk/root-alias.cjs',
+  dest: '/home/tomdean88/openclaw/dist/plugin-sdk/root-alias.cjs'
+}
+
+
+Node.js v22.22.0
+ ELIFECYCLE  Command failed with exit code 1.
+[✗] Build failed — check for TypeScript errors

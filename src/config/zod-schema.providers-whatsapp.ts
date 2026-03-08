@@ -32,6 +32,7 @@ const WhatsAppAckReactionSchema = z
   .optional();
 
 const WhatsAppSharedSchema = z.object({
+  mode: z.enum(["active", "watch"]).optional().default("active"),
   enabled: z.boolean().optional(),
   capabilities: z.array(z.string()).optional(),
   markdown: MarkdownConfigSchema,
