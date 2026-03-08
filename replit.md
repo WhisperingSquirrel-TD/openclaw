@@ -226,6 +226,9 @@ These exist in upstream code (not our files) and should not be fixed by us:
 - `dm-policy-shared.js` consumers — `resolvePinnedMainDmOwnerFromAllowlist` missing export
 - `vite.config.ts` — `allowedHosts` type mismatch
 
+### Recreated upstream files
+- `src/plugin-sdk/root-alias.cjs` — CJS-to-ESM proxy shim for legacy plugin `require()` support. Was missing after upstream sync (`.cjs` files not captured in tarball extraction). Recreated based on test expectations and upstream plugin-sdk loader behavior. Inlines `emptyPluginConfigSchema` for fast access; lazily loads full ESM index via `require("./index.js")` (works in Node 22.12+ which supports `require()` of ESM modules).
+
 ## Custom Files Index
 All files unique to our fork (not present in upstream):
 - `src/infra/totp/totp.ts` — TOTP core
