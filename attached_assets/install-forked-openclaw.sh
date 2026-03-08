@@ -97,10 +97,21 @@ else
     info "Fork cloned"
 fi
 
-# Step 6: Install dependencies with pnpm
+# Step 6: Install dependencies with pnpm (with retries for flaky Pi networking)
 warn "Installing dependencies with pnpm (this may take a few minutes on Pi)..."
 cd ~/openclaw
-pnpm install || fail "pnpm install failed"
+PNPM_OK=false
+for attempt in 1 2 3; do
+    if pnpm install --network-timeout 120000; then
+        PNPM_OK=true
+        break
+    fi
+    if [ "$attempt" -lt 3 ]; then
+        warn "pnpm install failed (attempt $attempt/3) — retrying in 15s..."
+        sleep 15
+    fi
+done
+$PNPM_OK || fail "pnpm install failed after 3 attempts. Check your internet connection and try again."
 info "Dependencies installed"
 
 # Step 7: Build TypeScript
