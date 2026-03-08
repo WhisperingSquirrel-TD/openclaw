@@ -180,12 +180,24 @@ print('Config updated successfully')
 sudo chattr +i "$CONFIG_FILE"
 info "Config updated and locked"
 
-# Step 10: Start L1
+# Step 10: Set audit log append-only (tamper protection)
+AUDIT_DIR="$HOME/.openclaw/audit"
+if [ -d "$AUDIT_DIR" ]; then
+    sudo chattr +a "$AUDIT_DIR/outbound-audit.jsonl" 2>/dev/null && info "Audit log set append-only" || true
+fi
+TOTP_DIR="$HOME/.openclaw/totp"
+if [ -d "$TOTP_DIR" ]; then
+    sudo chattr +i "$TOTP_DIR/totp-secret.enc" 2>/dev/null || true
+    sudo chattr +i "$TOTP_DIR/totp-secret.txt" 2>/dev/null || true
+    info "TOTP secret files protected"
+fi
+
+# Step 11: Start L1
 echo ""
 warn "Starting L1..."
 ~/l1-start.sh
 
-# Step 11: Update hashes
+# Step 12: Update hashes
 md5sum /mnt/l1-secure/*.md > ~/l1-hashes.txt 2>/dev/null || true
 info "Hashes updated"
 

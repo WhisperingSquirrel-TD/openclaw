@@ -124,12 +124,32 @@ When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator 
 
 **Secret storage:** `<state-dir>/totp/totp-secret.enc` (AES-256-GCM, encrypted with `OPENCLAW_VAULT_PASSPHRASE`) or `totp-secret.txt` (plaintext fallback)
 
+**Replay protection:** Each TOTP code can only be used once. A monotonic counter is persisted at `<state-dir>/totp/totp-last-counter.txt` — codes at or below the last-used counter step are rejected even within the ±1 window.
+
 **Files:**
-- `src/infra/totp/totp.ts` — RFC 6238 TOTP core (generate, verify, URI)
+- `src/infra/totp/totp.ts` — RFC 6238 TOTP core (generate, verify, URI, replay protection)
 - `src/infra/totp/totp-setup.ts` — Secret generation, encrypted storage, setup helper
 - `src/infra/totp/totp-session.ts` — In-memory approval window manager
 - `src/infra/outbound/trust-gate.ts` — Trust gate with TOTP mode support
 - `src/auto-reply/reply/commands-totp.ts` — Telegram command handlers
+
+### Exec Security Denylist
+A hardcoded denylist in `src/agents/bash-tools.exec-host-gateway.ts` blocks exec commands that could tamper with system protections, regardless of TOTP approval. Blocked patterns include:
+- `chattr` (any use — prevents removing immutable/append-only flags)
+- References to `openclaw.json`, TOTP secret files, audit log, `SOUL.md.enc`, vault passphrase
+- `systemctl stop/disable/mask openclaw`, `l1-stop.sh`
+- System files (`/etc/passwd`, `/etc/shadow`, `.bashrc`)
+
+This denylist is evaluated before TOTP approval, so even an active approval window cannot authorize these commands.
+
+Additionally, when `approvalMode: "totp"` (hardened mode), any command flagged by the obfuscation detector (`src/infra/exec-obfuscation-detect.ts`) is hard-blocked (not just warned). This prevents bypass via base64 encoding, shell heredocs, eval/exec wrappers, curl-pipe-shell, variable expansion chains, and similar techniques.
+
+### Audit Log Tamper Protection
+The audit log (`<state-dir>/audit/outbound-audit.jsonl`) is:
+- Opened with `0600` permissions
+- Set to append-only (`chattr +a`) on creation (best-effort, requires root)
+- Protected by the exec denylist (agent cannot reference the file in exec commands)
+- The install script additionally sets `chattr +a` on the audit log and `chattr +i` on TOTP secret files
 
 ## Environment Variables
 See `.env.example` for all options. Key variables:

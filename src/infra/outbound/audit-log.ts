@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveStateDir } from "../../config/paths.js";
@@ -32,6 +33,17 @@ function ensureAuditDir(filePath: string): void {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 }
 
+function trySetAppendOnly(filePath: string): void {
+  try {
+    execSync(`chattr +a ${JSON.stringify(filePath)} 2>/dev/null`, {
+      timeout: 2000,
+      stdio: "ignore",
+    });
+  } catch {
+    // chattr may not be available or may need root — best-effort
+  }
+}
+
 function getAuditFd(): number | null {
   if (auditFd != null) {
     return auditFd;
@@ -41,6 +53,7 @@ function getAuditFd(): number | null {
     ensureAuditDir(filePath);
     auditFd = fs.openSync(filePath, "a", 0o600);
     auditFilePath = filePath;
+    trySetAppendOnly(filePath);
     return auditFd;
   } catch (err) {
     log.warn(`Failed to open audit log file: ${String(err)}`);

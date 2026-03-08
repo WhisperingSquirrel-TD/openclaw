@@ -1,8 +1,40 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 const TOTP_DIGITS = 6;
 const TOTP_STEP_SECONDS = 30;
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+let lastUsedCounter = -1;
+let counterFilePath: string | null = null;
+
+export function setReplayCounterPath(filePath: string): void {
+  counterFilePath = filePath;
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8").trim();
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      lastUsedCounter = parsed;
+    }
+  } catch {
+    lastUsedCounter = -1;
+  }
+}
+
+function persistCounter(counter: number): void {
+  lastUsedCounter = counter;
+  if (!counterFilePath) {
+    return;
+  }
+  try {
+    const dir = path.dirname(counterFilePath);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(counterFilePath, String(counter), { encoding: "utf-8", mode: 0o600 });
+  } catch {
+    // best-effort
+  }
+}
 
 export function generateTotpSecret(bytes = 20): string {
   const buf = crypto.randomBytes(bytes);
@@ -77,8 +109,13 @@ export function verifyTotpCode(
   }
   for (let i = -window; i <= window; i++) {
     const offsetTime = time + i * TOTP_STEP_SECONDS * 1000;
+    const counter = Math.floor(offsetTime / 1000 / TOTP_STEP_SECONDS);
+    if (counter <= lastUsedCounter) {
+      continue;
+    }
     const expected = generateTotpCode(secret, offsetTime);
     if (crypto.timingSafeEqual(Buffer.from(trimmed), Buffer.from(expected))) {
+      persistCounter(counter);
       return true;
     }
   }

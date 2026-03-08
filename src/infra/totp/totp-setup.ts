@@ -4,13 +4,14 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { resolveStateDir } from "../../config/paths.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
-import { generateTotpSecret } from "./totp.js";
+import { generateTotpSecret, setReplayCounterPath } from "./totp.js";
 
 const log = createSubsystemLogger("totp/setup");
 
 const TOTP_DIRNAME = "totp";
 const SECRET_FILENAME = "totp-secret.enc";
 const SECRET_PLAINTEXT_FILENAME = "totp-secret.txt";
+const COUNTER_FILENAME = "totp-last-counter.txt";
 const PASSPHRASE_ENV = "OPENCLAW_VAULT_PASSPHRASE";
 
 const ALGORITHM = "aes-256-gcm";
@@ -97,6 +98,8 @@ export async function saveTotpSecret(secret: string, stateDir?: string): Promise
 export async function loadTotpSecret(stateDir?: string): Promise<string | null> {
   const dir = resolveTotpDir(stateDir);
   const passphrase = resolvePassphrase();
+
+  setReplayCounterPath(path.join(dir, COUNTER_FILENAME));
 
   if (passphrase) {
     const encPath = path.join(dir, SECRET_FILENAME);

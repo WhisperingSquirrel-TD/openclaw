@@ -64,9 +64,43 @@ export type ProcessGatewayAllowlistResult = {
   pendingResult?: AgentToolResult<ExecToolDetails>;
 };
 
+const SECURITY_DENY_PATTERNS: RegExp[] = [
+  /\bchattr\b/,
+  /\bchmod\b.*openclaw/i,
+  /\bchmod\b.*\.openclaw/i,
+  /\bchmod\b.*totp/i,
+  /\bchmod\b.*audit/i,
+  /openclaw\.json/,
+  /totp-secret\.(enc|txt)/,
+  /totp-last-counter/,
+  /outbound-audit\.jsonl/,
+  /SOUL\.md\.enc/,
+  /OPENCLAW_VAULT_PASSPHRASE/,
+  /l1-stop\.sh/,
+  /systemctl\s+(stop|disable|mask|edit)\s+openclaw/,
+  /\.bashrc/,
+  /\/etc\/passwd/,
+  /\/etc\/shadow/,
+];
+
+function isSecurityDenied(command: string): string | null {
+  for (const pattern of SECURITY_DENY_PATTERNS) {
+    if (pattern.test(command)) {
+      return pattern.source;
+    }
+  }
+  return null;
+}
+
 export async function processGatewayAllowlist(
   params: ProcessGatewayAllowlistParams,
 ): Promise<ProcessGatewayAllowlistResult> {
+  const securityDeny = isSecurityDenied(params.command);
+  if (securityDeny) {
+    logInfo(`exec: SECURITY DENIED — command matched denylist pattern: ${securityDeny}`);
+    throw new Error("exec denied: command blocked by security policy");
+  }
+
   try {
     const cfg = loadConfig();
     if (cfg.agents?.defaults?.approvalMode === "totp") {
@@ -125,6 +159,11 @@ export async function processGatewayAllowlist(
   const obfuscation = detectCommandObfuscation(params.command);
   if (obfuscation.detected) {
     logInfo(`exec: obfuscation detected (gateway): ${obfuscation.reasons.join(", ")}`);
+    const cfg2 = loadConfig();
+    if (cfg2.agents?.defaults?.approvalMode === "totp") {
+      logInfo(`exec: SECURITY DENIED — obfuscated command blocked in TOTP mode`);
+      throw new Error("exec denied: obfuscated commands are blocked in hardened mode");
+    }
     params.warnings.push(`⚠️ Obfuscated command detected: ${obfuscation.reasons.join("; ")}`);
   }
   const recordMatchedAllowlistUse = (resolvedPath?: string) => {
