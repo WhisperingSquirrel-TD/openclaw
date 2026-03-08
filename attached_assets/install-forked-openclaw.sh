@@ -61,7 +61,7 @@ info "Dependencies installed"
 # Step 6: Build TypeScript
 warn "Building from TypeScript source (this may take a while on Pi)..."
 cd ~/openclaw
-find dist -name '*.js' -newer package.json -delete 2>/dev/null || true
+rm -rf dist 2>/dev/null || true
 pnpm run build || fail "Build failed — check for TypeScript errors"
 COMMIT_SHORT=$(cd ~/openclaw && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 info "Build complete (commit: $COMMIT_SHORT)"

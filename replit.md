@@ -9,6 +9,7 @@ OpenClaw is a multi-channel personal AI assistant gateway. It runs on your own d
 - **Frontend** (`ui/`): Vite + Lit web components (OpenClaw Control UI)
 - **Packages** (`packages/`): `clawdbot`, `moltbot`
 - **Extensions** (`extensions/`): Channel extension plugins
+- **Build tool**: `tsdown` (esbuild-based bundler) — replaced `tsc` for builds. Entry points defined in `tsdown.config.ts`, output to `dist/`. Build command: `pnpm run build`.
 
 ## Development Setup
 
@@ -20,14 +21,55 @@ The workflow runs:
 This installs dependencies then launches the Vite dev server at **port 5000**.
 
 ### Key Configuration
-- **`.npmrc`**: `manage-package-manager-versions=false` — disables pnpm corepack auto-switching (needed because the project pins `pnpm@10.23.0` in `packageManager` but Replit has `10.26.1`)
+- **`.npmrc`**: `manage-package-manager-versions=false` — **never remove** — disables pnpm corepack auto-switching (needed because the project pins `pnpm@10.23.0` in `packageManager` but Replit has `10.26.1`)
 - **`ui/vite.config.ts`**: Configured for `host: "0.0.0.0"`, `port: 5000`, `allowedHosts: "all"` for Replit proxy compatibility
 - **`pnpm-workspace.yaml`**: Workspace root + `ui/`, `packages/*`, `extensions/*`
 
-## Deployment
+## Deployment (Replit)
 - **Type**: Static site (builds the control UI)
 - **Build command**: `pnpm run build` (builds to `dist/control-ui/`)
 - **Public directory**: `dist/control-ui`
+
+## Raspberry Pi Deployment
+
+### Prerequisites
+- **Node.js >= 22.12.0** (required by upstream since 2026.3.8 — verify with `node -v` on Pi)
+- **pnpm** (installed automatically by install script if missing)
+- **Git** access to `https://github.com/WhisperingSquirrel-TD/openclaw.git`
+
+### Install / Update
+```bash
+bash ~/install-forked-openclaw.sh
+```
+The script is self-updating — it copies the latest version from `attached_assets/install-forked-openclaw.sh` on each run.
+
+### What the install script does (in order)
+1. Stops L1 (`~/l1-stop.sh`)
+2. Uninstalls old global OpenClaw (`npm uninstall -g`, `pnpm unlink --global`)
+3. Installs pnpm if missing
+4. Clones or pulls the fork (`~/openclaw/`)
+5. `pnpm install` (resolves dependencies)
+6. `rm -rf dist && pnpm run build` (clean rebuild with tsdown)
+7. `pnpm link --global` (makes `openclaw` command available)
+8. Updates `~/.openclaw/openclaw.json` (sets WhatsApp watch mode, TOTP approval, etc.)
+9. Sets file protections (`chattr +a` audit log, `chattr +i` TOTP secrets, `chattr +i` config)
+10. Starts L1 (`~/l1-start.sh`)
+11. Updates integrity hashes
+
+### Manual operations on the Pi
+- **Stop**: `~/l1-stop.sh`
+- **Start**: `~/l1-start.sh`
+- **Direct debug**: `cd ~/openclaw && node dist/entry.js gateway run`
+- **Quick update** (no config changes): `~/l1-stop.sh && cd ~/openclaw && git pull && pnpm install && pnpm run build && ~/l1-start.sh`
+- **Config file**: `~/.openclaw/openclaw.json` (locked with `chattr +i`)
+  - Unlock: `sudo chattr -i ~/.openclaw/openclaw.json`
+  - Re-lock: `sudo chattr +i ~/.openclaw/openclaw.json`
+- **Logs**: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
+- **TOTP debug**: Look for "TOTP code input ignored: approvalMode is socket" or "unauthorized sender" in logs
+
+### Pi restart notes
+- Use `~/l1-stop.sh && ~/l1-start.sh`, NOT `openclaw gateway restart`
+- The gateway entry point is `node dist/entry.js gateway run`
 
 ## WhatsApp Watch Mode
 The WhatsApp channel supports a `mode` config field (`"active"` or `"watch"`):
@@ -158,6 +200,47 @@ Fork base: `d911b02` (2026-02-27). Last synced: **2026-03-08** (upstream commit 
 - Upstream remote: `https://github.com/openclaw/openclaw.git`
 - Fork remote: `https://github.com/WhisperingSquirrel-TD/openclaw.git`
 - Key upstream changes: Gemini 3.1 Flash Lite, exec approval refactoring (`exec-host-shared.ts`), `createConnectedChannelStatusPatch`, `normalizeDeviceMetadataForPolicy`, MCP bootstrap improvements, CLI restart fixes
+- Build tool changed from `tsc` to `tsdown` (esbuild bundler) — `dist/` now contains bundled JS, not 1:1 transpiled files
+
+### Merge details for conflict files
+These files had both upstream refactoring and our security customizations. In each case, upstream was used as the base and our customizations were carefully re-applied:
+
+1. **`src/agents/bash-tools.exec-host-gateway.ts`** — Upstream refactored approval context into shared helpers (`resolveExecHostApprovalContext`, `createDefaultExecApprovalRequestContext`, `resolveBaseExecApprovalDecision`, `resolveApprovalDecisionOrUndefined` from `bash-tools.exec-host-shared.js`, plus `buildExecApprovalRequesterContext`, `buildExecApprovalTurnSourceContext`, `registerExecApprovalRequestForHostOrThrow` from `bash-tools.exec-approval-request.js`). Our denylist, TOTP gate (`requestExecApproval` from `trust-gate.ts`), and obfuscation hard-block all run BEFORE the upstream approval context resolution.
+
+2. **`src/web/outbound.ts`** — Upstream added `cfg` parameter to all outbound functions and switched to account resolution via `resolveWhatsAppAccount()`. Our `assertNotWatchMode(account)` guard and audit logging on block preserved.
+
+3. **`src/web/auto-reply/monitor.ts`** — Upstream added `createConnectedChannelStatusPatch` and `resolveWhatsAppMediaMaxBytes`. Our watch mode routing (`isWatchMode` check), `appendWatchTranscript` for message capture, and conditional read receipt/debounce suppression preserved. The old `DEFAULT_WEB_MEDIA_BYTES` constant import was replaced with `resolveWhatsAppMediaMaxBytes(cfg)`.
+
+4. **`src/web/inbound/monitor.ts`** — Upstream refactored into helper functions (`normalizeInboundMessage`, `enrichInboundMessage`, `enqueueInboundMessage`). Our watch mode features preserved: presence update bypass, access control bypass for all senders, read receipt suppression, composing indicator suppression, and `sendMedia`/`reply` function blocking.
+
+5. **`src/gateway/node-command-policy.ts`** — Upstream added `PlatformId` type system and `normalizeDeviceMetadataForPolicy`. Our `resolveChannelDenyCommands` function preserved.
+
+### `ChannelMode` type (our addition)
+Upstream removed the `ChannelMode` type and `mode` field from `src/web/accounts.ts` — these are our additions for watch mode. Re-added as:
+- `export type ChannelMode = "active" | "watch"`
+- `mode?: ChannelMode` on `ResolvedWhatsAppAccount`
+- Safe cast from config with `resolveWhatsAppMode()` returning `"active"` as default
+
+### Pre-existing upstream TypeScript errors
+These exist in upstream code (not our files) and should not be fixed by us:
+- `rate-limiter.ts` — `maxMessagesPerMinute`/`maxMessagesPerHour` on Discord config
+- `dm-policy-shared.js` consumers — `resolvePinnedMainDmOwnerFromAllowlist` missing export
+- `vite.config.ts` — `allowedHosts` type mismatch
+
+## Custom Files Index
+All files unique to our fork (not present in upstream):
+- `src/infra/totp/totp.ts` — TOTP core
+- `src/infra/totp/totp-setup.ts` — TOTP secret management
+- `src/infra/totp/totp-session.ts` — Approval window manager
+- `src/infra/outbound/trust-gate.ts` — Trust gate (TOTP + socket modes)
+- `src/infra/outbound/audit-log.ts` — Outbound audit logger
+- `src/infra/exec-obfuscation-detect.ts` — Exec obfuscation detector
+- `src/auto-reply/reply/commands-totp.ts` — Telegram TOTP commands
+- `src/web/watch-mode.ts` — Watch mode error/helper
+- `src/web/auto-reply/watch-transcript.ts` — Watch mode transcript writer
+- `src/agents/soul-integrity.ts` — SOUL.md hash verification
+- `src/agents/soul-vault.ts` — Encrypted SOUL.md at rest
+- `attached_assets/install-forked-openclaw.sh` — Pi install/upgrade script
 
 ## Environment Variables
 See `.env.example` for all options. Key variables:
