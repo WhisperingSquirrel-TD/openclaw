@@ -54,8 +54,8 @@ function buildActionMessage(action: ClassifiedAction): string {
   });
 
   const truncatedMsg =
-    action.originalMessage.length > 200
-      ? action.originalMessage.slice(0, 197) + "..."
+    action.originalMessage.length > 100
+      ? action.originalMessage.slice(0, 97) + "..."
       : action.originalMessage;
 
   return [

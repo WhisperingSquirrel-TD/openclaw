@@ -83,6 +83,9 @@ const SECURITY_DENY_PATTERNS: RegExp[] = [
   /\.bashrc/,
   /\/etc\/passwd/,
   /\/etc\/shadow/,
+  /watch-transcripts/,
+  /watch-actions/,
+  /pending-actions\.json/,
 ];
 
 function isSecurityDenied(command: string): string | null {

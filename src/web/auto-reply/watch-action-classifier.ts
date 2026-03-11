@@ -74,13 +74,30 @@ function buildClassificationPrompt(
       const time = entry.msg.timestamp
         ? new Date(entry.msg.timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
         : "??:??";
-      prompt += `[${label}:${idx}] ${time} ${sender}: ${entry.msg.body.slice(0, 500)}\n`;
+      prompt += `[${label}:${idx}] ${time} ${sender}: ${redactPii(entry.msg.body.slice(0, 500))}\n`;
     }
     prompt += "\n";
   }
 
   prompt += "Use messageIndex values from [NEW] messages only. Respond with ONLY a JSON array. No other text.";
   return prompt;
+}
+
+const PII_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
+  { pattern: /\b\d{10,15}\b/g, replacement: "[phone]" },
+  { pattern: /\+\d{1,3}\s?\d{4,14}/g, replacement: "[phone]" },
+  { pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, replacement: "[email]" },
+  { pattern: /\b[A-Z]{1,2}\d{1,2}\s?\d[A-Z]{2}\b/gi, replacement: "[postcode]" },
+  { pattern: /\b\d{4}\s?\d{4}\s?\d{4}\s?\d{4}\b/g, replacement: "[card]" },
+  { pattern: /\b\d{6,8}\b(?=\s*(sort|code))/gi, replacement: "[sortcode]" },
+];
+
+function redactPii(text: string): string {
+  let result = text;
+  for (const { pattern, replacement } of PII_PATTERNS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
 }
 
 const CHEAP_MODELS: Record<string, string> = {
@@ -198,9 +215,9 @@ export async function classifyActions(
       results.push({
         actionType,
         summary: String(item.summary).slice(0, 200),
-        originalMessage: candidate.body.slice(0, 500),
-        senderName: candidate.senderName,
-        chatName: candidate.chatName,
+        originalMessage: redactPii(candidate.body.slice(0, 150)),
+        senderName: candidate.senderName ? redactPii(candidate.senderName) : undefined,
+        chatName: candidate.chatName ? redactPii(candidate.chatName) : undefined,
         timestamp: candidate.timestamp,
       });
     }

@@ -43,7 +43,7 @@ function writeActionStore(store: Map<string, DetectedAction>): void {
   const storePath = resolveActionStorePath();
   try {
     const entries = Array.from(store.values());
-    fs.writeFileSync(storePath, JSON.stringify(entries, null, 2), "utf-8");
+    fs.writeFileSync(storePath, JSON.stringify(entries, null, 2), { encoding: "utf-8", mode: 0o600 });
   } catch (err) {
     logVerbose(`Watch action store write failed: ${String(err)}`);
   }
