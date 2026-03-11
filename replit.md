@@ -51,7 +51,7 @@ The script is self-updating — it copies the latest version from `attached_asse
 5. `pnpm install` (resolves dependencies)
 6. `rm -rf dist && pnpm run build` (clean rebuild with tsdown)
 7. `pnpm link --global` (makes `openclaw` command available)
-8. Updates `~/.openclaw/openclaw.json` (sets WhatsApp watch mode, TOTP approval, etc.)
+8. Updates `~/.openclaw/openclaw.json` using `setdefault` for all fields (safe to re-run — never overwrites existing user customizations). Sets: WhatsApp watch mode, TOTP approval, exec host=gateway, watch action scanner. Type guards ensure malformed values (e.g. `null` where a dict is expected) are repaired rather than crashing.
 9. Sets file protections (`chattr +a` audit log, `chattr +i` TOTP secrets, `chattr +i` config)
 10. Starts L1 (`~/l1-start.sh`)
 11. Updates integrity hashes

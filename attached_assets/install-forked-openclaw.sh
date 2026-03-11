@@ -181,17 +181,23 @@ except json.JSONDecodeError as e:
     sys.exit(1)
 
 c.setdefault('channels', {})
+if not isinstance(c['channels'], dict):
+    c['channels'] = {}
 
 # Merge watch mode into WhatsApp config (preserves accounts/credentials)
+# Uses setdefault for all fields — never overwrites values you've manually changed
 wa = c['channels'].setdefault('whatsapp', {})
-wa['mode'] = 'watch'
-wa['dmPolicy'] = 'open'
-wa['groupPolicy'] = 'open'
-wa['debounceMs'] = 3000
-# selfChatMode and allowFrom are valid schema fields
-wa['selfChatMode'] = True
-wa['allowFrom'] = ['*']
-wa['groupAllowFrom'] = ['*']
+if not isinstance(wa, dict):
+    c['channels']['whatsapp'] = {}
+    wa = c['channels']['whatsapp']
+wa.setdefault('mode', 'watch')
+wa.setdefault('dmPolicy', 'open')
+wa.setdefault('groupPolicy', 'open')
+wa.setdefault('debounceMs', 3000)
+wa.setdefault('selfChatMode', True)
+wa.setdefault('allowFrom', ['*'])
+wa.setdefault('groupAllowFrom', ['*'])
+print(f'WhatsApp config: mode={wa[\"mode\"]}')
 
 # Make sure Telegram stays active
 if 'telegram' not in c['channels']:
@@ -211,30 +217,44 @@ if 'message.send' in deny:
     print('Removed message.send from denyCommands — watch mode enforces this now')
 
 # Set up TOTP approval mode for trust gate (Pi-compatible, replaces socket-based approval)
-agents = c.setdefault('agents', {}).setdefault('defaults', {})
-if 'approvalMode' not in agents:
-    agents['approvalMode'] = 'totp'
-    agents.setdefault('totpWindowMinutes', 5)
-    agents.setdefault('trustLevel', 1)
-    agents.setdefault('requireApproval', ['message.send', 'exec.run'])
-    print('TOTP approval mode configured (trustLevel=1, window=5min)')
-else:
-    print(f'Approval mode already set: {agents[\"approvalMode\"]}')
+c.setdefault('agents', {})
+if not isinstance(c['agents'], dict):
+    c['agents'] = {}
+agents = c['agents'].setdefault('defaults', {})
+if not isinstance(agents, dict):
+    c['agents']['defaults'] = {}
+    agents = c['agents']['defaults']
+agents.setdefault('approvalMode', 'totp')
+agents.setdefault('totpWindowMinutes', 5)
+agents.setdefault('trustLevel', 1)
+agents.setdefault('requireApproval', ['message.send', 'exec.run'])
+print(f'Approval mode: {agents[\"approvalMode\"]} (window={agents[\"totpWindowMinutes\"]}min)')
 
 # Ensure restart is still disabled (safe setdefault)
-c.setdefault('commands', {})['restart'] = False
+c.setdefault('commands', {}).setdefault('restart', False)
 
 # Set exec host to gateway (allows TOTP-gated shell commands on the Pi)
-c.setdefault('tools', {}).setdefault('exec', {})['host'] = 'gateway'
-print('Exec host set to gateway (TOTP-gated)')
+# Uses setdefault so manual overrides (e.g. back to sandbox) are preserved
+c.setdefault('tools', {})
+if not isinstance(c['tools'], dict):
+    c['tools'] = {}
+tools_exec = c['tools'].setdefault('exec', {})
+if not isinstance(tools_exec, dict):
+    c['tools']['exec'] = {}
+    tools_exec = c['tools']['exec']
+tools_exec.setdefault('host', 'gateway')
+print(f'Exec host: {tools_exec[\"host\"]}')
 
 # Enable WhatsApp watch action scanner (AI-powered action detection from WhatsApp messages)
 wa_actions = wa.setdefault('watchActions', {})
+if not isinstance(wa_actions, dict):
+    wa['watchActions'] = {}
+    wa_actions = wa['watchActions']
 wa_actions.setdefault('enabled', True)
 wa_actions.setdefault('activeHoursStart', 8)
 wa_actions.setdefault('activeHoursEnd', 22)
 wa_actions.setdefault('intervalMinutes', 60)
-print('WhatsApp watch action scanner enabled (8am-10pm, hourly)')
+print(f'Watch actions: enabled={wa_actions[\"enabled\"]}, hours={wa_actions[\"activeHoursStart\"]}-{wa_actions[\"activeHoursEnd\"]}, interval={wa_actions[\"intervalMinutes\"]}min')
 
 with open(config_path, 'w') as f:
     json.dump(c, f, indent=2)
