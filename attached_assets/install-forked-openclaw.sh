@@ -10,6 +10,17 @@ info() { echo -e "${GREEN}[✓] $1${NC}"; }
 warn() { echo -e "${YELLOW}[!] $1${NC}"; }
 fail() { echo -e "${RED}[✗] $1${NC}"; exit 1; }
 
+# Self-update: if the repo has a newer version of this script, replace and re-exec
+# This must run before anything else so bash doesn't buffer the old version into memory
+SELF="$HOME/install-forked-openclaw.sh"
+REPO_COPY="$HOME/openclaw/attached_assets/install-forked-openclaw.sh"
+if [ -f "$REPO_COPY" ] && ! diff -q "$SELF" "$REPO_COPY" > /dev/null 2>&1; then
+    echo -e "${YELLOW}[!] Install script updated — restarting with new version...${NC}"
+    cp "$REPO_COPY" "$SELF"
+    chmod +x "$SELF"
+    exec bash "$SELF" "$@"
+fi
+
 echo ""
 echo "========================================="
 echo "  L1 — Install Forked OpenClaw"
@@ -149,12 +160,6 @@ if command -v openclaw &> /dev/null; then
     info "OpenClaw available: $(openclaw --version 2>/dev/null || echo 'installed')"
 else
     warn "openclaw command not in PATH — use ~/l1-start.sh to run instead"
-fi
-
-if [ -f ~/openclaw/attached_assets/install-forked-openclaw.sh ]; then
-    cp ~/openclaw/attached_assets/install-forked-openclaw.sh ~/install-forked-openclaw.sh
-    chmod +x ~/install-forked-openclaw.sh
-    info "Install script updated at ~/install-forked-openclaw.sh"
 fi
 
 # Step 10: Update config — set WhatsApp to watch mode
