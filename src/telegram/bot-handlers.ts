@@ -1150,6 +1150,53 @@ export const registerTelegramHandlers = ({
         return;
       }
 
+      const watchActionMatch = data.match(/^wa_act_(add|ign|rem)_(.+)$/);
+      if (watchActionMatch) {
+        const [, actionVerb, actionId] = watchActionMatch;
+        const { getAction, resolveAction } = await import("../web/auto-reply/watch-action-store.js");
+        const action = getAction(actionId);
+        if (!action) {
+          try {
+            await editCallbackMessage("Action not found or expired.");
+          } catch {}
+          return;
+        }
+        if (action.resolved) {
+          try {
+            await editCallbackMessage(`Already handled: ${action.resolvedAction ?? "resolved"}`);
+          } catch {}
+          return;
+        }
+        if (actionVerb === "ign") {
+          resolveAction(actionId, "ignored");
+          try {
+            await editCallbackMessage(`${callbackMessage.text ?? ""}\n\n_Dismissed._`, {
+              parse_mode: "Markdown",
+            });
+          } catch {}
+          return;
+        }
+        if (actionVerb === "add") {
+          resolveAction(actionId, `added (${action.actionType})`);
+          const label =
+            action.actionType === "shopping"
+              ? "Added to shopping list"
+              : action.actionType === "calendar"
+                ? "Noted for calendar"
+                : action.actionType === "reminder"
+                  ? "Reminder noted"
+                  : "Action noted";
+          try {
+            await editCallbackMessage(
+              `${callbackMessage.text ?? ""}\n\n_${label}: ${action.summary}_`,
+              { parse_mode: "Markdown" },
+            );
+          } catch {}
+          return;
+        }
+        return;
+      }
+
       const paginationMatch = data.match(/^commands_page_(\d+|noop)(?::(.+))?$/);
       if (paginationMatch) {
         const pageValue = paginationMatch[1];

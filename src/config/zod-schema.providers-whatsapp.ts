@@ -31,8 +31,20 @@ const WhatsAppAckReactionSchema = z
   .strict()
   .optional();
 
+const WatchActionsSchema = z
+  .object({
+    enabled: z.boolean().optional().default(false),
+    activeHoursStart: z.number().int().min(0).max(23).optional().default(8),
+    activeHoursEnd: z.number().int().min(0).max(23).optional().default(22),
+    intervalMinutes: z.number().int().min(5).max(1440).optional().default(60),
+    model: z.string().optional(),
+  })
+  .strict()
+  .optional();
+
 const WhatsAppSharedSchema = z.object({
   mode: z.enum(["active", "watch"]).optional().default("active"),
+  watchActions: WatchActionsSchema,
   enabled: z.boolean().optional(),
   capabilities: z.array(z.string()).optional(),
   markdown: MarkdownConfigSchema,

@@ -246,9 +246,43 @@ All files unique to our fork (not present in upstream):
 - `src/auto-reply/reply/commands-totp.ts` — Telegram TOTP commands
 - `src/web/watch-mode.ts` — Watch mode error/helper
 - `src/web/auto-reply/watch-transcript.ts` — Watch mode transcript writer
+- `src/web/auto-reply/watch-action-scanner.ts` — Reads watch transcript JSONL, tracks cursor, returns new messages for analysis
+- `src/web/auto-reply/watch-action-classifier.ts` — AI-powered action detection using cheap model (Haiku/4o-mini/Flash). Conversation-aware: considers full thread context so resolved actions aren't flagged
+- `src/web/auto-reply/watch-action-notify.ts` — Sends Telegram inline keyboard cards for detected actions
+- `src/web/auto-reply/watch-action-store.ts` — Pending action store (JSON file) for callback button handling
+- `src/web/auto-reply/watch-action-scheduler.ts` — Hourly scan scheduler: active 8am-10pm (configurable), 15-min tick with time-of-day awareness
 - `src/agents/soul-integrity.ts` — SOUL.md hash verification
 - `src/agents/soul-vault.ts` — Encrypted SOUL.md at rest
 - `attached_assets/install-forked-openclaw.sh` — Pi install/upgrade script
+
+## WhatsApp Watch Action Scanner
+Periodically scans WhatsApp watch-mode transcripts for actionable items using a cheap AI model, then surfaces them as Telegram inline keyboard cards.
+
+Config in `openclaw.json` under `channels.whatsapp`:
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "mode": "watch",
+      "watchActions": {
+        "enabled": true,
+        "activeHoursStart": 8,
+        "activeHoursEnd": 22,
+        "intervalMinutes": 60,
+        "model": "anthropic/claude-haiku-4-20250414"
+      }
+    }
+  }
+}
+```
+- `enabled` (default false) — must be true to activate
+- `activeHoursStart`/`activeHoursEnd` (default 8/22) — scan window
+- `intervalMinutes` (default 60) — how often to scan during active hours
+- `model` (optional) — override the cheap model used for classification. If unset, auto-selects cheapest model from your configured provider (Haiku for Anthropic, 4o-mini for OpenAI, Flash for Google)
+
+Action types detected: shopping, calendar, task, reminder, urgent. The AI analyses full conversation threads so it understands when actions have been resolved by follow-up messages.
+
+Telegram cards have inline buttons: "Add to list" / "Ignore". Button callbacks update the action store and edit the card message.
 
 ## Environment Variables
 See `.env.example` for all options. Key variables:

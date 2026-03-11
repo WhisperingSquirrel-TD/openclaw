@@ -23,6 +23,7 @@ import { isTruthyEnvValue } from "../infra/env.js";
 import type { loadOpenClawPlugins } from "../plugins/loader.js";
 import { type PluginServicesHandle, startPluginServices } from "../plugins/services.js";
 import { startBrowserControlServerIfEnabled } from "./server-browser.js";
+import { startWatchActionScheduler } from "../web/auto-reply/watch-action-scheduler.js";
 import {
   scheduleRestartSentinelWake,
   shouldWakeFromRestartSentinel,
@@ -185,6 +186,12 @@ export async function startGatewaySidecars(params: {
     setTimeout(() => {
       void scheduleRestartSentinelWake({ deps: params.deps });
     }, 750);
+  }
+
+  try {
+    startWatchActionScheduler();
+  } catch (err) {
+    params.log.warn(`watch action scheduler failed to start: ${String(err)}`);
   }
 
   return { browserControl, pluginServices };
