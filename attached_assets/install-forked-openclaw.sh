@@ -224,8 +224,17 @@ else:
 # Ensure restart is still disabled (safe setdefault)
 c.setdefault('commands', {})['restart'] = False
 
-# Ensure sandbox exec (safe setdefault)
-c.setdefault('tools', {}).setdefault('exec', {})['host'] = 'sandbox'
+# Set exec host to gateway (allows TOTP-gated shell commands on the Pi)
+c.setdefault('tools', {}).setdefault('exec', {})['host'] = 'gateway'
+print('Exec host set to gateway (TOTP-gated)')
+
+# Enable WhatsApp watch action scanner (AI-powered action detection from WhatsApp messages)
+wa_actions = wa.setdefault('watchActions', {})
+wa_actions.setdefault('enabled', True)
+wa_actions.setdefault('activeHoursStart', 8)
+wa_actions.setdefault('activeHoursEnd', 22)
+wa_actions.setdefault('intervalMinutes', 60)
+print('WhatsApp watch action scanner enabled (8am-10pm, hourly)')
 
 with open(config_path, 'w') as f:
     json.dump(c, f, indent=2)
@@ -265,8 +274,10 @@ echo ""
 echo "  Fork installed from: github.com/WhisperingSquirrel-TD/openclaw"
 echo "  Commit: ${COMMIT_SHORT:-unknown}"
 echo "  WhatsApp: watch mode (read-only, silent)"
+echo "  WhatsApp actions: AI scanner enabled (8am-10pm, hourly)"
 echo "  Telegram: active (2-way with Tom)"
-echo "  Trust gate: TOTP approval (5-min window)"
+echo "  Exec host: gateway (TOTP-gated)"
+echo "  Trust gate: TOTP approval"
 echo "  Config: locked"
 echo ""
 echo "  TOTP setup (first time only):"
