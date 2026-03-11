@@ -65,7 +65,7 @@ The script is self-updating — it copies the latest version from `attached_asse
   - Unlock: `sudo chattr -i ~/.openclaw/openclaw.json`
   - Re-lock: `sudo chattr +i ~/.openclaw/openclaw.json`
 - **Logs**: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
-- **TOTP debug**: Look for "TOTP code input ignored: approvalMode is socket" or "unauthorized sender" in logs
+- **TOTP debug**: Look for "TOTP" in logs. Common issues: "unauthorized sender" (message from non-owner), "TOTP code rejected" (wrong code or replay), "approval window expired"
 
 ### Pi restart notes
 - Use `~/l1-stop.sh && ~/l1-start.sh`, NOT `openclaw gateway restart`
@@ -181,6 +181,7 @@ A hardcoded denylist in `src/agents/bash-tools.exec-host-gateway.ts` blocks exec
 - References to `openclaw.json`, TOTP secret files, audit log, `SOUL.md.enc`, vault passphrase
 - `systemctl stop/disable/mask openclaw`, `l1-stop.sh`
 - System files (`/etc/passwd`, `/etc/shadow`, `.bashrc`)
+- Watch mode data: `watch-transcripts`, `watch-actions`, `pending-actions.json` (prevents L1 from reading or tampering with WhatsApp surveillance data)
 
 This denylist is evaluated before TOTP approval, so even an active approval window cannot authorize these commands.
 
@@ -221,12 +222,14 @@ Upstream removed the `ChannelMode` type and `mode` field from `src/web/accounts.
 - **Config schema**: `mode: z.enum(["active", "watch"]).optional().default("active")` added to `WhatsAppSharedSchema` in `src/config/zod-schema.providers-whatsapp.ts` — inherited by both `WhatsAppConfigSchema` (root level) and `WhatsAppAccountSchema` (per-account). Required because both schemas use `.strict()` which rejects unknown keys.
 
 ### Pre-existing upstream TypeScript errors
-These exist in upstream code (not our files) and should not be fixed by us. They cause 29 errors in 19 files during `tsc`:
-- `dm-policy-shared.ts` — `resolvePinnedMainDmOwnerFromAllowlist` missing export (referenced by iMessage, Signal, Slack, Discord, Telegram, Line, WhatsApp monitors)
-- `safe-regex.ts` — `testRegexWithBoundedInput` missing export (referenced by Discord exec-approvals, exec-approval-forwarder)
+These exist in upstream code (not our files). They cause warnings during `tsc` but don't affect the `tsdown` build:
+- `safe-regex.ts` — `testRegexWithBoundedInput` missing export (referenced by Discord exec-approvals, exec-approval-forwarder). Only affects Discord channel — harmless for our setup.
 - `rate-limiter.ts` — `maxMessagesPerMinute`/`maxMessagesPerHour` on Discord config
 - `vite.config.ts` — `allowedHosts` type mismatch
 - Various `TS7006` implicit-any errors in `compaction.ts`, `pi-embedded-helpers`, `pi-embedded-runner`, `pdf-tool.helpers.ts`, `commands-core.ts`, `get-reply-inline-actions.ts`, `memory-flush.ts`, `post-compaction-context.ts`, `heartbeat-runner.ts`, `process-message.ts`
+
+**Previously upstream errors that we fixed:**
+- `dm-policy-shared.ts` — `resolvePinnedMainDmOwnerFromAllowlist` was removed by upstream but still imported by all channel handlers. We re-implemented it (see "Recreated/restored upstream exports" below).
 
 **Build fix**: `tsconfig.plugin-sdk.dts.json` has `noEmitOnError: false` (upstream has `true`) so the `build:plugin-sdk:dts` step emits declarations despite these upstream errors. Without this, the build fails on the Pi.
 
