@@ -242,8 +242,12 @@ tools_exec = c['tools'].setdefault('exec', {})
 if not isinstance(tools_exec, dict):
     c['tools']['exec'] = {}
     tools_exec = c['tools']['exec']
-tools_exec.setdefault('host', 'gateway')
-print(f'Exec host: {tools_exec[\"host\"]}')
+if tools_exec.get('host') == 'sandbox':
+    tools_exec['host'] = 'gateway'
+    print('Exec host: sandbox -> gateway (migrated)')
+else:
+    tools_exec.setdefault('host', 'gateway')
+    print(f'Exec host: {tools_exec[\"host\"]}')
 
 # Enable WhatsApp watch action scanner (AI-powered action detection from WhatsApp messages)
 wa_actions = wa.setdefault('watchActions', {})
