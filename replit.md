@@ -41,7 +41,11 @@ This installs dependencies then launches the Vite dev server at **port 5000**.
 ```bash
 bash ~/install-forked-openclaw.sh
 ```
-The script is self-updating — it copies the latest version from `attached_assets/install-forked-openclaw.sh` on each run.
+**Single command — no manual steps needed.** The script handles everything:
+- Pulls the latest code from GitHub first (Step 0), before doing anything else
+- Copies the freshly-pulled version of itself over `~/install-forked-openclaw.sh` and re-execs it
+- This guarantees the newest script logic always runs, even if `~/install-forked-openclaw.sh` is months old
+- `OPENCLAW_REEXEC=1` env var is passed through `exec` to prevent infinite re-exec loops
 
 ### What the install script does (in order)
 1. Stops L1 (`~/l1-stop.sh`)
@@ -60,7 +64,7 @@ The script is self-updating — it copies the latest version from `attached_asse
 - **Stop**: `~/l1-stop.sh`
 - **Start**: `~/l1-start.sh`
 - **Direct debug**: `cd ~/openclaw && node dist/entry.js gateway run`
-- **Quick update** (no config changes): `~/l1-stop.sh && cd ~/openclaw && git pull && pnpm install && pnpm run build && ~/l1-start.sh`
+- **Quick update**: `bash ~/install-forked-openclaw.sh` — this is always the right command, it handles pull + build + config + restart automatically
 - **Config file**: `~/.openclaw/openclaw.json` (locked with `chattr +i`)
   - Unlock: `sudo chattr -i ~/.openclaw/openclaw.json`
   - Re-lock: `sudo chattr +i ~/.openclaw/openclaw.json`

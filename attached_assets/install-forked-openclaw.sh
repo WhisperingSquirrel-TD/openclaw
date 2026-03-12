@@ -10,15 +10,38 @@ info() { echo -e "${GREEN}[✓] $1${NC}"; }
 warn() { echo -e "${YELLOW}[!] $1${NC}"; }
 fail() { echo -e "${RED}[✗] $1${NC}"; exit 1; }
 
-# Self-update: if the repo has a newer version of this script, replace and re-exec
-# This must run before anything else so bash doesn't buffer the old version into memory
-SELF="$HOME/install-forked-openclaw.sh"
-REPO_COPY="$HOME/openclaw/attached_assets/install-forked-openclaw.sh"
-if [ -f "$REPO_COPY" ] && ! diff -q "$SELF" "$REPO_COPY" > /dev/null 2>&1; then
-    echo -e "${YELLOW}[!] Install script updated — restarting with new version...${NC}"
-    cp "$REPO_COPY" "$SELF"
-    chmod +x "$SELF"
-    exec bash "$SELF" "$@"
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 0: Pull latest code FIRST, then self-update and re-exec.
+# This guarantees we always run the newest version of this script.
+# OPENCLAW_REEXEC=1 is set on the re-exec to prevent an infinite loop.
+# ─────────────────────────────────────────────────────────────────────────────
+if [ -z "${OPENCLAW_REEXEC:-}" ]; then
+    echo ""
+    echo "========================================="
+    echo "  L1 — Fetching latest code from GitHub"
+    echo "========================================="
+    echo ""
+    if [ -d "$HOME/openclaw" ]; then
+        warn "Pulling latest changes..."
+        git -C "$HOME/openclaw" stash 2>/dev/null || true
+        git -C "$HOME/openclaw" pull || warn "Git pull failed — proceeding with existing code"
+        git -C "$HOME/openclaw" stash pop 2>/dev/null || true
+        info "Code updated"
+    else
+        warn "Cloning fork from GitHub..."
+        git clone https://github.com/WhisperingSquirrel-TD/openclaw.git "$HOME/openclaw" \
+            || fail "Clone failed. Check your connection and repo URL."
+        info "Fork cloned"
+    fi
+    # Copy the freshly-pulled script over ~/install-forked-openclaw.sh and re-exec it
+    REPO_SCRIPT="$HOME/openclaw/attached_assets/install-forked-openclaw.sh"
+    SELF="$HOME/install-forked-openclaw.sh"
+    if [ -f "$REPO_SCRIPT" ]; then
+        cp "$REPO_SCRIPT" "$SELF"
+        chmod +x "$SELF"
+        info "Install script updated from repo"
+    fi
+    exec env OPENCLAW_REEXEC=1 bash "$SELF" "$@"
 fi
 
 echo ""
@@ -92,21 +115,9 @@ else
     info "pnpm already installed: $(pnpm --version)"
 fi
 
-# Step 5: Clone or pull the fork
-if [ -d ~/openclaw ]; then
-    warn "Fork already cloned — pulling latest changes..."
-    cd ~/openclaw
-    git stash 2>/dev/null || true
-    git pull || fail "Git pull failed. Check your connection."
-    git stash pop 2>/dev/null || true
-    info "Code updated"
-else
-    warn "Cloning fork from GitHub..."
-    cd ~
-    git clone https://github.com/WhisperingSquirrel-TD/openclaw.git || fail "Clone failed. Check your connection and repo name."
-    cd ~/openclaw
-    info "Fork cloned"
-fi
+# Step 5: Confirm repo is ready (already pulled in Step 0)
+cd "$HOME/openclaw"
+info "Repo ready: $(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 
 # Step 6: Install dependencies with pnpm (with retries for flaky Pi networking)
 warn "Installing dependencies with pnpm (this may take a few minutes on Pi)..."
@@ -373,13 +384,8 @@ echo "  TOTP setup (first time only):"
 echo "    Send /totp-setup on Telegram"
 echo "    Scan the URI with Google Authenticator or Authy"
 echo ""
-echo "  To pull future updates:"
+echo "  To update in future (single command — handles everything):"
 echo "    bash ~/install-forked-openclaw.sh"
-echo ""
-echo "  Quick manual update (if you know there are no config changes):"
-echo "    ~/l1-stop.sh"
-echo "    cd ~/openclaw && git pull && pnpm install && pnpm run build"
-echo "    ~/l1-start.sh"
 echo ""
 echo "  To check status:"
 echo "    openclaw doctor"
