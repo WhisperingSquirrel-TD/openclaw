@@ -100,6 +100,11 @@ Extends the global `gateway.nodes.denyCommands` to per-channel scoping. Setting 
 - Config: `channels.<channel>.denyCommands: string[]` (WhatsApp, Telegram)
 - Files: `src/gateway/node-command-policy.ts` (`resolveChannelDenyCommands`), channel config schemas
 
+**Permanently blocked commands** (must always remain in `denyCommands`, verified by config-check/check.py):
+- `calendar.add` / `calendar.update` — calendar writes must go through the Outlook/Microsoft integration only (`poll.py`), not any generic calendar provider (e.g. Google Calendar). Unblocking these globally would allow L1 to write to the wrong calendar.
+- `calendar.delete` — destructive, never permitted
+- `message.react`, `camera.snap`, `camera.clip`, `screen.record`, `contacts.add`, `reminders.add`
+
 ### Immutable System Prompt (Req #10)
 Adds `agents.defaults.systemPrompt` — an immutable preamble injected before SOUL.md in every agent session. Not subject to bootstrap character limits.
 - Config: `agents.defaults.systemPrompt: string`

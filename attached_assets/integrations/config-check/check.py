@@ -20,6 +20,13 @@ EXPECTED = {
     ("agents", "defaults", "approvalMode"): "totp",
 }
 
+# Commands that must remain in denyCommands (cannot be unblocked)
+MUST_DENY = [
+    "calendar.add",    # Outlook-only via poll.py — must not go through generic calendar provider
+    "calendar.update", # same reason
+    "calendar.delete", # destructive — never permitted
+]
+
 def get_nested(d, *keys):
     for k in keys:
         if not isinstance(d, dict):
@@ -56,6 +63,16 @@ def main():
             mismatches.append(msg)
         else:
             print(f"[OK] {key_str} = {repr(actual)}")
+
+    # Check that required commands remain in denyCommands
+    deny = get_nested(config, "gateway", "nodes", "denyCommands") or []
+    for cmd in MUST_DENY:
+        if cmd not in deny:
+            msg = f"{cmd} is NOT in denyCommands (must remain blocked)"
+            log_alert(f"Security drift: {msg}")
+            mismatches.append(msg)
+        else:
+            print(f"[OK] denyCommands contains {cmd}")
 
     if mismatches:
         print(f"\n{len(mismatches)} mismatch(es) found — see {LOG_PATH}")

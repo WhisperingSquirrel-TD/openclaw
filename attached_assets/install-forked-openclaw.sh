@@ -215,18 +215,16 @@ else:
     )
     print(f'Telegram config preserved (botToken present: {has_token})')
 
-# denyCommands: remove message.send (watch mode handles it), calendar.add, calendar.update
+# denyCommands: remove message.send only (watch mode handles it)
+# calendar.add and calendar.update remain blocked — calendar writes must go
+# through the Outlook/Microsoft integration only, not any generic calendar provider
 deny = c.get('gateway', {}).get('nodes', {}).get('denyCommands', [])
 if not isinstance(deny, list):
     deny = []
     c.setdefault('gateway', {}).setdefault('nodes', {})['denyCommands'] = deny
-removed = []
-for cmd in ['message.send', 'calendar.add', 'calendar.update']:
-    if cmd in deny:
-        deny.remove(cmd)
-        removed.append(cmd)
-if removed:
-    print(f'Removed from denyCommands: {removed}')
+if 'message.send' in deny:
+    deny.remove('message.send')
+    print('Removed message.send from denyCommands — watch mode enforces this now')
 
 # Set up TOTP approval mode for trust gate (Pi-compatible, replaces socket-based approval)
 c.setdefault('agents', {})
