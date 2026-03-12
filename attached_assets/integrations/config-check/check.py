@@ -14,7 +14,7 @@ LOG_PATH = os.path.expanduser("~/.openclaw/workspace/memory/config-alerts.log")
 
 EXPECTED = {
     ("tools", "exec", "host"): "gateway",
-    ("agents", "defaults", "totpWindowMinutes"): 5,
+    ("agents", "defaults", "totpWindowMinutes"): 2,
     ("channels", "telegram", "dmPolicy"): "allowlist",
     ("channels", "whatsapp", "mode"): "watch",
     ("agents", "defaults", "approvalMode"): "totp",

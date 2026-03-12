@@ -167,7 +167,7 @@ When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator 
 
 **Config:**
 - `agents.defaults.approvalMode: "socket" | "totp"` (default: `"socket"`)
-- `agents.defaults.totpWindowMinutes: 1–60` (default: `5`)
+- `agents.defaults.totpWindowMinutes: 1–60` (always `2` on Pi — enforced by install script)
 
 **Secret storage:** `<state-dir>/totp/totp-secret.enc` (AES-256-GCM, encrypted with `OPENCLAW_VAULT_PASSPHRASE`) or `totp-secret.txt` (plaintext fallback)
 

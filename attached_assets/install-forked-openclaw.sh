@@ -235,12 +235,13 @@ if not isinstance(agents, dict):
     c['agents']['defaults'] = {}
     agents = c['agents']['defaults']
 agents.setdefault('approvalMode', 'totp')
-# FIX 3: migrate totpWindowMinutes: 2 -> 5 (2 is too short, SOUL.md specifies 5)
-if agents.get('totpWindowMinutes') == 2:
-    agents['totpWindowMinutes'] = 5
-    print('totpWindowMinutes: 2 -> 5 (migrated)')
+# totpWindowMinutes must always be 2 — migrate any other value
+if agents.get('totpWindowMinutes') != 2:
+    old = agents.get('totpWindowMinutes', 'unset')
+    agents['totpWindowMinutes'] = 2
+    print(f'totpWindowMinutes: {old} -> 2 (corrected)')
 else:
-    agents.setdefault('totpWindowMinutes', 5)
+    agents['totpWindowMinutes'] = 2
 agents.setdefault('trustLevel', 1)
 agents.setdefault('requireApproval', ['message.send', 'exec.run'])
 print(f'Approval mode: {agents[\"approvalMode\"]} (window={agents[\"totpWindowMinutes\"]}min)')
