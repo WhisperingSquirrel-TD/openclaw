@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveOAuthDir } from "../../config/paths.js";
+import { resolveOAuthDir, resolveStateDir } from "../../config/paths.js";
 import { logVerbose } from "../../globals.js";
 
 export type WatchTranscriptEntry = {
@@ -34,6 +34,32 @@ export function resolveTranscriptPath(accountId: string): string {
   return path.join(dir, `whatsapp-watch-${safeAccountId}.jsonl`);
 }
 
+function resolveMarkdownLogPath(): string {
+  const workspaceDir = path.join(resolveStateDir(), "workspace");
+  fs.mkdirSync(workspaceDir, { recursive: true });
+  return path.join(workspaceDir, "WHATSAPP_LOG.md");
+}
+
+function formatMarkdownLogLine(entry: WatchTranscriptEntry): string {
+  const ts = new Date(entry.timestamp);
+  const datePart = ts.toISOString().slice(0, 10);
+  const timePart = ts.toTimeString().slice(0, 5);
+  const prefix = entry.isFromMe ? "Me" : (entry.senderName || entry.senderNumber || "Unknown");
+  const chat = entry.chatType === "group" && entry.chatName ? ` [${sanitize(entry.chatName, 40)}]` : "";
+  const body = sanitize(entry.body, 500);
+  return `[${datePart} ${timePart}]${chat} ${prefix}: ${body}\n`;
+}
+
+function appendMarkdownLog(entry: WatchTranscriptEntry): void {
+  try {
+    const logPath = resolveMarkdownLogPath();
+    const line = formatMarkdownLogLine(entry);
+    fs.appendFileSync(logPath, line, "utf-8");
+  } catch (err) {
+    logVerbose(`Watch markdown log write failed: ${String(err)}`);
+  }
+}
+
 export function appendWatchTranscript(
   accountId: string,
   entry: WatchTranscriptEntry,
@@ -58,4 +84,5 @@ export function appendWatchTranscript(
   } catch (err) {
     logVerbose(`Watch transcript write failed: ${String(err)}`);
   }
+  appendMarkdownLog(entry);
 }

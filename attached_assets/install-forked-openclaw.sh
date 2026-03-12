@@ -215,11 +215,18 @@ else:
     )
     print(f'Telegram config preserved (botToken present: {has_token})')
 
-# Remove message.send from denyCommands if present (watch mode handles it now)
+# denyCommands: remove message.send (watch mode handles it), calendar.add, calendar.update
 deny = c.get('gateway', {}).get('nodes', {}).get('denyCommands', [])
-if 'message.send' in deny:
-    deny.remove('message.send')
-    print('Removed message.send from denyCommands — watch mode enforces this now')
+if not isinstance(deny, list):
+    deny = []
+    c.setdefault('gateway', {}).setdefault('nodes', {})['denyCommands'] = deny
+removed = []
+for cmd in ['message.send', 'calendar.add', 'calendar.update']:
+    if cmd in deny:
+        deny.remove(cmd)
+        removed.append(cmd)
+if removed:
+    print(f'Removed from denyCommands: {removed}')
 
 # Set up TOTP approval mode for trust gate (Pi-compatible, replaces socket-based approval)
 c.setdefault('agents', {})
@@ -230,7 +237,12 @@ if not isinstance(agents, dict):
     c['agents']['defaults'] = {}
     agents = c['agents']['defaults']
 agents.setdefault('approvalMode', 'totp')
-agents.setdefault('totpWindowMinutes', 5)
+# FIX 3: migrate totpWindowMinutes: 2 -> 5 (2 is too short, SOUL.md specifies 5)
+if agents.get('totpWindowMinutes') == 2:
+    agents['totpWindowMinutes'] = 5
+    print('totpWindowMinutes: 2 -> 5 (migrated)')
+else:
+    agents.setdefault('totpWindowMinutes', 5)
 agents.setdefault('trustLevel', 1)
 agents.setdefault('requireApproval', ['message.send', 'exec.run'])
 print(f'Approval mode: {agents[\"approvalMode\"]} (window={agents[\"totpWindowMinutes\"]}min)')
@@ -274,7 +286,56 @@ print('Config updated successfully')
 sudo chattr +i "$CONFIG_FILE"
 info "Config updated and locked"
 
-# Step 11: Set audit log append-only (tamper protection)
+# Step 11: Deploy integration scripts from repo
+echo ""
+warn "Deploying integration scripts..."
+
+INTEGRATIONS_SRC="$HOME/openclaw/attached_assets/integrations"
+INTEGRATIONS_DST="$HOME/.openclaw/integrations"
+
+deploy_integration() {
+    local src="$1"
+    local dst="$2"
+    if [ -f "$src" ]; then
+        mkdir -p "$(dirname "$dst")"
+        cp "$src" "$dst"
+        chmod +x "$dst"
+        info "Deployed: $dst"
+    fi
+}
+
+deploy_integration "$INTEGRATIONS_SRC/config-check/check.py"      "$INTEGRATIONS_DST/config-check/check.py"
+deploy_integration "$INTEGRATIONS_SRC/docx-converter/convert.py"   "$INTEGRATIONS_DST/docx-converter/convert.py"
+deploy_integration "$INTEGRATIONS_SRC/microsoft/poll.py"           "$INTEGRATIONS_DST/microsoft/poll.py"
+
+# FIX 1: Create last-seen-emails.md template if it doesn't exist
+LAST_SEEN="$HOME/.openclaw/workspace/memory/last-seen-emails.md"
+if [ ! -f "$LAST_SEEN" ]; then
+    mkdir -p "$(dirname "$LAST_SEEN")"
+    cat > "$LAST_SEEN" << 'EOF'
+# Last Seen Emails — Known Contacts
+# Format: contact-email | last-seen-timestamp (ISO 8601)
+stuart.hobin@croydemedical.co.uk | 
+emily.thomas@croydemedical.co.uk | 
+john@reveela.com | 
+ed.patchett@7thsense.one | 
+johnjamesmarsh@hotmail.com | 
+andy.barrett@sjpp.co.uk | 
+olivia.collington@collingtonwinter.co.uk | 
+EOF
+    info "Created last-seen-emails.md template"
+else
+    info "last-seen-emails.md already exists — not overwritten"
+fi
+
+# Run config drift check immediately after deploy
+if [ -f "$INTEGRATIONS_DST/config-check/check.py" ]; then
+    echo ""
+    warn "Running config drift check..."
+    python3 "$INTEGRATIONS_DST/config-check/check.py" || true
+fi
+
+# Step 12a: Set audit log append-only (tamper protection)
 AUDIT_DIR="$HOME/.openclaw/audit"
 if [ -d "$AUDIT_DIR" ]; then
     sudo chattr +a "$AUDIT_DIR/outbound-audit.jsonl" 2>/dev/null && info "Audit log set append-only" || true
@@ -286,12 +347,12 @@ if [ -d "$TOTP_DIR" ]; then
     info "TOTP secret files protected"
 fi
 
-# Step 12: Start L1
+# Step 12b: Start L1
 echo ""
 warn "Starting L1..."
 ~/l1-start.sh
 
-# Step 13: Update hashes
+# Step 13: Update integrity hashes
 md5sum /mnt/l1-secure/*.md > ~/l1-hashes.txt 2>/dev/null || true
 info "Hashes updated"
 

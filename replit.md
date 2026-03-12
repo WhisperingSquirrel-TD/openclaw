@@ -256,7 +256,10 @@ All files unique to our fork (not present in upstream):
 - `src/web/auto-reply/watch-action-scheduler.ts` — Hourly scan scheduler: active 8am-10pm (configurable), 15-min tick with time-of-day awareness
 - `src/agents/soul-integrity.ts` — SOUL.md hash verification
 - `src/agents/soul-vault.ts` — Encrypted SOUL.md at rest
-- `attached_assets/install-forked-openclaw.sh` — Pi install/upgrade script
+- `attached_assets/install-forked-openclaw.sh` — Pi install/upgrade script (self-updating: re-execs from repo copy if newer)
+- `attached_assets/integrations/config-check/check.py` — Config drift detector: verifies exec.host=gateway, totpWindowMinutes=5, telegram.dmPolicy=allowlist, whatsapp.mode=watch. Logs to `~/.openclaw/workspace/memory/config-alerts.log`. Run automatically at end of install.
+- `attached_assets/integrations/docx-converter/convert.py` — Watches `~/.openclaw/media/inbound/` for .docx files, converts to .txt via LibreOffice headless. Logs to `workspace/memory/docx-conversions.log`.
+- `attached_assets/integrations/microsoft/poll.py` — Microsoft Graph email poller: inbox + sent items, per-contact state tracking in `last-seen-emails.md`, immediate alert file on new email from known contact, shorter poll interval for known contacts (2min vs 5min general).
 
 ## WhatsApp Watch Action Scanner
 Periodically scans WhatsApp watch-mode transcripts for actionable items using a cheap AI model, then surfaces them as Telegram inline keyboard cards.

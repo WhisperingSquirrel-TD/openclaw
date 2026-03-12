@@ -1,0 +1,140 @@
+Lobstromonous1 - Pi:
+Here's the prompt — structured so a coding agent can work through each fix in order:
+
+───
+
+OPENCLAW IMPROVEMENT PROMPT — L1 RASPBERRY PI
+
+I'm running OpenClaw on a Raspberry Pi. This prompt covers 10 systematic improvements to make. Work through them in order. Review existing files before changing anything. Flag anything that looks risky before doing it.
+
+Context:
+
+• Config: /home/tomdean88/.openclaw/openclaw.json (protected with chattr +i — will need sudo to edit)
+• Workspace: /home/tomdean88/.openclaw/workspace/
+• Integrations: /home/tomdean88/.openclaw/integrations/
+• OpenClaw version: 2026.3.8
+
+───
+
+FIX 1 — Persistent email state (no-push workaround)
+Create /home/tomdean88/.openclaw/workspace/memory/last-seen-emails.md with this structure:
+
+# Last Seen Emails — Known Contacts
+# Format: contact-email | last-seen-timestamp (ISO 8601)
+stuart.hobin@croydemedical.co.uk | 
+emily.thomas@croydemedical.co.uk | 
+john@reveela.com | 
+ed.patchett@7thSense.one | 
+johnjamesmarsh@hotmail.com | 
+andy.barrett@sjpp.co.uk | 
+olivia.collington@collingtonwinter.co.uk | 
+
+Then update the active watch cron prompt (cron ID: 61619d39-bf97-40c6-b901-0d04dccbf237) via the OpenClaw cron API to instruct it to: (a) read this file, (b) compare email timestamps against last-seen values, (c) only alert on genuinely new emails, (d) update the file after each check.
+
+───
+
+FIX 2 — Calendar write enabled
+Edit /home/tomdean88/.openclaw/openclaw.json:
+
+• Remove calendar.add and calendar.update from gateway.nodes.denyCommands
+• These should remain in the denylist: message.react, camera.snap, camera.clip, screen.record, calendar.delete, contacts.add, reminders.add
+• Restart gateway after change
+
+───
+
+FIX 3 — TOTP window mismatch
+Current config has totpWindowMinutes: 2. SOUL.md specifies 5 minutes.
+Edit openclaw.json to set agents.defaults.totpWindowMinutes: 5.
+Restart gateway after change.
+
+───
+
+FIX 4 — .docx auto-conversion script
+Write a script at /home/tomdean88/.openclaw/integrations/docx-converter/convert.py that:
+
+• Watches /home/tomdean88/.openclaw/media/inbound/ for new .docx files
+• On detection, runs libreoffice --headless --convert-to txt to produce a .txt alongside the original
+• Logs conversions to /home/tomdean88/.openclaw/workspace/memory/docx-conversions.log
+
+Then create a systemd service or cron to run it on startup.
+
+───
+
+FIX 5 — WhatsApp scanner health check
+Check if the WhatsApp action scanner process is running:
+
+openclaw status
+ps aux | grep -i whatsapp
+journalctl -u openclaw --no-pager -n 50 | grep -i whatsapp
+
+Report what you find. If the scanner is not running or not delivering cards, identify why and fix it.
+
+───
+
+FIX 6 — Microsoft poll: push on change
+Review /home/tomdean88/.openclaw/integrations/microsoft/poll.py.
+Currently polls on a timer. Improve it to:
+
+• Track the timestamp of the newest email seen per known contact
+• Write this to a state file (can reuse last-seen-emails.md)
+• When a new email arrives from a known contact, trigger an immediate notification rather than waiting for the next heartbeat
+• Optionally: reduce poll interval for known contacts to every 2 minutes vs every 5 minutes for general inbox
+
+───
+
+FIX 7 — Outlook sent items (already in task list)
+Extend /home/tomdean88/.openclaw/integrations/microsoft/poll.py to also read the Sent Items folder and append sent emails to OUTLOOK_INBOX.md with a [SENT] prefix. This lets L1 track what Tom has alre
+
+ady replied to without being told manually.
+
+───
+
+FIX 8 — Config/SOUL drift detection
+Write a simple startup script at /home/tomdean88/.openclaw/integrations/config-check/check.py that verifies:
+
+• tools.exec.host = gateway
+• agents.defaults.totpWindowMinutes = 5
+• channels.telegram.dmPolicy = allowlist
+• channels.whatsapp.mode = watch
+
+If any mismatch found, log a warning to /home/tomdean88/.openclaw/workspace/memory/config-alerts.log and print to stdout. Run this as part of the OpenClaw startup sequence if possible, or as a daily cron.
+
+───
+
+FIX 9 — WhatsApp logging to persistent file
+Configure the WhatsApp integration to write all inbound messages to /home/tomdean88/.openclaw/workspace/WHATSAPP_LOG.md as they arrive, in format:
+
+[YYYY-MM-DD HH:MM] From: [name/number]: [message text]
+
+Review the existing WhatsApp watch config to find where to hook this in.
+
+───
+
+FIX 10 — SOUL.md additions (text only, no code)
+The SOUL.md file is at /home/tomdean88/.openclaw/workspace/SOUL.md (encrypted vault copy at /home/tomdean88/.openclaw/vault/SOUL.md.gpg — do not touch the vault).
+
+Add the following to the plaintext SOUL.md:
+
+Part 3 — Proactive Nudges, add:
+
+"When scanning OUTLOOK_INBOX.md or GMAIL_INBOX.md, always read the full recent window — do not stop at the top. Search explicitly for emails from known contacts. A reply from a known lead sitting unread for more than one heartbeat cycle is a monitoring failure. LinkedIn post drafts must always include: post copy in Tom's voice, a CTA linking to stackstoneconsulting.co.uk tools (AI Advisor or Briefing Pack), hashtags, and a DALL-E image prompt in YouTube thumbnail style with stackstoneconsulting.co.uk visible. Never deliver a post draft without all four."
+
+Add Part 9 — Continuous Improvement:
+
+"Every time Tom flags a missed alert or repeated mistake: (1) identify the root cause, (2) write a process fix immediately to HEARTBEAT.md or resolved.md, (3) flag any SOUL.md-level change to Tom for the next Pi session. If Tom corrects the same behaviour more than once, it belongs in SOUL.md, not HEARTBEAT.md. Conversation acknowledgements are not fixes. Only written rules are fixes."
+
+───
+
+After all fixes:
+
+1. Run openclaw gateway restart
+2. Confirm gateway comes back up cleanly
+3. Run the config-check script and confirm no mismatches
+4. Send a test email to tomdean1988@gmail.com via the send script to confirm exec still works
+5. Report a summary of what was changed, what was skipped, and any issues found
+
+───
+
+That covers all 10. Push to Pi and pull when ready.
+
+-- Lobstromonous1
