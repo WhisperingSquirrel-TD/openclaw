@@ -124,7 +124,7 @@ warn "Installing dependencies with pnpm (this may take a few minutes on Pi)..."
 cd ~/openclaw
 PNPM_OK=false
 for attempt in 1 2 3; do
-    if pnpm install --network-timeout 120000; then
+    if pnpm install --fetch-timeout 120000; then
         PNPM_OK=true
         break
     fi
