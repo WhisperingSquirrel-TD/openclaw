@@ -287,6 +287,55 @@ wa_actions.setdefault('activeHoursEnd', 22)
 wa_actions.setdefault('intervalMinutes', 5)
 print(f'Watch actions: enabled={wa_actions[\"enabled\"]}, hours={wa_actions[\"activeHoursStart\"]}-{wa_actions[\"activeHoursEnd\"]}, interval={wa_actions[\"intervalMinutes\"]}min')
 
+# Token efficiency settings
+# These reduce API cost significantly without degrading quality.
+# All use setdefault — never overwrites values you've manually set.
+agent_defaults = c.setdefault('agents', {}).setdefault('defaults', {})
+if not isinstance(agent_defaults, dict):
+    c['agents']['defaults'] = {}
+    agent_defaults = c['agents']['defaults']
+
+# 1. Heartbeat light context: heartbeat only sends HEARTBEAT.md, not SOUL.md + memory.
+#    This alone cuts heartbeat token cost by ~70%.
+hb = agent_defaults.setdefault('heartbeat', {})
+if not isinstance(hb, dict):
+    agent_defaults['heartbeat'] = {}
+    hb = agent_defaults['heartbeat']
+hb.setdefault('lightContext', True)
+
+# 2. Heartbeat interval: every 60 min instead of default 30 min.
+#    Halves the number of background API calls.
+hb.setdefault('every', '60m')
+
+# 3. Heartbeat active hours: no nighttime heartbeats (midnight → 7am = zero calls).
+active_hours = hb.setdefault('activeHours', {})
+if not isinstance(active_hours, dict):
+    hb['activeHours'] = {}
+    active_hours = hb['activeHours']
+active_hours.setdefault('start', '07:00')
+active_hours.setdefault('end', '23:00')
+
+# 4. Cap heartbeat acknowledgement at 150 chars (it just needs to confirm tasks, not essay).
+hb.setdefault('ackMaxChars', 150)
+
+# 5. Bootstrap file size cap: each workspace file (SOUL.md, HEARTBEAT.md, memory.md)
+#    truncated at 10KB instead of the default 20KB. Forces you to keep files tight.
+agent_defaults.setdefault('bootstrapMaxChars', 10000)
+
+# 6. Context pruning (Claude only): prune conversation history older than 2 hours.
+#    Prevents sessions from growing unbounded. Silently skipped on non-Claude providers.
+pruning = agent_defaults.setdefault('contextPruning', {})
+if not isinstance(pruning, dict):
+    agent_defaults['contextPruning'] = {}
+    pruning = agent_defaults['contextPruning']
+pruning.setdefault('mode', 'cache-ttl')
+pruning.setdefault('ttl', '2h')
+pruning.setdefault('keepLastAssistants', 5)
+
+print(f'Token efficiency: lightContext={hb[\"lightContext\"]}, heartbeat every={hb[\"every\"]}, ' +
+      f'activeHours={active_hours[\"start\"]}-{active_hours[\"end\"]}, ' +
+      f'bootstrapMaxChars={agent_defaults[\"bootstrapMaxChars\"]}')
+
 with open(config_path, 'w') as f:
     json.dump(c, f, indent=2)
 

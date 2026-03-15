@@ -30,6 +30,23 @@ This installs dependencies then launches the Vite dev server at **port 5000**.
 - **Build command**: `pnpm run build` (builds to `dist/control-ui/`)
 - **Public directory**: `dist/control-ui`
 
+## Token Efficiency (Pi Config)
+
+The install script applies these automatically via `setdefault` (all preserving any manual overrides):
+
+| Setting | Value | Effect |
+|---|---|---|
+| `heartbeat.lightContext` | `true` | Heartbeat only sends `HEARTBEAT.md`, **not** SOUL.md/memory. ~70% cut in heartbeat cost |
+| `heartbeat.every` | `60m` | Once per hour (default 30m) — halves background API calls |
+| `heartbeat.activeHours` | `07:00–23:00` | Zero calls midnight–7am |
+| `heartbeat.ackMaxChars` | `150` | Heartbeat replies capped at 150 chars |
+| `bootstrapMaxChars` | `10000` | Each workspace file (SOUL.md etc.) capped at 10KB |
+| `contextPruning.mode` | `cache-ttl` | Prunes conversation history >2h old (Claude only) |
+
+**What still gets sent on every interactive message:** SOUL.md + memory files (up to 10KB each). Keep these files focused — every line costs tokens on every exchange.
+
+**Skills vs inline context:** OpenClaw's skill system means tool descriptions are injected on-demand, not in the system prompt. No changes needed there.
+
 ## Raspberry Pi Deployment
 
 ### Prerequisites (all handled automatically by the install script)
