@@ -284,7 +284,7 @@ if not isinstance(wa_actions, dict):
 wa_actions.setdefault('enabled', True)
 wa_actions.setdefault('activeHoursStart', 8)
 wa_actions.setdefault('activeHoursEnd', 22)
-wa_actions.setdefault('intervalMinutes', 60)
+wa_actions.setdefault('intervalMinutes', 5)
 print(f'Watch actions: enabled={wa_actions[\"enabled\"]}, hours={wa_actions[\"activeHoursStart\"]}-{wa_actions[\"activeHoursEnd\"]}, interval={wa_actions[\"intervalMinutes\"]}min')
 
 with open(config_path, 'w') as f:

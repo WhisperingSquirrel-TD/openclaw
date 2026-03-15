@@ -19,6 +19,11 @@ let schedulerTimer: ReturnType<typeof setInterval> | null = null;
 let lastScanTime: number = 0;
 let isScanning = false;
 
+let eventDrivenDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let lastEventDrivenScanTime: number = 0;
+const EVENT_DRIVEN_DEBOUNCE_MS = 45_000;
+const EVENT_DRIVEN_MIN_INTERVAL_MS = 2 * 60 * 1000;
+
 function resolveWatchActionsConfig(cfg: OpenClawConfig): WatchActionsConfig {
   const whatsapp = cfg.channels?.whatsapp as Record<string, unknown> | undefined;
   const watchActions = whatsapp?.watchActions as Record<string, unknown> | undefined;
@@ -27,7 +32,7 @@ function resolveWatchActionsConfig(cfg: OpenClawConfig): WatchActionsConfig {
     enabled: watchActions?.enabled === true,
     activeHoursStart: typeof watchActions?.activeHoursStart === "number" ? watchActions.activeHoursStart : 8,
     activeHoursEnd: typeof watchActions?.activeHoursEnd === "number" ? watchActions.activeHoursEnd : 22,
-    intervalMinutes: typeof watchActions?.intervalMinutes === "number" ? watchActions.intervalMinutes : 60,
+    intervalMinutes: typeof watchActions?.intervalMinutes === "number" ? watchActions.intervalMinutes : 5,
     model: typeof watchActions?.model === "string" ? watchActions.model : undefined,
   };
 }
@@ -67,7 +72,7 @@ function isInActiveHours(config: WatchActionsConfig): boolean {
   return hour >= config.activeHoursStart && hour < config.activeHoursEnd;
 }
 
-async function runScan(): Promise<void> {
+async function runScan(opts: { skipIntervalThrottle?: boolean } = {}): Promise<void> {
   if (isScanning) {
     logVerbose("watch-action-scheduler: scan already in progress, skipping");
     return;
@@ -88,14 +93,16 @@ async function runScan(): Promise<void> {
       return;
     }
 
-    const now = Date.now();
-    const intervalMs = config.intervalMinutes * 60 * 1000;
-    if (now - lastScanTime < intervalMs) {
-      logVerbose("watch-action-scheduler: too soon since last scan, skipping");
-      return;
+    if (!opts.skipIntervalThrottle) {
+      const now = Date.now();
+      const intervalMs = config.intervalMinutes * 60 * 1000;
+      if (now - lastScanTime < intervalMs) {
+        logVerbose("watch-action-scheduler: too soon since last scan, skipping");
+        return;
+      }
     }
 
-    lastScanTime = now;
+    lastScanTime = Date.now();
     const accountIds = resolveWhatsAppAccountIds(cfg);
 
     let totalActions = 0;
@@ -138,7 +145,33 @@ async function runScan(): Promise<void> {
   }
 }
 
-const TICK_INTERVAL_MS = 15 * 60 * 1000;
+/**
+ * Called from monitor.ts each time a new WhatsApp message is written to the transcript.
+ * Debounces for 45 seconds (to batch quick bursts), then triggers a scan immediately
+ * regardless of the intervalMinutes setting — so cards appear within ~1 minute of the message.
+ * Won't fire more than once every 2 minutes via this path.
+ */
+export function triggerWatchActionScanDebounced(): void {
+  if (eventDrivenDebounceTimer) {
+    clearTimeout(eventDrivenDebounceTimer);
+    eventDrivenDebounceTimer = null;
+  }
+
+  const now = Date.now();
+  if (now - lastEventDrivenScanTime < EVENT_DRIVEN_MIN_INTERVAL_MS) {
+    logVerbose("watch-action-scheduler: event-driven scan throttled (too recent)");
+    return;
+  }
+
+  eventDrivenDebounceTimer = setTimeout(() => {
+    eventDrivenDebounceTimer = null;
+    lastEventDrivenScanTime = Date.now();
+    logVerbose("watch-action-scheduler: event-driven scan triggered by incoming message");
+    void runScan({ skipIntervalThrottle: true });
+  }, EVENT_DRIVEN_DEBOUNCE_MS);
+}
+
+const TICK_INTERVAL_MS = 2 * 60 * 1000;
 
 export function startWatchActionScheduler(): void {
   if (schedulerTimer) {
@@ -155,7 +188,7 @@ export function startWatchActionScheduler(): void {
   }
 
   logInfo(
-    `watch-action-scheduler: starting (active ${config.activeHoursStart}:00-${config.activeHoursEnd}:00, every ${config.intervalMinutes}min)`,
+    `watch-action-scheduler: starting (active ${config.activeHoursStart}:00-${config.activeHoursEnd}:00, every ${config.intervalMinutes}min, event-driven debounce ${EVENT_DRIVEN_DEBOUNCE_MS / 1000}s)`,
   );
 
   schedulerTimer = setInterval(() => {
@@ -170,5 +203,9 @@ export function stopWatchActionScheduler(): void {
     clearInterval(schedulerTimer);
     schedulerTimer = null;
     logInfo("watch-action-scheduler: stopped");
+  }
+  if (eventDrivenDebounceTimer) {
+    clearTimeout(eventDrivenDebounceTimer);
+    eventDrivenDebounceTimer = null;
   }
 }

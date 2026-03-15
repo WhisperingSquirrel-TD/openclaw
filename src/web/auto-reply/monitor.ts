@@ -31,6 +31,7 @@ import { createWebOnMessageHandler } from "./monitor/on-message.js";
 import type { WebChannelStatus, WebInboundMsg, WebMonitorTuning } from "./types.js";
 import { isLikelyWhatsAppCryptoError } from "./util.js";
 import { appendWatchTranscript } from "./watch-transcript.js";
+import { triggerWatchActionScanDebounced } from "./watch-action-scheduler.js";
 
 function isNonRetryableWebCloseStatus(statusCode: unknown): boolean {
   return statusCode === 440;
@@ -190,6 +191,7 @@ export async function monitorWebChannel(
         quotedMessage: msg.replyToBody,
         isFromMe: msg.fromMe ?? false,
       });
+      triggerWatchActionScanDebounced();
     };
 
     const inboundDebounceMs = resolveInboundDebounceMs({ cfg, channel: "whatsapp" });
