@@ -262,7 +262,8 @@ All files unique to our fork (not present in upstream):
 - `src/web/auto-reply/watch-action-classifier.ts` — AI-powered action detection using cheap model (Haiku/4o-mini/Flash). Conversation-aware: considers full thread context so resolved actions aren't flagged
 - `src/web/auto-reply/watch-action-notify.ts` — Sends Telegram inline keyboard cards for detected actions
 - `src/web/auto-reply/watch-action-store.ts` — Pending action store (JSON file) for callback button handling
-- `src/web/auto-reply/watch-action-scheduler.ts` — Hourly scan scheduler: active 8am-10pm (configurable), 15-min tick with time-of-day awareness
+- `src/web/auto-reply/watch-action-scheduler.ts` — Scan scheduler: event-driven (45s debounce after each message) + 2-min tick + 5-min interval throttle. Active 8am-10pm. Exports `triggerWatchActionScanDebounced()` called from `monitor.ts` on every new message.
+- `src/web/auto-reply/watch-action-google-tasks.ts` — Google Tasks integration. Device Authorization Flow (TV-style: user visits accounts.google.com/device and enters a code). Credentials at `~/.openclaw/oauth/google/credentials.json`, token at `~/.openclaw/oauth/google/tasks-token.json`. Shopping actions → "Shopping" task list (auto-created). Other actions → default task list.
 - `src/agents/soul-integrity.ts` — SOUL.md hash verification
 - `src/agents/soul-vault.ts` — Encrypted SOUL.md at rest
 - `attached_assets/install-forked-openclaw.sh` — Pi install/upgrade script (self-updating: re-execs from repo copy if newer)

@@ -1177,21 +1177,128 @@ export const registerTelegramHandlers = ({
           return;
         }
         if (actionVerb === "add") {
-          resolveAction(actionId, `added (${action.actionType})`);
-          const label =
-            action.actionType === "shopping"
-              ? "Added to shopping list"
-              : action.actionType === "calendar"
-                ? "Noted for calendar"
-                : action.actionType === "reminder"
-                  ? "Reminder noted"
-                  : "Action noted";
-          try {
-            await editCallbackMessage(
-              `${callbackMessage.text ?? ""}\n\n_${label}: ${action.summary}_`,
-              { parse_mode: "Markdown" },
+          const {
+            getGoogleTasksStatus,
+            readGoogleCredentials,
+            startDeviceFlow,
+            pollUntilAuthorized,
+            addShoppingItem,
+            addTaskItem,
+            getCredentialsPath,
+          } = await import("../web/auto-reply/watch-action-google-tasks.js");
+
+          const googleStatus = getGoogleTasksStatus();
+
+          if (googleStatus === "no-credentials") {
+            const credPath = getCredentialsPath();
+            try {
+              await replyToCallbackChat(
+                `🔧 *Google Tasks not configured*\n\nTo enable Google Tasks, create a credentials file on your Pi:\n\n\`${credPath}\`\n\nWith:\n\`\`\`\n{\n  "clientId": "YOUR_GOOGLE_CLIENT_ID",\n  "clientSecret": "YOUR_GOOGLE_CLIENT_SECRET"\n}\`\`\`\n\nGet credentials from console.cloud.google.com → APIs & Services → Credentials → Create OAuth 2.0 Client (Desktop app) → Enable Tasks API.`,
+                { parse_mode: "Markdown" },
+              );
+            } catch {}
+            return;
+          }
+
+          const isShoppingType = action.actionType === "shopping";
+          const isCalendarType = action.actionType === "calendar";
+
+          if (googleStatus === "no-token") {
+            const creds = readGoogleCredentials()!;
+            let deviceFlow: Awaited<ReturnType<typeof startDeviceFlow>>;
+            try {
+              deviceFlow = await startDeviceFlow(creds);
+            } catch (err) {
+              try {
+                await replyToCallbackChat(`Failed to start Google login: ${String(err)}`);
+              } catch {}
+              return;
+            }
+
+            const authInstructions =
+              `🔐 *Connect your Google account*\n\n` +
+              `1. Visit: accounts.google.com/device\n` +
+              `2. Enter code: \`${deviceFlow.user_code}\`\n` +
+              `3. Sign in and tap Allow\n\n` +
+              `_I'll add "${action.summary}" automatically once you're connected._`;
+
+            try {
+              await replyToCallbackChat(authInstructions, { parse_mode: "Markdown" });
+            } catch {}
+
+            const chatId = callbackMessage.chat.id;
+            const summaryToAdd = action.summary;
+            const notesText = action.originalMessage;
+            const addType = isShoppingType ? "shopping" : "task";
+
+            void pollUntilAuthorized(
+              creds,
+              deviceFlow.device_code,
+              deviceFlow.interval,
+              deviceFlow.expires_in,
+              async () => {
+                try {
+                  if (addType === "shopping") {
+                    await addShoppingItem(summaryToAdd, notesText);
+                  } else {
+                    await addTaskItem(summaryToAdd, notesText);
+                  }
+                  await bot.api.sendMessage(
+                    chatId,
+                    `✅ Google connected! Added to ${addType === "shopping" ? "Shopping list" : "Tasks"}: _${summaryToAdd}_`,
+                    { parse_mode: "Markdown" },
+                  );
+                } catch (err) {
+                  await bot.api.sendMessage(
+                    chatId,
+                    `Google connected but failed to add item: ${String(err)}`,
+                  );
+                }
+              },
+              async (reason) => {
+                try {
+                  await bot.api.sendMessage(
+                    chatId,
+                    reason === "denied"
+                      ? "❌ Google access was denied. Tap Add to list again to retry."
+                      : "⏱ Google login timed out. Tap Add to list again to retry.",
+                  );
+                } catch {}
+              },
             );
-          } catch {}
+            return;
+          }
+
+          if (isCalendarType) {
+            resolveAction(actionId, "noted (calendar)");
+            try {
+              await editCallbackMessage(
+                `${callbackMessage.text ?? ""}\n\n_Noted for calendar: ${action.summary}_`,
+                { parse_mode: "Markdown" },
+              );
+            } catch {}
+            return;
+          }
+
+          try {
+            if (isShoppingType) {
+              await addShoppingItem(action.summary, action.originalMessage);
+            } else {
+              await addTaskItem(action.summary, action.originalMessage);
+            }
+            resolveAction(actionId, `added (${action.actionType})`);
+            const listName = isShoppingType ? "Shopping list" : "Google Tasks";
+            try {
+              await editCallbackMessage(
+                `${callbackMessage.text ?? ""}\n\n_Added to ${listName}: ${action.summary}_`,
+                { parse_mode: "Markdown" },
+              );
+            } catch {}
+          } catch (err) {
+            try {
+              await replyToCallbackChat(`Failed to add to Google Tasks: ${String(err)}`);
+            } catch {}
+          }
           return;
         }
         return;

@@ -318,6 +318,27 @@ deploy_integration "$INTEGRATIONS_SRC/config-check/check.py"      "$INTEGRATIONS
 deploy_integration "$INTEGRATIONS_SRC/docx-converter/convert.py"   "$INTEGRATIONS_DST/docx-converter/convert.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/poll.py"           "$INTEGRATIONS_DST/microsoft/poll.py"
 
+# Deploy Google Tasks credentials template (only if no credentials file exists yet)
+GOOGLE_CREDS="$HOME/.openclaw/oauth/google/credentials.json"
+if [ ! -f "$GOOGLE_CREDS" ]; then
+    mkdir -p "$(dirname "$GOOGLE_CREDS")"
+    cp "$INTEGRATIONS_SRC/google/credentials-template.json" "$GOOGLE_CREDS" 2>/dev/null || \
+    cat > "$GOOGLE_CREDS" << 'GCEOF'
+{
+  "clientId": "YOUR_GOOGLE_CLIENT_ID",
+  "clientSecret": "YOUR_GOOGLE_CLIENT_SECRET"
+}
+GCEOF
+    warn "Google Tasks credentials template created at: $GOOGLE_CREDS"
+    warn "To enable 'Add to list': fill in your Google OAuth credentials there."
+    warn "  1. Go to console.cloud.google.com"
+    warn "  2. Create a project, enable Tasks API"
+    warn "  3. APIs & Services → Credentials → Create OAuth 2.0 Client (Desktop app)"
+    warn "  4. Edit $GOOGLE_CREDS with your Client ID and Secret"
+else
+    info "Google Tasks credentials file already exists — not overwritten"
+fi
+
 # FIX 1: Create last-seen-emails.md template if it doesn't exist
 LAST_SEEN="$HOME/.openclaw/workspace/memory/last-seen-emails.md"
 if [ ! -f "$LAST_SEEN" ]; then
