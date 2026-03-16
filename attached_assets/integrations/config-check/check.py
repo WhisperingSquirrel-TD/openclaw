@@ -20,19 +20,22 @@ EXPECTED = {
     ("agents", "defaults", "approvalMode"): "totp",
 }
 
-# Commands that must remain permanently blocked in denyCommands
+# Commands that must remain permanently blocked in denyCommands.
+# NOTE: requireApproval only gates exec.run and message.send (hardcoded in trust gate).
+# There is no mechanism to TOTP-gate calendar at the tool level without a code change,
+# so blocking them entirely in denyCommands is the only reliable enforcement.
 MUST_DENY = [
+    "calendar.add",    # no TOTP-gate mechanism at tool level — block entirely
+    "calendar.update", # same — block entirely
     "calendar.delete", # destructive — never permitted under any circumstance
+    "reminders.add",   # same risk as calendar.add — potential bypass route
+    "contacts.add",    # prevent silent contact writes
 ]
 
-# Commands that must be in requireApproval (TOTP-gated, not freely callable)
-# calendar.add/update are here — L1 must use the proper tool and the TOTP prompt
-# will name the exact action so the user knows what they're approving.
-# exec.run is here as the backstop against code-based bypass routes.
+# Commands that must be in requireApproval (genuinely TOTP-gated by the trust gate)
 MUST_REQUIRE_APPROVAL = [
-    "calendar.add",    # TOTP-gated calendar write via proper tool
-    "calendar.update", # TOTP-gated calendar edit via proper tool
-    "exec.run",        # TOTP-gated shell — prevents silent code-based bypasses
+    "exec.run",        # TOTP-gated shell — hardcoded in trust gate
+    "message.send",    # TOTP-gated outbound messages — hardcoded in trust gate
 ]
 
 def get_nested(d, *keys):
@@ -91,14 +94,6 @@ def main():
             mismatches.append(msg)
         else:
             print(f"[OK] requireApproval contains {cmd}")
-
-    # Sanity: calendar.add/update must not appear in denyCommands (they'd be uncallable
-    # instead of TOTP-gated, which is wrong — they should go through the approval flow)
-    for cmd in ["calendar.add", "calendar.update"]:
-        if cmd in deny:
-            msg = f"{cmd} is in denyCommands — should be in requireApproval instead (TOTP-gated)"
-            log_alert(f"Config mismatch: {msg}")
-            mismatches.append(msg)
 
     if mismatches:
         print(f"\n{len(mismatches)} mismatch(es) found — see {LOG_PATH}")

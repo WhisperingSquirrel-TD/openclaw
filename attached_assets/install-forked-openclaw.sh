@@ -228,21 +228,25 @@ else:
 
 # denyCommands:
 # - message.send: removed (watch mode enforces it instead)
-# - calendar.add, calendar.update: removed from deny, moved to requireApproval so L1
-#   must use the proper tool and the TOTP prompt explicitly names the action.
-#   Using exec.run to bypass this still requires TOTP (exec.run is in requireApproval).
-# - calendar.delete: permanently blocked — destructive, never permitted
+# - calendar.add, calendar.update, calendar.delete: remain permanently blocked.
+#   The requireApproval trust gate only intercepts exec.run and message.send (hardcoded
+#   in the trust gate). There is no mechanism to TOTP-gate calendar at the tool level
+#   without a code change. Keeping them in denyCommands is the only reliable enforcement.
+#   L1 bypassing via exec.run still hits the exec.run TOTP gate.
 deny = c.get('gateway', {}).get('nodes', {}).get('denyCommands', [])
 if not isinstance(deny, list):
     deny = []
     c.setdefault('gateway', {}).setdefault('nodes', {})['denyCommands'] = deny
-for cmd in ['message.send', 'calendar.add', 'calendar.update']:
-    if cmd in deny:
-        deny.remove(cmd)
-        print(f'Removed {cmd} from denyCommands — now TOTP-gated via requireApproval')
-if 'calendar.delete' not in deny:
-    deny.append('calendar.delete')
-    print('Added calendar.delete to denyCommands — permanently blocked')
+if 'message.send' in deny:
+    deny.remove('message.send')
+    print('Removed message.send from denyCommands — watch mode enforces this now')
+for cmd in ['calendar.add', 'calendar.update', 'calendar.delete',
+            'reminders.add',   # same risk as calendar.add — bypass route
+            'contacts.add',    # prevent L1 silently writing to contacts
+            ]:
+    if cmd not in deny:
+        deny.append(cmd)
+        print(f'Added {cmd} to denyCommands — permanently blocked')
 
 # Set up TOTP approval mode for trust gate (Pi-compatible, replaces socket-based approval)
 c.setdefault('agents', {})
@@ -261,20 +265,17 @@ if agents.get('totpWindowMinutes') != 2:
 else:
     agents['totpWindowMinutes'] = 2
 agents.setdefault('trustLevel', 1)
-# requireApproval: calendar.add and calendar.update require explicit TOTP confirmation.
-# The TOTP prompt will name the specific tool so the user knows exactly what they're approving.
-# exec.run stays here as the backstop against code-based bypass routes.
+# requireApproval: only exec.run and message.send are intercepted by the trust gate
+# (these are the only two actions with hardcoded trust gate enforcement in the codebase).
+# Adding other tool names here has no effect — the gate doesn't call them.
 required = agents.setdefault('requireApproval', [])
 if not isinstance(required, list):
     agents['requireApproval'] = []
     required = agents['requireApproval']
-for cmd in ['exec.run', 'calendar.add', 'calendar.update']:
+for cmd in ['exec.run', 'message.send']:
     if cmd not in required:
         required.append(cmd)
         print(f'Added {cmd} to requireApproval')
-# message.send stays out of requireApproval — watch mode policy handles it
-if 'message.send' in required:
-    required.remove('message.send')
 print(f'Approval mode: {agents[\"approvalMode\"]} (window={agents[\"totpWindowMinutes\"]}min)')
 
 # Ensure restart is still disabled (safe setdefault)
