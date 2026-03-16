@@ -20,11 +20,19 @@ EXPECTED = {
     ("agents", "defaults", "approvalMode"): "totp",
 }
 
-# Commands that must remain in denyCommands (cannot be unblocked)
+# Commands that must remain permanently blocked in denyCommands
 MUST_DENY = [
-    "calendar.add",    # Outlook-only via poll.py — must not go through generic calendar provider
-    "calendar.update", # same reason
-    "calendar.delete", # destructive — never permitted
+    "calendar.delete", # destructive — never permitted under any circumstance
+]
+
+# Commands that must be in requireApproval (TOTP-gated, not freely callable)
+# calendar.add/update are here — L1 must use the proper tool and the TOTP prompt
+# will name the exact action so the user knows what they're approving.
+# exec.run is here as the backstop against code-based bypass routes.
+MUST_REQUIRE_APPROVAL = [
+    "calendar.add",    # TOTP-gated calendar write via proper tool
+    "calendar.update", # TOTP-gated calendar edit via proper tool
+    "exec.run",        # TOTP-gated shell — prevents silent code-based bypasses
 ]
 
 def get_nested(d, *keys):
@@ -64,15 +72,33 @@ def main():
         else:
             print(f"[OK] {key_str} = {repr(actual)}")
 
-    # Check that required commands remain in denyCommands
+    # Check that permanently blocked commands remain in denyCommands
     deny = get_nested(config, "gateway", "nodes", "denyCommands") or []
     for cmd in MUST_DENY:
         if cmd not in deny:
-            msg = f"{cmd} is NOT in denyCommands (must remain blocked)"
+            msg = f"{cmd} is NOT in denyCommands (must remain permanently blocked)"
             log_alert(f"Security drift: {msg}")
             mismatches.append(msg)
         else:
             print(f"[OK] denyCommands contains {cmd}")
+
+    # Check that TOTP-gated commands are in requireApproval (not silently callable)
+    require = get_nested(config, "agents", "defaults", "requireApproval") or []
+    for cmd in MUST_REQUIRE_APPROVAL:
+        if cmd not in require:
+            msg = f"{cmd} is NOT in requireApproval (must be TOTP-gated)"
+            log_alert(f"Security drift: {msg}")
+            mismatches.append(msg)
+        else:
+            print(f"[OK] requireApproval contains {cmd}")
+
+    # Sanity: calendar.add/update must not appear in denyCommands (they'd be uncallable
+    # instead of TOTP-gated, which is wrong — they should go through the approval flow)
+    for cmd in ["calendar.add", "calendar.update"]:
+        if cmd in deny:
+            msg = f"{cmd} is in denyCommands — should be in requireApproval instead (TOTP-gated)"
+            log_alert(f"Config mismatch: {msg}")
+            mismatches.append(msg)
 
     if mismatches:
         print(f"\n{len(mismatches)} mismatch(es) found — see {LOG_PATH}")
