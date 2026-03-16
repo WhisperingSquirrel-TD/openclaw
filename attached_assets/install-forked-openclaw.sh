@@ -387,6 +387,7 @@ deploy_integration() {
 deploy_integration "$INTEGRATIONS_SRC/config-check/check.py"      "$INTEGRATIONS_DST/config-check/check.py"
 deploy_integration "$INTEGRATIONS_SRC/docx-converter/convert.py"   "$INTEGRATIONS_DST/docx-converter/convert.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/poll.py"           "$INTEGRATIONS_DST/microsoft/poll.py"
+deploy_integration "$INTEGRATIONS_SRC/google/gmail_poll.py"        "$INTEGRATIONS_DST/google/gmail_poll.py"
 
 # Deploy Google Tasks credentials template (only if no credentials file exists yet)
 GOOGLE_CREDS="$HOME/.openclaw/oauth/google/credentials.json"
@@ -409,12 +410,36 @@ else
     info "Google Tasks credentials file already exists — not overwritten"
 fi
 
-# FIX 1: Create last-seen-emails.md template if it doesn't exist
-LAST_SEEN="$HOME/.openclaw/workspace/memory/last-seen-emails.md"
-if [ ! -f "$LAST_SEEN" ]; then
-    mkdir -p "$(dirname "$LAST_SEEN")"
-    cat > "$LAST_SEEN" << 'EOF'
-# Last Seen Emails — Known Contacts
+# Create shared known-contacts.txt (read by ALL email pollers — Microsoft, Gmail, etc.)
+# This is the single source of truth for trusted senders across all email channels.
+KNOWN_CONTACTS_FILE="$HOME/.openclaw/integrations/known-contacts.txt"
+if [ ! -f "$KNOWN_CONTACTS_FILE" ]; then
+    mkdir -p "$(dirname "$KNOWN_CONTACTS_FILE")"
+    cat > "$KNOWN_CONTACTS_FILE" << 'EOF'
+# Known/trusted email contacts — shared across all email integrations
+# One email address per line. Lines starting with # are ignored.
+# Both Microsoft (Outlook) and Gmail pollers read from this file.
+# Emails from these addresses get body previews in *_INBOX.md.
+# All other senders → metadata only in *_EXTERNAL.md (no body, no injection risk).
+stuart.hobin@croydemedical.co.uk
+emily.thomas@croydemedical.co.uk
+john@reveela.com
+ed.patchett@7thsense.one
+johnjamesmarsh@hotmail.com
+andy.barrett@sjpp.co.uk
+olivia.collington@collingtonwinter.co.uk
+EOF
+    info "Created shared known-contacts.txt"
+else
+    info "known-contacts.txt already exists — not overwritten"
+fi
+
+# Create per-provider last-seen state files (provider-specific, not shared)
+LAST_SEEN_MS="$HOME/.openclaw/workspace/memory/last-seen-emails-microsoft.md"
+if [ ! -f "$LAST_SEEN_MS" ]; then
+    mkdir -p "$(dirname "$LAST_SEEN_MS")"
+    cat > "$LAST_SEEN_MS" << 'EOF'
+# Last Seen Emails — Microsoft (Known Contacts)
 # Format: contact-email | last-seen-timestamp (ISO 8601)
 stuart.hobin@croydemedical.co.uk | 
 emily.thomas@croydemedical.co.uk | 
@@ -424,9 +449,42 @@ johnjamesmarsh@hotmail.com |
 andy.barrett@sjpp.co.uk | 
 olivia.collington@collingtonwinter.co.uk | 
 EOF
-    info "Created last-seen-emails.md template"
+    info "Created last-seen-emails-microsoft.md template"
 else
-    info "last-seen-emails.md already exists — not overwritten"
+    info "last-seen-emails-microsoft.md already exists — not overwritten"
+fi
+
+LAST_SEEN_GM="$HOME/.openclaw/workspace/memory/last-seen-emails-gmail.md"
+if [ ! -f "$LAST_SEEN_GM" ]; then
+    mkdir -p "$(dirname "$LAST_SEEN_GM")"
+    cat > "$LAST_SEEN_GM" << 'EOF'
+# Last Seen Emails — Gmail (Known Contacts)
+# Format: contact-email | last-seen-date-header
+stuart.hobin@croydemedical.co.uk | 
+emily.thomas@croydemedical.co.uk | 
+john@reveela.com | 
+ed.patchett@7thsense.one | 
+johnjamesmarsh@hotmail.com | 
+andy.barrett@sjpp.co.uk | 
+olivia.collington@collingtonwinter.co.uk | 
+EOF
+    info "Created last-seen-emails-gmail.md template"
+else
+    info "last-seen-emails-gmail.md already exists — not overwritten"
+fi
+
+# Gmail poller setup note
+GMAIL_CREDS="$HOME/.openclaw/integrations/google/gmail-credentials.json"
+if [ ! -f "$GMAIL_CREDS" ]; then
+    warn "Gmail poller not yet authorised. To enable:"
+    warn "  1. Go to console.cloud.google.com → enable Gmail API"
+    warn "  2. Create OAuth 2.0 Client ID (Desktop app)"
+    warn "  3. Download credentials JSON → $GMAIL_CREDS"
+    warn "  4. pip3 install google-auth google-auth-oauthlib google-api-python-client"
+    warn "  5. Run once manually: python3 $INTEGRATIONS_DST/google/gmail_poll.py"
+    warn "     (opens browser for consent, saves token automatically)"
+else
+    info "Gmail credentials file found — poller ready to run"
 fi
 
 # Run config drift check immediately after deploy
