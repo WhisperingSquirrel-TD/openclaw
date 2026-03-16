@@ -436,9 +436,15 @@ fi
 
 # Create per-provider last-seen state files (provider-specific, not shared)
 LAST_SEEN_MS="$HOME/.openclaw/workspace/memory/last-seen-emails-microsoft.md"
+LAST_SEEN_OLD="$HOME/.openclaw/workspace/memory/last-seen-emails.md"
 if [ ! -f "$LAST_SEEN_MS" ]; then
     mkdir -p "$(dirname "$LAST_SEEN_MS")"
-    cat > "$LAST_SEEN_MS" << 'EOF'
+    if [ -f "$LAST_SEEN_OLD" ]; then
+        # Migrate existing state so the poller doesn't re-alert on already-seen emails
+        cp "$LAST_SEEN_OLD" "$LAST_SEEN_MS"
+        info "Migrated last-seen-emails.md → last-seen-emails-microsoft.md"
+    else
+        cat > "$LAST_SEEN_MS" << 'EOF'
 # Last Seen Emails — Microsoft (Known Contacts)
 # Format: contact-email | last-seen-timestamp (ISO 8601)
 stuart.hobin@croydemedical.co.uk | 
@@ -449,7 +455,8 @@ johnjamesmarsh@hotmail.com |
 andy.barrett@sjpp.co.uk | 
 olivia.collington@collingtonwinter.co.uk | 
 EOF
-    info "Created last-seen-emails-microsoft.md template"
+        info "Created last-seen-emails-microsoft.md template"
+    fi
 else
     info "last-seen-emails-microsoft.md already exists — not overwritten"
 fi
