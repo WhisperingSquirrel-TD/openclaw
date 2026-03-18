@@ -501,6 +501,89 @@ if [ -f "$INTEGRATIONS_DST/config-check/check.py" ]; then
     python3 "$INTEGRATIONS_DST/config-check/check.py" || true
 fi
 
+# Step 11c: Email poller systemd user services
+# These run the Python pollers as managed background services — they survive
+# reboots, restart automatically on failure, and never require exec.run or
+# manual intervention to keep email feeds current.
+warn "Setting up email poller services..."
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+mkdir -p "$SYSTEMD_USER_DIR"
+PYTHON3_BIN="$(which python3 2>/dev/null || echo /usr/bin/python3)"
+MS_POLLER="$HOME/.openclaw/integrations/microsoft/poll.py"
+GM_POLLER="$HOME/.openclaw/integrations/google/gmail_poll.py"
+MS_LOG="$HOME/.openclaw/workspace/memory/poll-microsoft-log.txt"
+GM_LOG="$HOME/.openclaw/workspace/memory/poll-gmail-log.txt"
+
+cat > "$SYSTEMD_USER_DIR/openclaw-email-microsoft.service" << SVCEOF
+[Unit]
+Description=OpenClaw Microsoft Email Poller
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=$PYTHON3_BIN $MS_POLLER
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:$MS_LOG
+StandardError=append:$MS_LOG
+
+[Install]
+WantedBy=default.target
+SVCEOF
+
+cat > "$SYSTEMD_USER_DIR/openclaw-email-gmail.service" << SVCEOF
+[Unit]
+Description=OpenClaw Gmail Email Poller
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=$PYTHON3_BIN $GM_POLLER
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:$GM_LOG
+StandardError=append:$GM_LOG
+
+[Install]
+WantedBy=default.target
+SVCEOF
+
+# Allow user services to start at boot even without an active login session
+loginctl enable-linger "$USER" 2>/dev/null || true
+
+systemctl --user daemon-reload
+
+# Microsoft poller — start if token exists (auth already done)
+MS_TOKEN="$HOME/.openclaw/integrations/microsoft/token.json"
+systemctl --user enable openclaw-email-microsoft.service 2>/dev/null || true
+if [ -f "$MS_TOKEN" ]; then
+    systemctl --user restart openclaw-email-microsoft.service && \
+        info "Microsoft email poller running (systemd service)" || \
+        warn "Microsoft email poller failed to start — check $MS_LOG"
+else
+    warn "Microsoft email poller enabled but not started — token.json missing, run auth first"
+fi
+
+# Gmail poller — start only if both credentials AND token exist
+GM_CREDS="$HOME/.openclaw/integrations/google/gmail-credentials.json"
+GM_TOKEN="$HOME/.openclaw/integrations/google/gmail-token.json"
+systemctl --user enable openclaw-email-gmail.service 2>/dev/null || true
+if [ -f "$GM_CREDS" ] && [ -f "$GM_TOKEN" ]; then
+    systemctl --user restart openclaw-email-gmail.service && \
+        info "Gmail email poller running (systemd service)" || \
+        warn "Gmail email poller failed to start — check $GM_LOG"
+elif [ -f "$GM_CREDS" ]; then
+    warn "Gmail poller enabled but not started — run it once manually to complete OAuth"
+else
+    info "Gmail poller not started (credentials not configured yet)"
+fi
+
 # Step 12a: Set audit log append-only (tamper protection)
 AUDIT_DIR="$HOME/.openclaw/audit"
 if [ -d "$AUDIT_DIR" ]; then
