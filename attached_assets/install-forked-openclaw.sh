@@ -494,6 +494,24 @@ else
     info "Gmail credentials file found — poller ready to run"
 fi
 
+# Migrate old Outlook feed file names → Microsoft
+# The poller now writes MICROSOFT_INBOX.md / MICROSOFT_EXTERNAL.md.
+# If the old OUTLOOK_*.md files still exist, rename them so content isn't lost
+# and SOUL.md references (once updated) resolve immediately.
+MEMORY_DIR="$HOME/.openclaw/workspace/memory"
+for OLD_NAME in OUTLOOK_INBOX OUTLOOK_EXTERNAL; do
+    NEW_NAME="${OLD_NAME/OUTLOOK/MICROSOFT}"
+    OLD_FILE="$MEMORY_DIR/${OLD_NAME}.md"
+    NEW_FILE="$MEMORY_DIR/${NEW_NAME}.md"
+    if [ -f "$OLD_FILE" ] && [ ! -f "$NEW_FILE" ]; then
+        mv "$OLD_FILE" "$NEW_FILE"
+        info "Migrated ${OLD_NAME}.md → ${NEW_NAME}.md"
+    elif [ -f "$OLD_FILE" ] && [ -f "$NEW_FILE" ]; then
+        rm "$OLD_FILE"
+        info "Removed stale ${OLD_NAME}.md (${NEW_NAME}.md already exists)"
+    fi
+done
+
 # Run config drift check immediately after deploy
 if [ -f "$INTEGRATIONS_DST/config-check/check.py" ]; then
     echo ""
