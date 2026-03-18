@@ -106,6 +106,11 @@ export function closeApprovalWindow(): void {
   drainAllResolvers(false);
 }
 
+export function rejectPendingApprovals(): void {
+  log.info("TOTP: invalid code — rejecting pending approvals immediately");
+  drainAllResolvers(false);
+}
+
 export function waitForApprovalWindow(
   action: string,
   timeoutMs: number,

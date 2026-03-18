@@ -6,6 +6,7 @@ import {
   startApprovalWindow,
   getWindowStatus,
   closeApprovalWindow,
+  rejectPendingApprovals,
 } from "../../infra/totp/totp-session.js";
 import type { CommandHandler } from "./commands-types.js";
 
@@ -155,9 +156,10 @@ export const handleTotpCodeInput: CommandHandler = async (params, allowTextComma
 
   const valid = verifyTotpCode(secret, normalized);
   if (!valid) {
+    rejectPendingApprovals();
     return {
       shouldContinue: false,
-      reply: { text: "❌ Invalid code. Try again." },
+      reply: { text: "❌ Invalid code — action cancelled." },
     };
   }
 
