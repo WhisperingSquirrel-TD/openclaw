@@ -116,6 +116,11 @@ def fetch_emails(access_token: str, folder: str = "inbox", top: int = MAX_RESULT
         "$select": "id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead",
     }
     resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"}, params=params, timeout=15)
+    if resp.status_code == 429:
+        retry_after = int(resp.headers.get("Retry-After", "60"))
+        log(f"Rate limited by Microsoft Graph — backing off {retry_after}s")
+        time.sleep(retry_after)
+        resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"}, params=params, timeout=15)
     resp.raise_for_status()
     return resp.json().get("value", [])
 

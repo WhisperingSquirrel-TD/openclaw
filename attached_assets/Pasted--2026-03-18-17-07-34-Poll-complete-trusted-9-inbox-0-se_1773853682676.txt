@@ -1,0 +1,15 @@
+[2026-03-18 17:07:34] Poll complete — trusted: 9 inbox / 0 sent, external: 16 inbox
+[2026-03-18 17:07:34] Poll error: 429 Client Error: Too Many Requests for url: https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?%24top=25&%24orderby=receivedDateTime+desc&%24select=id%2Csubject%2Cfrom%2CtoRecipients%2CreceivedDateTime%2CbodyPreview%2CisRead
+[2026-03-18 17:07:34] Poll error: 429 Client Error: Too Many Requests for url: https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?%24top=25&%24orderby=receivedDateTime+desc&%24select=id%2Csubject%2Cfrom%2CtoRecipients%2CreceivedDateTime%2CbodyPreview%2CisRead
+[2026-03-18 17:07:34] Poll error: 429 Client Error: Too Many Requests for url: https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?%24top=25&%24orderby=receivedDateTime+desc&%24select=id%2Csubject%2Cfrom%2CtoRecipients%2CreceivedDateTime%2CbodyPreview%2CisRead
+[2026-03-18 17:07:35] Poll complete — trusted: 9 inbox / 0 sent, external: 16 inbox
+[2026-03-18 17:07:35] Poll complete — trusted: 9 inbox / 0 sent, external: 16 inbox
+[2026-03-18 17:07:35] Poll error: 429 Client Error: Too Many Requests for url: https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages?%24top=25&%24orderby=receivedDateTime+desc&%24select=id%2Csubject%2Cfrom%2CtoRecipients%2CreceivedDateTime%2CbodyPreview%2CisRead
+[2026-03-18 17:07:35] Poll complete — trusted: 9 inbox / 0 sent, external: 16 inbox
+[2026-03-18 17:07:35] Poll complete — trusted: 9 inbox / 0 sent, external: 16 inbox
+[2026-03-18 17:07:35] Poll complete — trusted: 9 inbox / 0 sent, external: 16 inbox
+[2026-03-18 17:07:35] Poll complete — trusted: 9 inbox / 0 sent, external: 16 inbox
+[2026-03-18 17:07:35] Poll error: 429 Client Error: Too Many Requests for url: https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages?%24top=25&%24orderby=receivedDateTime+desc&%24select=id%2Csubject%2Cfrom%2CtoRecipients%2CreceivedDateTime%2CbodyPreview%2CisRead
+[2026-03-18 17:07:35] Poll error: 429 Client Error: Too Many Requests for url: https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages?%24top=25&%24orderby=receivedDateTime+desc&%24select=id%2Csubject%2Cfrom%2CtoRecipients%2CreceivedDateTime%2CbodyPreview%2CisRead
+[2026-03-18 17:07:35] Poll complete — trusted: 9 inbox / 0 sent, external: 16 inbox
+[2026-03-18 17:07:35] Poll complete — trusted: 9 inbox / 0 sent, external: 16 inbox
