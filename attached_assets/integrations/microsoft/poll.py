@@ -53,11 +53,37 @@ def log(msg: str):
     print(line, end="")
 
 
+def _normalise_msal_cache(cache: dict) -> dict:
+    """Convert MSAL token cache (PascalCase keys) to the simple flat format."""
+    at_list  = list(cache.get("AccessToken",  {}).values())
+    rt_list  = list(cache.get("RefreshToken", {}).values())
+    app_list = list(cache.get("AppMetadata",  {}).values())
+    if not rt_list:
+        raise ValueError("No RefreshToken entry found in MSAL cache")
+    at  = at_list[0]  if at_list  else {}
+    rt  = rt_list[0]
+    app = app_list[0] if app_list else {}
+    return {
+        "client_id":     at.get("client_id") or app.get("client_id", ""),
+        "client_secret": "",
+        "tenant_id":     at.get("realm", "common"),
+        "refresh_token": rt["secret"],
+        "access_token":  at.get("secret", ""),
+    }
+
+
 def load_token() -> dict:
     if not TOKEN_FILE.exists():
         raise FileNotFoundError(f"Token file not found: {TOKEN_FILE}\nRun the Microsoft auth flow first.")
     with open(TOKEN_FILE) as f:
-        return json.load(f)
+        data = json.load(f)
+    if "RefreshToken" in data and "AccessToken" in data:
+        simple = _normalise_msal_cache(data)
+        with open(TOKEN_FILE, "w") as f:
+            json.dump(simple, f, indent=2)
+        log("Converted MSAL token cache to simple format")
+        return simple
+    return data
 
 
 def refresh_access_token(token_data: dict) -> str:
