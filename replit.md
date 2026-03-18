@@ -266,6 +266,55 @@ Lessons from applying upstream changes — follow this checklist every sync.
 
 ---
 
+## Key File Locations on the Pi
+
+### Email integration
+| File | Purpose |
+|---|---|
+| `~/.openclaw/integrations/known-contacts.txt` | Shared trusted contacts list — read by both Microsoft and Gmail pollers. One email per line. |
+| `~/.openclaw/integrations/microsoft/poll.py` | Microsoft Graph email poller script |
+| `~/.openclaw/integrations/microsoft/token.json` | Microsoft OAuth token (flat format after first run) |
+| `~/.openclaw/integrations/google/gmail_poll.py` | Gmail email poller script |
+| `~/.openclaw/integrations/google/gmail-credentials.json` | Gmail OAuth app credentials (from Google Cloud Console) |
+| `~/.openclaw/integrations/google/gmail-token.json` | Gmail OAuth token (delete and re-run poller to re-auth) |
+
+### Feed files (read by L1 via SOUL.md)
+| File | Purpose |
+|---|---|
+| `~/.openclaw/workspace/memory/MICROSOFT_INBOX.md` | Trusted Microsoft inbox summary |
+| `~/.openclaw/workspace/memory/MICROSOFT_EXTERNAL.md` | External/unknown Microsoft inbox |
+| `~/.openclaw/workspace/memory/GMAIL_INBOX.md` | Trusted Gmail inbox summary |
+| `~/.openclaw/workspace/memory/GMAIL_EXTERNAL.md` | External/unknown Gmail inbox |
+
+### Poll logs (debug here first when feeds go stale)
+| File | Purpose |
+|---|---|
+| `~/.openclaw/workspace/memory/poll-microsoft-log.txt` | Microsoft poller output — check for auth errors, poll complete lines |
+| `~/.openclaw/workspace/memory/poll-gmail-log.txt` | Gmail poller output — check for `invalid_grant`, poll complete lines |
+
+### Systemd services
+| Service | Purpose |
+|---|---|
+| `~/.config/systemd/user/openclaw-email-microsoft.service` | Manages Microsoft poller — auto-restarts on failure, starts on boot |
+| `~/.config/systemd/user/openclaw-email-gmail.service` | Manages Gmail poller — only starts if both credential and token files exist |
+
+### Security & config
+| File | Purpose |
+|---|---|
+| `~/.openclaw/openclaw.json` | Main gateway config (locked with `chattr +i`) |
+| `~/.openclaw/audit/outbound-audit.jsonl` | Append-only outbound message audit log |
+| `~/.openclaw/totp/totp-secret.enc` | Encrypted TOTP secret (locked with `chattr +i`) |
+| `/mnt/l1-secure/SOUL.md` | L1 personality and context file — edit with `nano /mnt/l1-secure/SOUL.md` |
+| `~/l1-hashes.txt` | SHA-256 integrity hashes of secure files — regenerated on every install |
+
+### Google Tasks (WhatsApp watch actions)
+| File | Purpose |
+|---|---|
+| `~/.openclaw/oauth/google/credentials.json` | Google OAuth app credentials (shared with Tasks + older Gmail setup) |
+| `~/.openclaw/oauth/google/tasks-token.json` | Google Tasks OAuth token (separate from Gmail token) |
+
+---
+
 ## Upstream Sync
 Fork base: `d911b02` (2026-02-27). Last synced: **2026-03-08** (upstream commit `d15b6af7`, version 2026.3.8).
 - 2,395 files synced from upstream (777 new, 1618 modified)
