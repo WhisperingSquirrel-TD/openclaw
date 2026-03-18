@@ -61,8 +61,9 @@ def load_token() -> dict:
 
 
 def refresh_access_token(token_data: dict) -> str:
+    tenant = token_data.get("tenant_id", "common")
     resp = requests.post(
-        f"https://login.microsoftonline.com/{token_data['tenant_id']}/oauth2/v2.0/token",
+        f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
         data={
             "client_id":     token_data["client_id"],
             "client_secret": token_data.get("client_secret", ""),
