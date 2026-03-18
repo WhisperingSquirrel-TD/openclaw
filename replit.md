@@ -220,6 +220,52 @@ The audit log (`<state-dir>/audit/outbound-audit.jsonl`) is:
 - Protected by the exec denylist (agent cannot reference the file in exec commands)
 - The install script additionally sets `chattr +a` on the audit log and `chattr +i` on TOTP secret files
 
+## Upstream Sync Playbook
+Lessons from applying upstream changes — follow this checklist every sync.
+
+### Before merging
+- **Never overwrite these 5 files from upstream** — they contain our fork-specific logic and upstream versions are incompatible:
+  - `src/channels/plugins/actions/discord.ts`
+  - `src/channels/plugins/actions/signal.ts`
+  - `src/channels/plugins/actions/telegram.ts`
+  - `src/channels/plugins/agent-tools/whatsapp-login.ts`
+  - `src/line/accounts.ts`
+- Check if upstream has added new build scripts. Any new `scripts/*.mjs` step that upstream wires into `package.json build` must be reviewed — it may reference upstream-only modules that don't exist in our fork. Trim `scripts/lib/plugin-sdk-entrypoints.json` accordingly.
+
+### After merging — build checks
+- **Plugin manifests**: `tsdown` does NOT copy `openclaw.plugin.json` files. The `scripts/copy-plugin-manifests.mjs` step must remain in the `build` and `build:strict-smoke` scripts in `package.json`. If plugin loader says "plugin not found" at startup, this step was dropped.
+- **`root-alias.cjs`**: Must not be deleted. It is a CJS-to-ESM shim for legacy plugin `require()` support and is not captured by upstream tarballs.
+- **`manage-package-manager-versions=false`** in `.npmrc`: Must never be removed.
+- Run `pnpm run build` and verify the dist file count is comparable to last sync (~600 files). A large drop means entry points were lost.
+
+### Background services (Pi)
+- Python pollers must run as **systemd user services**, not bare background processes. They will not survive a Pi reboot or openclaw restart otherwise. The install script creates `openclaw-email-microsoft` and `openclaw-email-gmail` services automatically.
+- `loginctl enable-linger $USER` is required so user services start at boot without a login session. The install script applies this.
+- If a service shows `inactive (dead)` after install, check whether credentials/token files exist — the services are intentionally not started until auth is complete.
+
+### Microsoft OAuth token format
+- The Microsoft auth library (MSAL) stores tokens in PascalCase format: `AccessToken`, `RefreshToken`, `AppMetadata`. Our poller expects a flat format: `access_token`, `refresh_token`, `tenant_id`, `client_id`.
+- `poll.py` auto-detects and converts the MSAL cache format on first load, writing back a simple flat file. No manual conversion needed on new installs.
+- If `tenant_id` is missing, default to `"common"` — works for personal Microsoft accounts.
+- Microsoft Graph API returns `429 Too Many Requests` when polled too rapidly after a restart (multiple restart cycles cause burst). The poller handles this by reading the `Retry-After` header and waiting before retrying.
+
+### Google OAuth tokens
+- Gmail tokens expire and can be revoked. If the poller logs `invalid_grant`, delete `gmail-token.json` and re-run the poller manually to trigger a fresh OAuth flow.
+- Credential file naming: the install script expects `gmail-credentials.json` and `gmail-token.json`. Older setups may have `credentials.json` / `token.json` — copy and rename if needed.
+- The Google Tasks integration (for WhatsApp watch actions) uses a separate token at `~/.openclaw/oauth/google/tasks-token.json` — different from Gmail.
+
+### TOTP behaviour
+- The TOTP wait window is **2 minutes** from when the code is requested. Once a valid code is accepted, the approval window is **5 minutes** by default. L1's SOUL.md should reflect this so it doesn't misinform the user about timing.
+- Invalid codes now immediately cancel any pending approval request (`rejectPendingApprovals`) — but only if there is an active pending request. If there is none (e.g., a replayed old Telegram message at startup), the rejection is a no-op so L1 is not affected.
+- Email polling is **never** a TOTP-gated action. If L1 tries to use `exec.run` to refresh email feeds, that is wrong — the pollers run as systemd services and self-recover. SOUL.md should make this explicit.
+
+### After every install on the Pi
+- Check `systemctl --user status openclaw-email-microsoft` and `openclaw-email-gmail` — both should show `active (running)`.
+- Check `tail ~/.openclaw/workspace/memory/poll-microsoft-log.txt` and `poll-gmail-log.txt` — should show `Poll complete` lines.
+- If feeds are stale: check logs for auth errors first (expired token), then check service status.
+
+---
+
 ## Upstream Sync
 Fork base: `d911b02` (2026-02-27). Last synced: **2026-03-08** (upstream commit `d15b6af7`, version 2026.3.8).
 - 2,395 files synced from upstream (777 new, 1618 modified)
@@ -286,7 +332,9 @@ All files unique to our fork (not present in upstream):
 - `attached_assets/install-forked-openclaw.sh` — Pi install/upgrade script (self-updating: re-execs from repo copy if newer)
 - `attached_assets/integrations/config-check/check.py` — Config drift detector: verifies exec.host=gateway, totpWindowMinutes=5, telegram.dmPolicy=allowlist, whatsapp.mode=watch. Logs to `~/.openclaw/workspace/memory/config-alerts.log`. Run automatically at end of install.
 - `attached_assets/integrations/docx-converter/convert.py` — Watches `~/.openclaw/media/inbound/` for .docx files, converts to .txt via LibreOffice headless. Logs to `workspace/memory/docx-conversions.log`.
-- `attached_assets/integrations/microsoft/poll.py` — Microsoft Graph email poller: inbox + sent items, per-contact state tracking in `last-seen-emails.md`, immediate alert file on new email from known contact, shorter poll interval for known contacts (2min vs 5min general).
+- `attached_assets/integrations/microsoft/poll.py` — Microsoft Graph email poller: inbox + sent items, per-contact state tracking in `last-seen-emails.md`, immediate alert file on new email from known contact, shorter poll interval for known contacts (2min vs 5min general). Auto-detects and converts MSAL token cache format. Handles 429 rate limiting with `Retry-After` backoff.
+- `attached_assets/integrations/google/gmail_poll.py` — Gmail email poller: identical guardrails to Microsoft poller (prompt-injection headers, known-contacts.txt filtering). Writes to `GMAIL_INBOX.md` / `GMAIL_EXTERNAL.md`. Uses Google OAuth2 (`gmail-credentials.json` + `gmail-token.json`).
+- `scripts/copy-plugin-manifests.mjs` — Copies `openclaw.plugin.json` from each `extensions/*/` source directory to the corresponding `dist/extensions/*/` output directory. Run as part of `pnpm build` and `build:strict-smoke`. Without this, the plugin loader cannot find plugins at startup.
 
 ## WhatsApp Watch Action Scanner
 Periodically scans WhatsApp watch-mode transcripts for actionable items using a cheap AI model, then surfaces them as Telegram inline keyboard cards.
