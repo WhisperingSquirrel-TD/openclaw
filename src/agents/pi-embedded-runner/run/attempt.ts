@@ -118,7 +118,7 @@ import {
   buildEmbeddedSystemPrompt,
   createSystemPromptOverride,
 } from "../system-prompt.js";
-import { dropThinkingBlocks } from "../thinking.js";
+import { dropThinkingBlocks, dropOlderThinkingBlocks } from "../thinking.js";
 import { collectAllowedToolNames } from "../tool-name-allowlist.js";
 import { installToolResultContextGuard } from "../tool-result-context-guard.js";
 import { splitSdkTools } from "../tool-split.js";
@@ -1305,6 +1305,32 @@ export async function runEmbeddedAttempt(
             return inner(model, context, options);
           }
           const sanitized = dropThinkingBlocks(messages as unknown as AgentMessage[]) as unknown;
+          if (sanitized === messages) {
+            return inner(model, context, options);
+          }
+          const nextContext = {
+            ...(context as unknown as Record<string, unknown>),
+            messages: sanitized,
+          } as unknown;
+          return inner(model, nextContext as typeof context, options);
+        };
+      }
+
+      // Anthropic requires the latest assistant turn's thinking blocks to be passed back
+      // verbatim. Older thinking blocks from previous turns are optional — if they have
+      // been altered by compaction or pruning, Anthropic rejects the request. Strip them
+      // from all turns except the most recent assistant message.
+      if (transcriptPolicy.dropOlderThinkingBlocks) {
+        const inner = activeSession.agent.streamFn;
+        activeSession.agent.streamFn = (model, context, options) => {
+          const ctx = context as unknown as { messages?: unknown };
+          const messages = ctx?.messages;
+          if (!Array.isArray(messages)) {
+            return inner(model, context, options);
+          }
+          const sanitized = dropOlderThinkingBlocks(
+            messages as unknown as AgentMessage[],
+          ) as unknown;
           if (sanitized === messages) {
             return inner(model, context, options);
           }
