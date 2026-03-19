@@ -52,6 +52,7 @@ export function dropThinkingBlocks(messages: AgentMessage[]): AgentMessage[] {
   return touched ? out : messages;
 }
 
+// Matches both thinking and redacted_thinking block types.
 function isThinkingBlock(block: unknown): boolean {
   if (!block || typeof block !== "object") return false;
   const t = (block as { type?: unknown }).type;
