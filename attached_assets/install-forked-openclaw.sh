@@ -657,13 +657,20 @@ if [ -d "$TOTP_DIR" ]; then
     info "TOTP secret files protected"
 fi
 
-# Step 12b: Restart L1 — kill any existing process first so new code takes effect
+# Step 12b: Restart L1 — prefer the systemd gateway service; fall back to l1-start.sh
 echo ""
 warn "Restarting L1..."
-pkill -f "node.*openclaw" 2>/dev/null || true
-pkill -f "ts-node.*openclaw" 2>/dev/null || true
-sleep 2
-~/l1-start.sh
+if systemctl --user is-enabled openclaw-gateway.service 2>/dev/null | grep -q "enabled\|static"; then
+    systemctl --user restart openclaw-gateway.service && \
+        info "openclaw-gateway.service restarted — new code is live" || \
+        warn "Failed to restart openclaw-gateway.service"
+else
+    # Fallback: kill any stale node process then use the start script
+    pkill -f "node.*openclaw" 2>/dev/null || true
+    pkill -f "ts-node.*openclaw" 2>/dev/null || true
+    sleep 2
+    ~/l1-start.sh
+fi
 
 # Step 13: Update integrity hashes
 md5sum /mnt/l1-secure/*.md > ~/l1-hashes.txt 2>/dev/null || true
