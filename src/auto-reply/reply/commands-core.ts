@@ -34,6 +34,7 @@ import {
 } from "./commands-session.js";
 import { handleSubagentsCommand } from "./commands-subagents.js";
 import {
+  handleTotpPreGate,
   handleTotpCodeInput,
   handleTotpSetupCommand,
   handleTotpStatusCommand,
@@ -176,6 +177,10 @@ function resolveSessionEntryForHookSessionKey(
 export async function handleCommands(params: HandleCommandsParams): Promise<CommandHandlerResult> {
   if (HANDLERS === null) {
     HANDLERS = [
+      // Pre-gate fires first: if approvalMode is totp and no window is active,
+      // it immediately prompts for a TOTP code and halts the message before L1
+      // ever starts reasoning. This ensures the gate is open before any work begins.
+      handleTotpPreGate,
       // TOTP code input must run early — it matches plain 6-digit numbers before
       // any other handler sees them. Setup/status/lock are slash commands and
       // can sit anywhere, but keeping them together aids readability.

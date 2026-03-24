@@ -8,6 +8,7 @@ import {
   closeApprovalWindow,
   rejectPendingApprovals,
   hasPendingApprovals,
+  isApprovalWindowActive,
 } from "../../infra/totp/totp-session.js";
 import type { CommandHandler } from "./commands-types.js";
 
@@ -113,6 +114,42 @@ export const handleTotpLockCommand: CommandHandler = async (params, allowTextCom
   return {
     shouldContinue: false,
     reply: { text: "🔒 Approval window closed. All gated actions now require a fresh code." },
+  };
+};
+
+/**
+ * Pre-gate handler — fires as the very first step on any plain message from an
+ * authorised sender when approvalMode is "totp" and no approval window is active.
+ * Immediately prompts for a TOTP code and halts the message so L1 never starts
+ * reasoning until the gate is open. The user sends their code, gets ✅ Approved,
+ * then resends their original message — which passes straight through to L1.
+ */
+export const handleTotpPreGate: CommandHandler = async (params, allowTextCommands) => {
+  if (!allowTextCommands) return null;
+  if (!params.command.isAuthorizedSender) return null;
+
+  const cfg = loadConfig();
+  const approvalMode = cfg.agents?.defaults?.approvalMode;
+  if (approvalMode !== "totp") return null;
+
+  // Already open — nothing to do.
+  if (isApprovalWindowActive()) return null;
+
+  const normalized = params.command.commandBodyNormalized.trim();
+
+  // Let TOTP codes and slash commands pass through to their own handlers.
+  if (/^\d{6}$/.test(normalized)) return null;
+  if (normalized.startsWith("/")) return null;
+
+  // No active window and this is a real message — ask for TOTP immediately.
+  logVerbose("TOTP pre-gate: no active window, prompting for code before dispatching to L1");
+  return {
+    shouldContinue: false,
+    reply: {
+      text:
+        "🔐 Send your TOTP code to open the approval gate.\n" +
+        "Once you see ✅ Approved, resend your message and I'll get straight to it.",
+    },
   };
 };
 
