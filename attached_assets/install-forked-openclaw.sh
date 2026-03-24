@@ -530,11 +530,21 @@ PYTHON3_BIN="$(which python3 2>/dev/null || echo /usr/bin/python3)"
 MS_POLLER="$HOME/.openclaw/integrations/microsoft/poll.py"
 GM_POLLER="$HOME/.openclaw/integrations/google/gmail_poll.py"
 MS_LOG="$HOME/.openclaw/workspace/memory/poll-microsoft-log.txt"
+AS_LOG="$HOME/.openclaw/workspace/memory/poll-assistant-log.txt"
 GM_LOG="$HOME/.openclaw/workspace/memory/poll-gmail-log.txt"
+
+# Backwards-compat: migrate old flat token.json → token-microsoft.json so the
+# parameterised poller (--account microsoft) finds its token automatically.
+OLD_MS_TOKEN="$HOME/.openclaw/integrations/microsoft/token.json"
+NEW_MS_TOKEN="$HOME/.openclaw/integrations/microsoft/token-microsoft.json"
+if [ -f "$OLD_MS_TOKEN" ] && [ ! -f "$NEW_MS_TOKEN" ]; then
+    cp "$OLD_MS_TOKEN" "$NEW_MS_TOKEN"
+    info "Migrated token.json → token-microsoft.json for multi-account support"
+fi
 
 cat > "$SYSTEMD_USER_DIR/openclaw-email-microsoft.service" << SVCEOF
 [Unit]
-Description=OpenClaw Microsoft Email Poller
+Description=OpenClaw Microsoft Email Poller (personal)
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
@@ -542,11 +552,31 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=$PYTHON3_BIN $MS_POLLER
+ExecStart=$PYTHON3_BIN $MS_POLLER --account microsoft --label "Tom Outlook"
 Restart=on-failure
 RestartSec=60
 StandardOutput=append:$MS_LOG
 StandardError=append:$MS_LOG
+
+[Install]
+WantedBy=default.target
+SVCEOF
+
+cat > "$SYSTEMD_USER_DIR/openclaw-email-assistant.service" << SVCEOF
+[Unit]
+Description=OpenClaw Microsoft Email Poller (assistant@)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=$PYTHON3_BIN $MS_POLLER --account assistant --label "L1 Assistant"
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:$AS_LOG
+StandardError=append:$AS_LOG
 
 [Install]
 WantedBy=default.target
@@ -577,15 +607,28 @@ loginctl enable-linger "$USER" 2>/dev/null || true
 
 systemctl --user daemon-reload
 
-# Microsoft poller — start if token exists (auth already done)
-MS_TOKEN="$HOME/.openclaw/integrations/microsoft/token.json"
+# Personal Microsoft poller — start if token exists
 systemctl --user enable openclaw-email-microsoft.service 2>/dev/null || true
-if [ -f "$MS_TOKEN" ]; then
+if [ -f "$NEW_MS_TOKEN" ] || [ -f "$OLD_MS_TOKEN" ]; then
     systemctl --user restart openclaw-email-microsoft.service && \
-        info "Microsoft email poller running (systemd service)" || \
-        warn "Microsoft email poller failed to start — check $MS_LOG"
+        info "Microsoft email poller (personal) running" || \
+        warn "Microsoft email poller (personal) failed to start — check $MS_LOG"
 else
-    warn "Microsoft email poller enabled but not started — token.json missing, run auth first"
+    warn "Microsoft poller (personal) enabled but not started — token missing, run auth first"
+fi
+
+# Assistant poller — start only if token-assistant.json exists
+AS_TOKEN="$HOME/.openclaw/integrations/microsoft/token-assistant.json"
+systemctl --user enable openclaw-email-assistant.service 2>/dev/null || true
+if [ -f "$AS_TOKEN" ]; then
+    systemctl --user restart openclaw-email-assistant.service && \
+        info "Microsoft email poller (assistant@) running — writes to ASSISTANT_INBOX.md" || \
+        warn "Microsoft email poller (assistant@) failed to start — check $AS_LOG"
+else
+    warn "Assistant email poller not started — token-assistant.json missing"
+    warn "To enable: authenticate as assistant@stackstoneconsulting.co.uk then copy the token:"
+    warn "  cp <token-from-auth-flow> $AS_TOKEN"
+    warn "  systemctl --user restart openclaw-email-assistant.service"
 fi
 
 # Gmail poller — start only if both credentials AND token exist
