@@ -141,23 +141,58 @@ export const handleTotpPreGate: CommandHandler = async (params, allowTextCommand
   if (isApprovalWindowActive()) return null;
 
   const normalized = params.command.commandBodyNormalized.trim();
+  const lower = normalized.toLowerCase();
 
   // Let TOTP codes and slash commands pass through to their own handlers.
   if (/^\d{6}$/.test(normalized)) return null;
   if (normalized.startsWith("/")) return null;
 
-  // Inject a system note so L1 asks for TOTP as its very first reply,
-  // before doing any work. The message itself still reaches L1 so it
-  // understands the task — it just knows to gate on TOTP first.
-  logVerbose("TOTP pre-gate: no active window, injecting TOTP-first instruction into message");
+  // Only inject the TOTP-first instruction when the message looks like it will
+  // need a gated action (exec.run or message.send). Conversational messages,
+  // questions, and advice requests pass through clean so L1 answers them directly.
+  //
+  // Heuristic: look for action-intent verbs that typically lead to gated tool calls.
+  // False positives (gating a non-action) are harmless; false negatives (missing an
+  // action) fall back to the existing trust gate prompt after L1 starts reasoning.
+  const ACTION_PATTERNS = [
+    /\bsend\b/,           // send email / send message
+    /\breply\b/,          // reply to email / reply to WhatsApp
+    /\brespond\b/,        // respond to
+    /\bforward\b/,        // forward email
+    /\bdraft\b/,          // draft a message/email
+    /\bemail\b/,          // email John / email the team
+    /\bwhatsapp\b/,       // whatsapp someone
+    /\brun\b/,            // run a command / run this script
+    /\bexecute\b/,        // execute
+    /\bschedule\b/,       // schedule a meeting
+    /\badd to\b/,         // add to contacts / add to calendar
+    /\bcreate.*event\b/,  // create a calendar event
+    /\bwrite to\b/,       // write to file
+    /\bsave\b/,           // save this
+    /\bdelete\b/,         // delete something
+    /\bremove\b/,         // remove something
+    /\bupdate.*contact\b/,// update a contact
+    /\bcall\b/,           // call someone (future)
+  ];
+
+  const looksLikeAction = ACTION_PATTERNS.some((re) => re.test(lower));
+  if (!looksLikeAction) {
+    logVerbose("TOTP pre-gate: no action keywords detected, passing message through to L1 unmodified");
+    return null;
+  }
+
+  // Looks like an action — inject a TOTP-first instruction so L1 asks for the
+  // code immediately as its very first reply, before spending time planning or
+  // calling any tools. No resend needed: L1 already has the full task context.
+  logVerbose("TOTP pre-gate: action keywords detected, injecting TOTP-first instruction");
   const original = params.ctx.BodyForAgent ?? params.ctx.Body ?? normalized;
   params.ctx.BodyForAgent =
     `[SYSTEM – TOTP GATE: No approval window is currently active. ` +
-    `Your FIRST response must be ONLY: "🔐 Please send your TOTP code to open the gate." ` +
-    `Do NOT start planning, drafting, or using any tools until the user sends a code and you see ✅ Approved. ` +
-    `Once the window is open, proceed with the task below.]\n\n${original}`;
+    `Your FIRST and ONLY response right now must be: "🔐 Please send your TOTP code to open the gate." ` +
+    `Do NOT plan, draft, analyse, or call any tools first. ` +
+    `Once the user sends a code and you see ✅ Approved, proceed with the task below.]\n\n${original}`;
 
-  return null; // shouldContinue — let L1 handle it with the injected instruction
+  return null; // shouldContinue — L1 gets the message with the injected instruction
 };
 
 export const handleTotpCodeInput: CommandHandler = async (params, allowTextCommands) => {
