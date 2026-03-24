@@ -657,9 +657,12 @@ if [ -d "$TOTP_DIR" ]; then
     info "TOTP secret files protected"
 fi
 
-# Step 12b: Start L1
+# Step 12b: Restart L1 — kill any existing process first so new code takes effect
 echo ""
-warn "Starting L1..."
+warn "Restarting L1..."
+pkill -f "node.*openclaw" 2>/dev/null || true
+pkill -f "ts-node.*openclaw" 2>/dev/null || true
+sleep 2
 ~/l1-start.sh
 
 # Step 13: Update integrity hashes
