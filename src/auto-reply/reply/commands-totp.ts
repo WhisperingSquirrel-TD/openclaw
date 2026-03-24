@@ -149,30 +149,42 @@ export const handleTotpPreGate: CommandHandler = async (params, allowTextCommand
 
   // Only inject the TOTP-first instruction when the message looks like it will
   // need a gated action (exec.run or message.send). Conversational messages,
-  // questions, and advice requests pass through clean so L1 answers them directly.
+  // questions, and read-only requests pass through clean.
   //
-  // Heuristic: look for action-intent verbs that typically lead to gated tool calls.
-  // False positives (gating a non-action) are harmless; false negatives (missing an
-  // action) fall back to the existing trust gate prompt after L1 starts reasoning.
+  // Two-step check:
+  //  1. If the message looks read-only, pass through immediately regardless of other keywords.
+  //  2. Otherwise check for write/send action keywords.
+  //
+  // Note: read-only exec commands (cat, ls, grep, etc.) are now exempt from TOTP
+  // in trust-gate.ts, so there's no need to pre-gate messages that only need reads.
+
+  const READ_ONLY_PATTERNS = [
+    /^(check|read|show|list|what|how many|do i have|any |have i|is there|look at|find|search|get|fetch|pull up|display|view)\b/,
+    /\b(check|read|show|list|look at|view)\b.*\b(email|inbox|mail|messages?|whatsapp)\b/,
+  ];
+  if (READ_ONLY_PATTERNS.some((re) => re.test(lower))) {
+    logVerbose("TOTP pre-gate: read-only request detected, passing through unmodified");
+    return null;
+  }
+
   const ACTION_PATTERNS = [
-    /\bsend\b/,           // send email / send message
-    /\breply\b/,          // reply to email / reply to WhatsApp
-    /\brespond\b/,        // respond to
-    /\bforward\b/,        // forward email
-    /\bdraft\b/,          // draft a message/email
-    /\bemail\b/,          // email John / email the team
-    /\bwhatsapp\b/,       // whatsapp someone
-    /\brun\b/,            // run a command / run this script
-    /\bexecute\b/,        // execute
-    /\bschedule\b/,       // schedule a meeting
-    /\badd to\b/,         // add to contacts / add to calendar
-    /\bcreate.*event\b/,  // create a calendar event
-    /\bwrite to\b/,       // write to file
-    /\bsave\b/,           // save this
-    /\bdelete\b/,         // delete something
-    /\bremove\b/,         // remove something
-    /\bupdate.*contact\b/,// update a contact
-    /\bcall\b/,           // call someone (future)
+    /\bsend\b/,            // send email / send message
+    /\breply\b/,           // reply to email / reply to WhatsApp
+    /\brespond\b/,         // respond to
+    /\bforward\b/,         // forward email
+    /\bdraft\b/,           // draft a message/email (likely to send)
+    /\bemail\s+\w/,        // "email John" / "email the team" (verb form, not noun)
+    /\bwhatsapp\s+\w/,     // "whatsapp someone" (verb form)
+    /\brun\b/,             // run a command / run this script
+    /\bexecute\b/,         // execute
+    /\bschedule\b/,        // schedule a meeting
+    /\badd to\b/,          // add to contacts / add to calendar
+    /\bcreate.*event\b/,   // create a calendar event
+    /\bwrite to\b/,        // write to file
+    /\bsave\b/,            // save this
+    /\bdelete\b/,          // delete something
+    /\bremove\b/,          // remove something
+    /\bupdate.*contact\b/, // update a contact
   ];
 
   const looksLikeAction = ACTION_PATTERNS.some((re) => re.test(lower));
