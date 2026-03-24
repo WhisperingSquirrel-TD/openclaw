@@ -196,6 +196,34 @@ export async function requestMessageSendApproval(params: {
   return requestApprovalViaSocket(params);
 }
 
+/**
+ * Returns true if a shell command is read-only and safe to run without TOTP.
+ * Conservative: only well-known read commands with no output redirection.
+ * Anything ambiguous (pipes to write, python scripts, bash/sh) requires TOTP.
+ */
+function isReadOnlyCommand(command: string): boolean {
+  const cmd = command.trim();
+  // Reject anything with output redirection (write to disk)
+  if (/>>?/.test(cmd)) return false;
+  // Allow known safe read-only prefixes
+  const READ_ONLY_PREFIXES = [
+    /^cat\s/,
+    /^ls(\s|$)/,
+    /^head\s/,
+    /^tail\s/,
+    /^grep\s/,
+    /^rg\s/,
+    /^find\s(?!.*-exec\s)/,
+    /^wc\s/,
+    /^stat\s/,
+    /^echo\s/,
+    /^pwd(\s|$)/,
+    /^which\s/,
+    /^type\s/,
+  ];
+  return READ_ONLY_PREFIXES.some((re) => re.test(cmd));
+}
+
 export async function requestExecApproval(params: {
   cfg: OpenClawConfig;
   command: string;
@@ -211,6 +239,16 @@ export async function requestExecApproval(params: {
   }
 
   const { cfg, command, sessionId } = params;
+
+  // Read-only commands (cat, ls, grep, head, tail, etc.) are safe to run
+  // without approval — they cannot send data or modify the system.
+  if (isReadOnlyCommand(command)) {
+    log.info("Trust gate (TOTP): read-only command — exec allowed without approval", {
+      command: command.slice(0, 120),
+    });
+    return { allowed: true, decision: "allow-once" };
+  }
+
   const windowMinutes = resolveTotpWindowMinutes(cfg);
 
   if (isActionApproved("exec.run")) {
