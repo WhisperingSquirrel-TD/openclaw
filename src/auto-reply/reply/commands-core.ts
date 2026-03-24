@@ -33,6 +33,12 @@ import {
   handleUsageCommand,
 } from "./commands-session.js";
 import { handleSubagentsCommand } from "./commands-subagents.js";
+import {
+  handleTotpCodeInput,
+  handleTotpSetupCommand,
+  handleTotpStatusCommand,
+  handleTotpLockCommand,
+} from "./commands-totp.js";
 import { handleTtsCommands } from "./commands-tts.js";
 import type {
   CommandHandler,
@@ -170,6 +176,13 @@ function resolveSessionEntryForHookSessionKey(
 export async function handleCommands(params: HandleCommandsParams): Promise<CommandHandlerResult> {
   if (HANDLERS === null) {
     HANDLERS = [
+      // TOTP code input must run early — it matches plain 6-digit numbers before
+      // any other handler sees them. Setup/status/lock are slash commands and
+      // can sit anywhere, but keeping them together aids readability.
+      handleTotpCodeInput,
+      handleTotpSetupCommand,
+      handleTotpStatusCommand,
+      handleTotpLockCommand,
       // Plugin commands are processed first, before built-in commands
       handlePluginCommand,
       handleBashCommand,
