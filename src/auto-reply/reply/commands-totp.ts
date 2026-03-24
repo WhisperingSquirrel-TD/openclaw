@@ -120,9 +120,14 @@ export const handleTotpLockCommand: CommandHandler = async (params, allowTextCom
 /**
  * Pre-gate handler — fires as the very first step on any plain message from an
  * authorised sender when approvalMode is "totp" and no approval window is active.
- * Immediately prompts for a TOTP code and halts the message so L1 never starts
- * reasoning until the gate is open. The user sends their code, gets ✅ Approved,
- * then resends their original message — which passes straight through to L1.
+ *
+ * Instead of blocking the message, it injects a system instruction into the
+ * message body that L1 will read. L1 is instructed to ask for the TOTP code as
+ * its very first reply — before planning, drafting, or using any tools. Once the
+ * user sends the code and the window opens, L1 proceeds with the original task.
+ *
+ * Slash commands and 6-digit codes are passed through untouched so their own
+ * handlers can process them normally.
  */
 export const handleTotpPreGate: CommandHandler = async (params, allowTextCommands) => {
   if (!allowTextCommands) return null;
@@ -141,16 +146,18 @@ export const handleTotpPreGate: CommandHandler = async (params, allowTextCommand
   if (/^\d{6}$/.test(normalized)) return null;
   if (normalized.startsWith("/")) return null;
 
-  // No active window and this is a real message — ask for TOTP immediately.
-  logVerbose("TOTP pre-gate: no active window, prompting for code before dispatching to L1");
-  return {
-    shouldContinue: false,
-    reply: {
-      text:
-        "🔐 Send your TOTP code to open the approval gate.\n" +
-        "Once you see ✅ Approved, resend your message and I'll get straight to it.",
-    },
-  };
+  // Inject a system note so L1 asks for TOTP as its very first reply,
+  // before doing any work. The message itself still reaches L1 so it
+  // understands the task — it just knows to gate on TOTP first.
+  logVerbose("TOTP pre-gate: no active window, injecting TOTP-first instruction into message");
+  const original = params.ctx.BodyForAgent ?? params.ctx.Body ?? normalized;
+  params.ctx.BodyForAgent =
+    `[SYSTEM – TOTP GATE: No approval window is currently active. ` +
+    `Your FIRST response must be ONLY: "🔐 Please send your TOTP code to open the gate." ` +
+    `Do NOT start planning, drafting, or using any tools until the user sends a code and you see ✅ Approved. ` +
+    `Once the window is open, proceed with the task below.]\n\n${original}`;
+
+  return null; // shouldContinue — let L1 handle it with the injected instruction
 };
 
 export const handleTotpCodeInput: CommandHandler = async (params, allowTextCommands) => {

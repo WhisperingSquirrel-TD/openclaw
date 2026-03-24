@@ -177,6 +177,10 @@ function resolveSessionEntryForHookSessionKey(
 export async function handleCommands(params: HandleCommandsParams): Promise<CommandHandlerResult> {
   if (HANDLERS === null) {
     HANDLERS = [
+      // Pre-gate injects a TOTP-first instruction into the message body when no
+      // approval window is active. L1 reads the instruction and asks for the code
+      // as its very first reply — the message itself still reaches L1 so no resend needed.
+      handleTotpPreGate,
       // TOTP code input must run early — it matches plain 6-digit numbers before
       // any other handler sees them. Setup/status/lock are slash commands and
       // can sit anywhere, but keeping them together aids readability.
