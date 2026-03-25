@@ -121,15 +121,20 @@ def load_token() -> dict:
 
 def refresh_access_token(token_data: dict) -> str:
     tenant = token_data.get("tenant_id", "common")
+    post_data: dict = {
+        "client_id":     token_data["client_id"],
+        "refresh_token": token_data["refresh_token"],
+        "grant_type":    "refresh_token",
+        "scope":         "Mail.Read offline_access",
+    }
+    # Only include client_secret for confidential clients (public clients must omit it)
+    secret = token_data.get("client_secret", "")
+    if secret:
+        post_data["client_secret"] = secret
+
     resp = requests.post(
         f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
-        data={
-            "client_id":     token_data["client_id"],
-            "client_secret": token_data.get("client_secret", ""),
-            "refresh_token": token_data["refresh_token"],
-            "grant_type":    "refresh_token",
-            "scope":         "Mail.Read offline_access",
-        },
+        data=post_data,
         timeout=15,
     )
     resp.raise_for_status()

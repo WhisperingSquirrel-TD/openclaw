@@ -271,32 +271,38 @@ Lessons from applying upstream changes — follow this checklist every sync.
 ### Email integration
 | File | Purpose |
 |---|---|
-| `~/.openclaw/integrations/known-contacts.txt` | Shared trusted contacts list — read by both Microsoft and Gmail pollers. One email per line. |
-| `~/.openclaw/integrations/microsoft/poll.py` | Microsoft Graph email poller script |
-| `~/.openclaw/integrations/microsoft/token.json` | Microsoft OAuth token (flat format after first run) |
+| `~/.openclaw/integrations/known-contacts.txt` | Shared trusted contacts list — read by all pollers. One email per line. |
+| `~/.openclaw/integrations/microsoft/poll.py` | Microsoft Graph email poller — parameterised, serves both personal and assistant accounts |
+| `~/.openclaw/integrations/microsoft/token-microsoft.json` | Personal Microsoft OAuth token (tom@stackstoneconsulting.co.uk) |
+| `~/.openclaw/integrations/microsoft-l1/token.json` | Assistant account OAuth token (assistant@stackstoneconsulting.co.uk) |
 | `~/.openclaw/integrations/google/gmail_poll.py` | Gmail email poller script |
 | `~/.openclaw/integrations/google/gmail-credentials.json` | Gmail OAuth app credentials (from Google Cloud Console) |
 | `~/.openclaw/integrations/google/gmail-token.json` | Gmail OAuth token (delete and re-run poller to re-auth) |
 
-### Feed files (read by L1 via SOUL.md)
+### Feed files (read by L1 directly via `cat` — no TOTP needed)
 | File | Purpose |
 |---|---|
-| `~/.openclaw/workspace/memory/MICROSOFT_INBOX.md` | Trusted Microsoft inbox summary |
-| `~/.openclaw/workspace/memory/MICROSOFT_EXTERNAL.md` | External/unknown Microsoft inbox |
-| `~/.openclaw/workspace/memory/GMAIL_INBOX.md` | Trusted Gmail inbox summary |
-| `~/.openclaw/workspace/memory/GMAIL_EXTERNAL.md` | External/unknown Gmail inbox |
+| `~/.openclaw/workspace/MICROSOFT_INBOX.md` | Personal Microsoft trusted inbox (tom@) |
+| `~/.openclaw/workspace/MICROSOFT_EXTERNAL.md` | Personal Microsoft external/unknown senders |
+| `~/.openclaw/workspace/ASSISTANT_INBOX.md` | Assistant inbox (assistant@stackstoneconsulting.co.uk) |
+| `~/.openclaw/workspace/ASSISTANT_EXTERNAL.md` | Assistant external/unknown senders |
+| `~/.openclaw/workspace/GMAIL_INBOX.md` | Trusted Gmail inbox summary |
+| `~/.openclaw/workspace/GMAIL_EXTERNAL.md` | External/unknown Gmail inbox |
 
 ### Poll logs (debug here first when feeds go stale)
 | File | Purpose |
 |---|---|
-| `~/.openclaw/workspace/memory/poll-microsoft-log.txt` | Microsoft poller output — check for auth errors, poll complete lines |
-| `~/.openclaw/workspace/memory/poll-gmail-log.txt` | Gmail poller output — check for `invalid_grant`, poll complete lines |
+| `~/.openclaw/workspace/memory/poll-microsoft-log.txt` | Personal Microsoft poller — check for auth errors |
+| `~/.openclaw/workspace/memory/poll-assistant-log.txt` | Assistant poller — check for auth errors |
+| `~/.openclaw/workspace/memory/poll-gmail-log.txt` | Gmail poller — check for `invalid_grant` |
 
 ### Systemd services
-| Service | Purpose |
+| Service | Command |
 |---|---|
-| `~/.config/systemd/user/openclaw-email-microsoft.service` | Manages Microsoft poller — auto-restarts on failure, starts on boot |
-| `~/.config/systemd/user/openclaw-email-gmail.service` | Manages Gmail poller — only starts if both credential and token files exist |
+| `openclaw-email-microsoft.service` | `systemctl --user restart openclaw-email-microsoft.service` |
+| `openclaw-email-assistant.service` | `systemctl --user restart openclaw-email-assistant.service` |
+| `openclaw-email-gmail.service` | `systemctl --user restart openclaw-email-gmail.service` |
+| `openclaw-gateway.service` | `systemctl --user restart openclaw-gateway.service` — restarts main L1 app |
 
 ### Security & config
 | File | Purpose |
