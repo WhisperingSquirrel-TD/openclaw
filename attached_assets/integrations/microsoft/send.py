@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""
+Microsoft Graph API email sender for OpenClaw.
+
+Sends email using a stored OAuth refresh token — no browser or interactive
+auth required. Uses the same token file as poll.py and refreshes automatically.
+
+Usage:
+  send.py <to> <from_name> <subject> <body> [reply_to_message_id]
+
+  to                  Recipient email address
+  from_name           Display name for the From field (e.g. "PA to Tom Dean")
+  subject             Email subject
+  body                Email body (plain text; use \\n for newlines)
+  reply_to_message_id (optional) Microsoft message ID to thread the reply to
+
+Options:
+  --account <slug>    Account to send from (default: looks for token-microsoft.json,
+                      then token.json in the same directory as this script)
+  --token-file <path> Explicit path to token JSON file
+
+Exit codes:
+  0  Success
+  1  Auth error (token missing, expired refresh token)
+  2  Send error (Graph API rejected the request)
+  3  Bad arguments
+"""
+import argparse
+import json
+import sys
+import requests
+from pathlib import Path
+
+STATE_DIR  = Path.home() / ".openclaw"
+GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="OpenClaw Microsoft Graph email sender")
+    p.add_argument("to",      help="Recipient email address")
+    p.add_argument("from_name", help="Display name for the From field")
+    p.add_argument("subject", help="Email subject")
+    p.add_argument("body",    help="Email body (plain text)")
+    p.add_argument("reply_to_message_id", nargs="?", default=None,
+                   help="Microsoft message ID to thread as a reply")
+    p.add_argument("--account",    default=None,
+                   help="Account slug (used to locate token file)")
+    p.add_argument("--token-file", default=None,
+                   help="Explicit path to OAuth token JSON file")
+    return p.parse_args()
+
+
+def resolve_token_file(args: argparse.Namespace) -> Path:
+    if args.token_file:
+        return Path(args.token_file)
+    script_dir = Path(__file__).parent
+    # Try account-specific file first, then generic token.json in same dir
+    candidates = []
+    if args.account:
+        candidates.append(STATE_DIR / f"integrations/microsoft/token-{args.account}.json")
+    candidates += [
+        script_dir / "token.json",
+        STATE_DIR / "integrations/microsoft/token-microsoft.json",
+        STATE_DIR / "integrations/microsoft/token.json",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    raise FileNotFoundError(
+        f"No token file found. Tried: {[str(c) for c in candidates]}\n"
+        "Run the Microsoft auth flow first."
+    )
+
+
+def load_token(token_file: Path) -> dict:
+    with open(token_file) as f:
+        data = json.load(f)
+    # Handle MSAL cache format
+    if "RefreshToken" in data and "AccessToken" in data:
+        at_list  = list(data.get("AccessToken",  {}).values())
+        rt_list  = list(data.get("RefreshToken", {}).values())
+        app_list = list(data.get("AppMetadata",  {}).values())
+        at  = at_list[0]  if at_list  else {}
+        rt  = rt_list[0]
+        app = app_list[0] if app_list else {}
+        simple = {
+            "client_id":     at.get("client_id") or app.get("client_id", ""),
+            "client_secret": "",
+            "tenant_id":     at.get("realm", "common"),
+            "refresh_token": rt["secret"],
+            "access_token":  at.get("secret", ""),
+        }
+        with open(token_file, "w") as f:
+            json.dump(simple, f, indent=2)
+        return simple
+    return data
+
+
+def refresh_access_token(token_data: dict, token_file: Path) -> str:
+    tenant = token_data.get("tenant_id", "common")
+    post_data: dict = {
+        "client_id":     token_data["client_id"],
+        "refresh_token": token_data["refresh_token"],
+        "grant_type":    "refresh_token",
+        "scope":         "Mail.Send offline_access",
+    }
+    # Only include client_secret for confidential clients
+    secret = token_data.get("client_secret", "")
+    if secret:
+        post_data["client_secret"] = secret
+
+    resp = requests.post(
+        f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+        data=post_data,
+        timeout=15,
+    )
+    if not resp.ok:
+        print(f"Token refresh failed: {resp.status_code} {resp.text}", file=sys.stderr)
+        sys.exit(1)
+
+    new_data = resp.json()
+    token_data["access_token"]  = new_data["access_token"]
+    token_data["refresh_token"] = new_data.get("refresh_token", token_data["refresh_token"])
+    with open(token_file, "w") as f:
+        json.dump(token_data, f, indent=2)
+    return token_data["access_token"]
+
+
+def send_email(
+    access_token: str,
+    to: str,
+    from_name: str,
+    subject: str,
+    body: str,
+    reply_to_message_id: str | None = None,
+) -> None:
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type":  "application/json",
+    }
+
+    # Build the message payload
+    message: dict = {
+        "subject": subject,
+        "body": {
+            "contentType": "Text",
+            "content":      body.replace("\\n", "\n"),
+        },
+        "toRecipients": [
+            {"emailAddress": {"address": to}},
+        ],
+    }
+
+    if reply_to_message_id:
+        # Use createReply endpoint to properly thread the email
+        create_url = f"{GRAPH_BASE}/me/messages/{reply_to_message_id}/createReply"
+        resp = requests.post(create_url, headers=headers, timeout=15)
+        if not resp.ok:
+            print(f"createReply failed: {resp.status_code} {resp.text}", file=sys.stderr)
+            sys.exit(2)
+        draft = resp.json()
+        draft_id = draft["id"]
+
+        # Update the draft with our content
+        update_url = f"{GRAPH_BASE}/me/messages/{draft_id}"
+        resp = requests.patch(update_url, headers=headers, json={
+            "subject": subject,
+            "body": message["body"],
+            "toRecipients": message["toRecipients"],
+        }, timeout=15)
+        if not resp.ok:
+            print(f"Draft update failed: {resp.status_code} {resp.text}", file=sys.stderr)
+            sys.exit(2)
+
+        # Send the draft
+        send_url = f"{GRAPH_BASE}/me/messages/{draft_id}/send"
+        resp = requests.post(send_url, headers=headers, timeout=15)
+    else:
+        # Send directly
+        payload = {"message": message, "saveToSentItems": True}
+        resp = requests.post(
+            f"{GRAPH_BASE}/me/sendMail",
+            headers=headers,
+            json=payload,
+            timeout=15,
+        )
+
+    if resp.status_code in (200, 202, 204):
+        print(f"Email sent to {to}")
+    else:
+        print(f"Send failed: {resp.status_code} {resp.text}", file=sys.stderr)
+        sys.exit(2)
+
+
+def main() -> None:
+    args = parse_args()
+    try:
+        token_file = resolve_token_file(args)
+    except FileNotFoundError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
+    token_data   = load_token(token_file)
+    access_token = refresh_access_token(token_data, token_file)
+    send_email(
+        access_token,
+        to=args.to,
+        from_name=args.from_name,
+        subject=args.subject,
+        body=args.body,
+        reply_to_message_id=args.reply_to_message_id,
+    )
+
+
+if __name__ == "__main__":
+    main()

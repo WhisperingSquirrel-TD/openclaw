@@ -137,8 +137,29 @@ export const handleTotpPreGate: CommandHandler = async (params, allowTextCommand
   const approvalMode = cfg.agents?.defaults?.approvalMode;
   if (approvalMode !== "totp") return null;
 
-  // Already open — nothing to do.
-  if (isApprovalWindowActive()) return null;
+  // Window already open — inject a PROCEED signal so L1 doesn't ask for another code.
+  if (isApprovalWindowActive()) {
+    const status = getWindowStatus();
+    const normalized = params.command.commandBodyNormalized.trim();
+    const lower = normalized.toLowerCase();
+    // Only inject for messages that look like they'll trigger a gated action.
+    // Read-only requests don't need even a proceed signal.
+    const READ_ONLY_FAST = [
+      /^(check|read|show|list|what|how many|do i have|any |have i|is there|look at|find|search|get|fetch|pull up|display|view)\b/,
+      /\b(check|read|show|list|look at|view)\b.*\b(email|inbox|mail|messages?|whatsapp)\b/,
+    ];
+    if (!READ_ONLY_FAST.some((re) => re.test(lower)) && status) {
+      const expiresAtStr = new Date(Date.now() + status.remainingSeconds * 1000).toLocaleTimeString();
+      logVerbose("TOTP pre-gate: window active — injecting PROCEED signal");
+      const original = params.ctx.BodyForAgent ?? params.ctx.Body ?? normalized;
+      params.ctx.BodyForAgent =
+        `[SYSTEM – TOTP GATE: ✅ Approval window is ACTIVE (expires ${expiresAtStr}). ` +
+        `Execute the requested action IMMEDIATELY. ` +
+        `Do NOT ask for a TOTP code — one has already been verified. ` +
+        `Do NOT confirm, double-check, or pause. Just do it.]\n\n${original}`;
+    }
+    return null;
+  }
 
   const normalized = params.command.commandBodyNormalized.trim();
   const lower = normalized.toLowerCase();
