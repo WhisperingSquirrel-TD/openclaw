@@ -617,18 +617,49 @@ else
     warn "Microsoft poller (personal) enabled but not started — token missing, run auth first"
 fi
 
-# Assistant poller — start only if token-assistant.json exists
-AS_TOKEN="$HOME/.openclaw/integrations/microsoft/token-assistant.json"
-systemctl --user enable openclaw-email-assistant.service 2>/dev/null || true
-if [ -f "$AS_TOKEN" ]; then
-    systemctl --user restart openclaw-email-assistant.service && \
-        info "Microsoft email poller (assistant@) running — writes to ASSISTANT_INBOX.md" || \
-        warn "Microsoft email poller (assistant@) failed to start — check $AS_LOG"
+# Assistant poller — credentials live in the existing microsoft-l1 folder
+# (set up previously for assistant@stackstoneconsulting.co.uk)
+AS_TOKEN_L1="$HOME/.openclaw/integrations/microsoft-l1/token.json"
+AS_TOKEN_NEW="$HOME/.openclaw/integrations/microsoft/token-assistant.json"
+# Resolve whichever token path exists
+if [ -f "$AS_TOKEN_L1" ]; then
+    RESOLVED_AS_TOKEN="$AS_TOKEN_L1"
+elif [ -f "$AS_TOKEN_NEW" ]; then
+    RESOLVED_AS_TOKEN="$AS_TOKEN_NEW"
 else
-    warn "Assistant email poller not started — token-assistant.json missing"
-    warn "To enable: authenticate as assistant@stackstoneconsulting.co.uk then copy the token:"
-    warn "  cp <token-from-auth-flow> $AS_TOKEN"
-    warn "  systemctl --user restart openclaw-email-assistant.service"
+    RESOLVED_AS_TOKEN=""
+fi
+
+systemctl --user enable openclaw-email-assistant.service 2>/dev/null || true
+
+if [ -n "$RESOLVED_AS_TOKEN" ]; then
+    # Rewrite the service unit to pass the correct token path
+    cat > "$SYSTEMD_USER_DIR/openclaw-email-assistant.service" << SVCEOF2
+[Unit]
+Description=OpenClaw Microsoft Email Poller (assistant@)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=$PYTHON3_BIN $MS_POLLER --account assistant --label "L1 Assistant" --token-file $RESOLVED_AS_TOKEN
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:$AS_LOG
+StandardError=append:$AS_LOG
+
+[Install]
+WantedBy=default.target
+SVCEOF2
+    systemctl --user daemon-reload
+    systemctl --user restart openclaw-email-assistant.service && \
+        info "Assistant email poller running — token: $RESOLVED_AS_TOKEN → ASSISTANT_INBOX.md" || \
+        warn "Assistant email poller failed to start — check $AS_LOG"
+else
+    warn "Assistant email poller not started — no token found at $AS_TOKEN_L1 or $AS_TOKEN_NEW"
+    warn "Once token exists, run: systemctl --user restart openclaw-email-assistant.service"
 fi
 
 # Gmail poller — start only if both credentials AND token exist
