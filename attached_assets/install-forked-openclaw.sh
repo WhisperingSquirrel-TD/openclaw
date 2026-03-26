@@ -414,6 +414,34 @@ else
     info "Google Tasks credentials file already exists — not overwritten"
 fi
 
+# ---------------------------------------------------------------------------
+# Prospector: bounce/unsub queue processor
+# Deploys process_queue.sh and installs a 30-minute cron job.
+# L1 appends email addresses to pending_bounces.txt / pending_unsubs.txt
+# (no exec.run / no TOTP needed); this script picks them up and calls manage.py.
+# ---------------------------------------------------------------------------
+PROSPECTOR_DIR="$HOME/prospector"
+PROSPECTOR_SCRIPT_SRC="$HOME/openclaw/attached_assets/prospector/process_queue.sh"
+PROSPECTOR_SCRIPT_DST="$PROSPECTOR_DIR/process_queue.sh"
+
+if [ -f "$PROSPECTOR_SCRIPT_SRC" ]; then
+    mkdir -p "$PROSPECTOR_DIR/logs"
+    cp "$PROSPECTOR_SCRIPT_SRC" "$PROSPECTOR_SCRIPT_DST"
+    chmod +x "$PROSPECTOR_SCRIPT_DST"
+    info "Prospector queue processor deployed: $PROSPECTOR_SCRIPT_DST"
+
+    # Touch queue files so L1 can append to them immediately
+    touch "$PROSPECTOR_DIR/pending_bounces.txt"
+    touch "$PROSPECTOR_DIR/pending_unsubs.txt"
+
+    # Install cron job (idempotent — removes any old entry first)
+    CRON_JOB="*/30 * * * * bash $PROSPECTOR_SCRIPT_DST >> $PROSPECTOR_DIR/logs/queue_processor.log 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "process_queue.sh"; echo "$CRON_JOB" ) | crontab -
+    info "Cron job installed: runs every 30 minutes"
+else
+    warn "Prospector script not found at $PROSPECTOR_SCRIPT_SRC — skipping queue processor setup"
+fi
+
 # Create shared known-contacts.txt (read by ALL email pollers — Microsoft, Gmail, etc.)
 # This is the single source of truth for trusted senders across all email channels.
 KNOWN_CONTACTS_FILE="$HOME/.openclaw/integrations/known-contacts.txt"
