@@ -17,7 +17,7 @@ export type ClassifiedAction = {
   timestamp: string;
 };
 
-const CLASSIFICATION_SYSTEM_PROMPT = `You are a message analysis assistant. You review WhatsApp conversation threads and identify actionable items that the recipient needs to act on.
+const CLASSIFICATION_SYSTEM_PROMPT = `You are a message analysis assistant. You review WhatsApp conversation threads and identify actionable items that need to be acted on.
 
 You MUST consider the FULL conversation context. If a later message resolves or cancels an earlier request, do NOT flag it as actionable.
 
@@ -27,7 +27,7 @@ Examples of resolved actions:
 - "Meeting at 3pm tomorrow" followed by "Meeting cancelled" = NOT actionable
 
 Action types:
-- shopping: Items to buy or pick up
+- shopping: Items to buy or pick up (e.g. "Get milk", "Buy coffee", "Pick up bread")
 - calendar: Events, meetings, appointments, dates to remember
 - task: Things to do, errands, requests for action
 - reminder: Things to remember or not forget
@@ -40,7 +40,10 @@ Respond with a JSON array. Each element must have:
 
 If NO messages require action, respond with an empty array: []
 
-IMPORTANT: Only flag genuinely actionable items. Casual conversation, greetings, jokes, memes, status updates, and general chat are NOT actionable. Be conservative — when in doubt, do not flag it.`;
+IMPORTANT RULES:
+- Messages sent by "ME" (labeled with sender "ME") are self-sent reminders or notes to self. Treat these with HIGH confidence — if a self-sent message names an item, errand, or task, flag it. Short imperative phrases like "Get milk", "Call dentist", "Book flights" are definitely actionable.
+- Casual conversation, greetings, jokes, status updates, and general chat are NOT actionable.
+- Only skip flagging when a message is clearly not a request or reminder — e.g. pure small talk, reactions, or emoji-only messages.`;
 
 function buildClassificationPrompt(
   candidates: ActionCandidate[],

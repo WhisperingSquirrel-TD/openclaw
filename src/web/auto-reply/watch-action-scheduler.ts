@@ -1,7 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import { logInfo } from "../../logger.js";
 import { logVerbose } from "../../globals.js";
+import { resolveOAuthDir } from "../../config/paths.js";
 import { scanWatchTranscript, commitCursor } from "./watch-action-scanner.js";
 import { classifyActions } from "./watch-action-classifier.js";
 import { notifyActions } from "./watch-action-notify.js";
@@ -41,14 +44,38 @@ function resolveWhatsAppAccountIds(cfg: OpenClawConfig): string[] {
   const whatsapp = cfg.channels?.whatsapp;
   if (!whatsapp) return [];
 
+  // IDs from config (explicit accounts block)
   const accounts = (whatsapp as Record<string, unknown>).accounts as
     | Record<string, unknown>
     | undefined;
-  if (accounts && typeof accounts === "object") {
-    return Object.keys(accounts);
+  const configIds = accounts && typeof accounts === "object" ? Object.keys(accounts) : [];
+
+  // Also discover account IDs from transcript files on disk — catches accounts that
+  // are paired but not yet reflected in the config (e.g. single-account root-level watch mode).
+  const transcriptDir = path.join(resolveOAuthDir(), "whatsapp", "watch-transcripts");
+  const diskIds: string[] = [];
+  try {
+    const files = fs.readdirSync(transcriptDir);
+    for (const file of files) {
+      const match = file.match(/^whatsapp-watch-(.+)\.jsonl$/);
+      if (match) {
+        diskIds.push(match[1]);
+      }
+    }
+  } catch {
+    // Directory doesn't exist yet — fine, nothing to scan
   }
 
-  return ["default"];
+  // Merge: config IDs first, then any disk IDs not already in the list
+  const merged = [...configIds];
+  for (const id of diskIds) {
+    if (!merged.includes(id)) {
+      merged.push(id);
+    }
+  }
+
+  // Fall back to "default" only if nothing found anywhere
+  return merged.length > 0 ? merged : ["default"];
 }
 
 function isWatchModeAccount(cfg: OpenClawConfig, accountId: string): boolean {

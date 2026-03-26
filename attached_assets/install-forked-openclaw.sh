@@ -442,6 +442,31 @@ else
     warn "Prospector script not found at $PROSPECTOR_SCRIPT_SRC — skipping queue processor setup"
 fi
 
+# ---------------------------------------------------------------------------
+# WhatsApp rolling recent file
+# Generates WHATSAPP_RECENT.md (last 48h) from the full WHATSAPP_LOG.md.
+# L1 reads WHATSAPP_RECENT.md — keeps context small without losing history.
+# ---------------------------------------------------------------------------
+WA_RECENT_SRC="$HOME/openclaw/attached_assets/scripts/whatsapp_recent.sh"
+WA_RECENT_DST="$HOME/.openclaw/scripts/whatsapp_recent.sh"
+
+if [ -f "$WA_RECENT_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/scripts"
+    cp "$WA_RECENT_SRC" "$WA_RECENT_DST"
+    chmod +x "$WA_RECENT_DST"
+    info "WhatsApp recent-file script deployed: $WA_RECENT_DST"
+
+    # Run it immediately so WHATSAPP_RECENT.md exists right after install
+    bash "$WA_RECENT_DST" || true
+
+    # Install cron job (idempotent)
+    WA_CRON="*/15 * * * * bash $WA_RECENT_DST"
+    ( crontab -l 2>/dev/null | grep -v "whatsapp_recent.sh"; echo "$WA_CRON" ) | crontab -
+    info "WhatsApp recent-file cron installed: runs every 15 minutes"
+else
+    warn "WhatsApp recent script not found at $WA_RECENT_SRC — skipping"
+fi
+
 # Create shared known-contacts.txt (read by ALL email pollers — Microsoft, Gmail, etc.)
 # This is the single source of truth for trusted senders across all email channels.
 KNOWN_CONTACTS_FILE="$HOME/.openclaw/integrations/known-contacts.txt"
