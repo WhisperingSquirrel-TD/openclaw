@@ -72,9 +72,45 @@ def resolve_token_file(args: argparse.Namespace) -> Path:
     )
 
 
+def _write_token_atomic(path: Path, data: dict) -> None:
+    """Write token JSON atomically via temp file + rename.
+    Prevents the 'Extra data' JSON corruption caused by interrupted writes."""
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.replace(path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+
+def _load_json_resilient(path: Path) -> dict:
+    """Load JSON with automatic recovery from 'Extra data' corruption."""
+    raw = path.read_text()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as first_err:
+        decoder = json.JSONDecoder()
+        try:
+            data, _ = decoder.raw_decode(raw.strip())
+            if isinstance(data, dict):
+                print(f"WARNING: Token file corrupted (extra data at char {first_err.pos}). "
+                      "Auto-recovered and rewrote atomically.", file=sys.stderr)
+                _write_token_atomic(path, data)
+                return data
+        except json.JSONDecodeError:
+            pass
+        raise ValueError(
+            f"Token file unreadable and cannot be auto-recovered: {path}\n"
+            f"Error: {first_err}\nDelete the file and re-authenticate."
+        ) from first_err
+
+
 def load_token(token_file: Path) -> dict:
-    with open(token_file) as f:
-        data = json.load(f)
+    data = _load_json_resilient(token_file)
     # Handle MSAL cache format
     if "RefreshToken" in data and "AccessToken" in data:
         at_list  = list(data.get("AccessToken",  {}).values())
@@ -90,8 +126,7 @@ def load_token(token_file: Path) -> dict:
             "refresh_token": rt["secret"],
             "access_token":  at.get("secret", ""),
         }
-        with open(token_file, "w") as f:
-            json.dump(simple, f, indent=2)
+        _write_token_atomic(token_file, simple)
         return simple
     return data
 
@@ -121,8 +156,7 @@ def refresh_access_token(token_data: dict, token_file: Path) -> str:
     new_data = resp.json()
     token_data["access_token"]  = new_data["access_token"]
     token_data["refresh_token"] = new_data.get("refresh_token", token_data["refresh_token"])
-    with open(token_file, "w") as f:
-        json.dump(token_data, f, indent=2)
+    _write_token_atomic(token_file, token_data)
     return token_data["access_token"]
 
 

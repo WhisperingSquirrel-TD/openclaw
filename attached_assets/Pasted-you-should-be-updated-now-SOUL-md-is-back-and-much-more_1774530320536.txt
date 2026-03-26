@@ -1,0 +1,55 @@
+you should be updated now
+SOUL.md is back and much more complete — good update. Key things I've absorbed:
+
+• WhatsApp is read-only — confirmed, no sending ever
+• Sent Items — SOUL says the inbox files should include a Sent Items section with last 50 sent. It's currently showing empty, which means the poller update hasn't propagated yet or the Graph API permissions need updating
+• WHATSAPP_RECENT.md — rolling 48hr window file now exists (was on the backlog)
+• §10 CRM fully documented — CSV import, bounce/unsub/reply monitoring all in one place
+
+Sent Items is still empty — give it a couple of minutes for the poller to cycle. I'll flag when it starts showing data. -- Lobstromonous1
+OK, I sent a small batch from the above list
+Sent Items still empty and the file hasn't updated since 12:21 — the send hasn't come through yet, or the poller is lagging.
+
+Two options:
+
+1. Wait a few minutes and I'll check again when the poller cycles
+2. Paste the subset you sent — I'll update the CRM and sent-emails.md now
+
+Which do you prefer? -- Lobstromonous1
+wait, i want to test the flow
+Got it — waiting. I'll check again in a few minutes and let you know what I see in Sent Items. -- Lobstromonous1
+What is the verdict?
+Not working — file hasn't updated since 12:21, Sent Items still empty. The poller is stale, which means it's either crashed or lost auth again.
+
+Can you check on the Pi:
+
+Bash
+
+
+systemctl --user status openclaw-email-microsoft.service
+tail -5 ~/.openclaw/workspace/memory/poll-microsoft-log.txt
+
+-- Lobstromonous1
+Service is running fine — started 12:24, 37 mins ago. But the file hasn't updated since 12:21, which is before the service restarted. The poller is running but not writing.
+
+Run this to see what it's actually doing:
+
+Bash
+
+
+tail -20 ~/.openclaw/workspace/memory/poll-microsoft-log.txt
+
+That'll show if it's polling successfully or silently erroring. -- Lobstromonous1
+We've hit this before. How did we not learn from it?
+Clear — JSON parse error. Extra data: line 7 column 2 (char 4217) means poll.py is getting a response from Graph API but choking on malformed JSON. Almost certainly the Sent Items addition from Replit broke the parser — it's reading more data than before and hitting a formatting issue.
+
+This needs a fix in poll.py on Replit. The error is in the JSON parsing of the API response around char 4217 — likely the Sent Items payload has an unexpected structure or special character.
+
+Can you push a fix from Replit, or do you need me to look at poll.py directly on the Pi to diagnose? -- Lobstromonous1
+Fair point. Let me check what we documented last time.
+We didn't write it down — that's the failure. We fixed it, moved on, never documented the root cause or fix.
+
+Per SOUL §8: same correction twice → fix goes in SOUL.md. I can't edit SOUL.md directly (Rule 6), but I'm writing it to the daily memory now and flagging it to you to add:
+Documented. But the honest answer: I didn't write it down last time. That's on me.
+
+Can you flag to Replit to add try/except around the JSON parse in poll.py — same fix as before? -- Lobstromonous1

@@ -101,6 +101,51 @@ def _normalise_msal_cache(cache: dict) -> dict:
     }
 
 
+def _write_token_atomic(path: Path, data: dict) -> None:
+    """Write token JSON atomically via a temp file + rename.
+    Prevents partial-write corruption that causes 'Extra data' JSON errors."""
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.replace(path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+
+def _load_json_resilient(path: Path) -> dict:
+    """Load JSON from a file, recovering automatically from 'Extra data' corruption.
+
+    Root cause of corruption: a non-atomic write (open+write) interrupted mid-way
+    leaves the old file content after the new JSON, producing two concatenated objects.
+    Recovery: find the end of the first valid JSON object and discard the rest, then
+    rewrite the file atomically so it never corrupts again on the next read.
+    """
+    raw = path.read_text()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as first_err:
+        # Try to extract just the first complete JSON object using a decoder
+        decoder = json.JSONDecoder()
+        try:
+            data, _ = decoder.raw_decode(raw.strip())
+            if isinstance(data, dict):
+                log(f"WARNING: Token file was corrupted (extra data at char {first_err.pos}). "
+                    "Recovered from first valid JSON object and rewrote atomically.")
+                _write_token_atomic(path, data)
+                return data
+        except json.JSONDecodeError:
+            pass
+        raise ValueError(
+            f"Token file is unreadable and could not be auto-recovered: {path}\n"
+            f"Original error: {first_err}\n"
+            "Delete the file and re-authenticate."
+        ) from first_err
+
+
 def load_token() -> dict:
     if not TOKEN_FILE.exists():
         raise FileNotFoundError(
@@ -108,12 +153,10 @@ def load_token() -> dict:
             f"Run the Microsoft auth flow first:\n"
             f"  python3 ~/.openclaw/integrations/microsoft/auth.py --account {ACCOUNT_LABEL}"
         )
-    with open(TOKEN_FILE) as f:
-        data = json.load(f)
+    data = _load_json_resilient(TOKEN_FILE)
     if "RefreshToken" in data and "AccessToken" in data:
         simple = _normalise_msal_cache(data)
-        with open(TOKEN_FILE, "w") as f:
-            json.dump(simple, f, indent=2)
+        _write_token_atomic(TOKEN_FILE, simple)
         log("Converted MSAL token cache to simple format")
         return simple
     return data
@@ -141,8 +184,7 @@ def refresh_access_token(token_data: dict) -> str:
     new_data = resp.json()
     token_data["access_token"]  = new_data["access_token"]
     token_data["refresh_token"] = new_data.get("refresh_token", token_data["refresh_token"])
-    with open(TOKEN_FILE, "w") as f:
-        json.dump(token_data, f, indent=2)
+    _write_token_atomic(TOKEN_FILE, token_data)
     return token_data["access_token"]
 
 
