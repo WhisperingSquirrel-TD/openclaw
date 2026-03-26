@@ -151,7 +151,7 @@ def fetch_emails(access_token: str, folder: str = "inbox", top: int = MAX_RESULT
     params = {
         "$top": top,
         "$orderby": "receivedDateTime desc",
-        "$select": "id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead",
+        "$select": "id,subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,isRead",
     }
     resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"}, params=params, timeout=15)
     if resp.status_code == 429:
@@ -199,6 +199,27 @@ def format_trusted_entry(msg: dict, prefix: str = "") -> str:
         f"---\n"
         f"{tag}**{subject}**\n"
         f"From: {from_name} <{from_addr}> | {ts_fmt}\n"
+        f"{preview}\n\n"
+    )
+
+
+def format_sent_entry(msg: dict) -> str:
+    """Format a sent item — shows To: recipients, full body preview.
+    No known-contacts filter: outbound emails are safe to show in full."""
+    sent_at   = msg.get("sentDateTime", msg.get("receivedDateTime", ""))
+    subject   = msg.get("subject", "(no subject)")
+    recipients = msg.get("toRecipients", [])
+    to_parts  = [
+        f"{r['emailAddress'].get('name', '')} <{r['emailAddress'].get('address', '')}>".strip()
+        for r in recipients
+    ]
+    to_str    = ", ".join(to_parts) if to_parts else "(unknown)"
+    preview   = msg.get("bodyPreview", "").replace("\r\n", " ").replace("\n", " ")[:300]
+    ts_fmt    = sent_at[:16].replace("T", " ") if sent_at else "unknown"
+    return (
+        f"---\n"
+        f"**{subject}**\n"
+        f"To: {to_str} | {ts_fmt}\n"
         f"{preview}\n\n"
     )
 
@@ -323,19 +344,20 @@ def main():
                 last_seen      = load_last_seen()
 
                 inbox_emails = fetch_emails(access_token, folder="inbox")
-                sent_emails  = fetch_emails(access_token, folder="sentitems")
+                sent_emails  = fetch_emails(access_token, folder="sentitems", top=50)
 
                 trusted_inbox, external_inbox, _ = process_emails(inbox_emails, last_seen, known_contacts, "INBOX")
-                trusted_sent,  _ext_sent,      _ = process_emails(sent_emails,  last_seen, known_contacts, "SENT")
+                # Sent items: show ALL (no known-contacts filter — outbound is safe)
+                all_sent = [format_sent_entry(m) for m in sent_emails]
 
                 save_last_seen(last_seen)
-                rebuild_inbox_md(trusted_inbox, trusted_sent)
+                rebuild_inbox_md(trusted_inbox, all_sent)
                 rebuild_external_md(external_inbox)
 
                 last_known_poll   = now
                 last_general_poll = now
                 log(
-                    f"Poll complete — trusted: {len(trusted_inbox)} inbox / {len(trusted_sent)} sent, "
+                    f"Poll complete — trusted: {len(trusted_inbox)} inbox / {len(all_sent)} sent, "
                     f"external: {len(external_inbox)} inbox"
                 )
 

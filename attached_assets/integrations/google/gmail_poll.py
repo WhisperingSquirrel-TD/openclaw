@@ -98,16 +98,17 @@ def parse_header(headers: list, name: str) -> str:
     return ""
 
 
-def fetch_messages(service, query: str, max_results: int = MAX_RESULTS) -> list:
+def fetch_messages(service, query: str, max_results: int = MAX_RESULTS, extra_headers: list = None) -> list:
     result = service.users().messages().list(
         userId="me", q=query, maxResults=max_results
     ).execute()
     msg_refs = result.get("messages", [])
+    headers_to_fetch = ["From", "Subject", "Date"] + (extra_headers or [])
     messages = []
     for ref in msg_refs:
         msg = service.users().messages().get(
             userId="me", id=ref["id"], format="metadata",
-            metadataHeaders=["From", "Subject", "Date"]
+            metadataHeaders=headers_to_fetch
         ).execute()
         msg["_snippet"] = msg.get("snippet", "")
         messages.append(msg)
@@ -159,6 +160,21 @@ def format_trusted_entry(headers: list, snippet: str, label: str = "") -> str:
         f"---\n"
         f"{tag}**{subject}**\n"
         f"From: {name} <{addr}> | {date_h[:25]}\n"
+        f"{preview}\n\n"
+    )
+
+
+def format_sent_entry(headers: list, snippet: str) -> str:
+    """Format a sent item — shows To: recipient, full snippet.
+    No known-contacts filter: outbound emails are safe to show in full."""
+    subject = parse_header(headers, "Subject") or "(no subject)"
+    date_h  = parse_header(headers, "Date")
+    to_h    = parse_header(headers, "To")
+    preview = snippet.replace("\u200c", "").strip()[:300]
+    return (
+        f"---\n"
+        f"**{subject}**\n"
+        f"To: {to_h} | {date_h[:25]}\n"
         f"{preview}\n\n"
     )
 
@@ -267,17 +283,21 @@ def main():
             last_seen      = load_last_seen()
 
             inbox_msgs = fetch_messages(service, "in:inbox", MAX_RESULTS)
-            sent_msgs  = fetch_messages(service, "in:sent",  MAX_RESULTS)
+            sent_msgs  = fetch_messages(service, "in:sent",  50, extra_headers=["To"])
 
             trusted_inbox, external_inbox, _ = process_messages(inbox_msgs, last_seen, known_contacts, "INBOX")
-            trusted_sent,  _ext_sent,      _ = process_messages(sent_msgs,  last_seen, known_contacts, "SENT")
+            # Sent items: show ALL (no known-contacts filter — outbound is safe)
+            all_sent = [
+                format_sent_entry(m.get("payload", {}).get("headers", []), m.get("_snippet", ""))
+                for m in sent_msgs
+            ]
 
             save_last_seen(last_seen)
-            rebuild_inbox_md(trusted_inbox, trusted_sent)
+            rebuild_inbox_md(trusted_inbox, all_sent)
             rebuild_external_md(external_inbox)
 
             log(
-                f"Poll complete — trusted: {len(trusted_inbox)} inbox / {len(trusted_sent)} sent, "
+                f"Poll complete — trusted: {len(trusted_inbox)} inbox / {len(all_sent)} sent, "
                 f"external: {len(external_inbox)} inbox"
             )
 
