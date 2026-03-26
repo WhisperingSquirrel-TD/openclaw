@@ -20,8 +20,10 @@ SECURITY NOTE — prompt injection defence:
   that L1 would otherwise treat as a directive.
 """
 import argparse
+import fcntl
 import json
 import os
+import sys
 import time
 import requests
 from datetime import datetime
@@ -359,6 +361,22 @@ def rebuild_external_md(external_inbox: list):
 def main():
     args = parse_args()
     resolve_paths(args)
+
+    # Acquire a per-account exclusive lock so two instances of this script for the
+    # same account can never run simultaneously (prevents concurrent file writes that
+    # cause one instance to overwrite the other's Sent Items with an empty list).
+    lock_path = Path(f"/tmp/openclaw-poll-{args.account}.lock")
+    try:
+        lock_fh = open(lock_path, "w")
+        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(
+            f"[poll.py] Another instance for account '{args.account}' is already running "
+            f"(lock: {lock_path}). Exiting.",
+            file=sys.stderr,
+        )
+        sys.exit(0)  # Clean exit — systemd will restart us shortly
+
     log(f"Microsoft email poller starting — account: {ACCOUNT_LABEL}, token: {TOKEN_FILE}")
 
     # Backwards-compat: if the old token path (token.json) exists and the new one
