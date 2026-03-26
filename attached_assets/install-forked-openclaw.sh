@@ -11,6 +11,31 @@ warn() { echo -e "${YELLOW}[!] $1${NC}"; }
 fail() { echo -e "${RED}[✗] $1${NC}"; exit 1; }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SOUL.md preservation — back up before ANYTHING runs, restore at exit.
+# This protects the user-managed persona file from being wiped by git, service
+# restarts, or workspace bootstrap during the install process.
+# ─────────────────────────────────────────────────────────────────────────────
+SOUL_MD_PATH="$HOME/.openclaw/workspace/SOUL.md"
+SOUL_MD_BACKUP="/tmp/openclaw-soul-backup.md"
+
+# Back up only if the file is non-empty AND we haven't already backed it up
+# (the script re-execs itself once via `exec`, sharing this fixed backup path).
+if [ -f "$SOUL_MD_PATH" ] && [ -s "$SOUL_MD_PATH" ]; then
+    cp "$SOUL_MD_PATH" "$SOUL_MD_BACKUP"
+    echo "[soul] SOUL.md backed up to $SOUL_MD_BACKUP"
+fi
+
+restore_soul_md() {
+    if [ -f "$SOUL_MD_BACKUP" ]; then
+        mkdir -p "$(dirname "$SOUL_MD_PATH")"
+        cp "$SOUL_MD_BACKUP" "$SOUL_MD_PATH"
+        rm -f "$SOUL_MD_BACKUP"
+        echo "[soul] SOUL.md restored from backup"
+    fi
+}
+trap restore_soul_md EXIT
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Step 0: Pull latest code FIRST, then self-update and re-exec.
 # This guarantees we always run the newest version of this script.
 # OPENCLAW_REEXEC=1 is set on the re-exec to prevent an infinite loop.
