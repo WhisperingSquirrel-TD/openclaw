@@ -1,0 +1,43 @@
+(tail -25 ~/.openclaw/integrations/stackstone/poller.log 2>/dev/null || echo "  No log yet — cron hasn't fired or run manually to test")
+
+── Cron ──────────────────────────────────────────
+*/15 * * * * cd /home/tomdean88/.openclaw/integrations/stackstone && python3 poll.py >> /tmp/l1-stackstone-poll.log 2>&1
+0 6 * * * cd /home/tomdean88/prospector && /usr/bin/python3 stackstone_prospector.py >> /home/tomdean88/prospects/logs/cron.log 2>&1
+*/5 * * * * python3 /home/tomdean88/.openclaw/integrations/stackstone/report_poller.py >> /home/tomdean88/.openclaw/integrations/stackstone/poller.log 2>&1
+
+── API key ───────────────────────────────────────
+  ✗ Not set in environment — check ~/.openclaw/.env
+
+── MS Graph token ────────────────────────────────
+  ? expiresAt field missing from token file
+
+── Stackstone API ────────────────────────────────
+  ✗ Cannot check — INTEGRATION_API_KEY not found anywhere
+
+── Recent poller log ─────────────────────────────
+[2026-03-27 16:10:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 16:15:02] [stackstone-report-poller] Poll starting
+[2026-03-27 16:15:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 16:20:02] [stackstone-report-poller] Poll starting
+[2026-03-27 16:20:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 16:25:02] [stackstone-report-poller] Poll starting
+[2026-03-27 16:25:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 16:30:02] [stackstone-report-poller] Poll starting
+[2026-03-27 16:30:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 16:35:02] [stackstone-report-poller] Poll starting
+[2026-03-27 16:35:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 16:40:02] [stackstone-report-poller] Poll starting
+[2026-03-27 16:40:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 16:45:02] [stackstone-report-poller] Poll starting
+[2026-03-27 16:45:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 16:50:02] [stackstone-report-poller] Poll starting
+[2026-03-27 16:50:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 16:55:02] [stackstone-report-poller] Poll starting
+[2026-03-27 16:55:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 17:00:02] [stackstone-report-poller] Poll starting
+[2026-03-27 17:00:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 17:05:02] [stackstone-report-poller] Poll starting
+[2026-03-27 17:05:02] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+[2026-03-27 17:10:01] [stackstone-report-poller] Poll starting
+[2026-03-27 17:10:01] [stackstone-report-poller] ERROR: Failed to fetch reports: INTEGRATION_API_KEY not set. Add it to your Pi environment.
+tomdean88@raspberrypi:~/prospector$ 
