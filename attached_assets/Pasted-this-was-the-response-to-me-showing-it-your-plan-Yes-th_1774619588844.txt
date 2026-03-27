@@ -1,0 +1,62 @@
+this was the response to me showing it your plan:
+Yes, the two plans fit together cleanly. Here's how the integration points line up:
+
+Payload — Stackstone's Task 5 (intake pipeline) fires exactly the shape our /send-report endpoint expects:
+
+{ to: { email, name }, reportUrl, companyName, firstName }
+Both sides agree on that structure.
+
+Shared secret — Stackstone stores it as INTAKE_SITE_SECRET; our endpoint reads it as REPORT_SEND_SECRET. Same value, different variable names on each end — that's fine, you just set them to the same string when configuring both sides.
+
+Domain check — Our endpoint hard-codes that reportUrl must start with https://stackstoneconsulting.co.uk. Stackstone's pipeline builds the URL as https://stackstoneconsulting.co.uk/report/{uuid}. That will always pass.
+
+Fire-and-forget — Stackstone's Task 5 calls the Pi endpoint async with a 10s timeout and doesn't block on it. Our Task #1 responds 202 immediately and sends async. Both sides handle failure gracefully without blocking the user.
+
+One thing to confirm before build starts: PI_ENDPOINT_URL in Stackstone's secrets needs to point to the Pi's /send-report path. If you're using a named Cloudflare tunnel (the recommended approach in the README), that would be something like https://reports.stackstoneconsulting.co.uk/send-report. Both plans should be built first, then you configure that URL once the tunnel is set up.
+
+No conflicts. You can run both tasks in parallel — they touch completely separate codebases.
+
+Im concerned about reports.stackstonecon... i dont know if i have wildcards/additional domains like that
+
+Good point. The reports.stackstoneconsulting.co.uk subdomain would require either a wildcard DNS record or a specific subdomain record pointing to Cloudflare. You have a few options:
+
+Check if you have wildcard DNS — if your DNS for stackstoneconsulting.co.uk has a *.stackstoneconsulting.co.uk record, you're fine and reports.stackstoneconsulting.co.uk would just work.
+
+Add a single subdomain record — if you manage your DNS (likely through whoever hosts the domain), you'd just add one CNAME record: reports → pointing to the Cloudflare tunnel. This is a one-time 2-minute job.
+
+Skip the subdomain entirely — use a random Cloudflare quick tunnel URL instead (e.g. https://something-random.trycloudflare.com/send-report). Downside: the URL changes every time you restart the tunnel, so you'd need to update PI_ENDPOINT_URL in Replit each time.
+
+Use your existing Cloudflare tunnel — if L1 already has a tunnel for other purposes, you could just add /send-report as a route on the same tunnel, same domain. No new subdomain needed.
+
+Option 2 is the cleanest — one CNAME record and it's permanent. But this is purely a DNS/infrastructure decision you'd make when wiring the two sides together, after both are built. It doesn't affect the code at all. The PI_ENDPOINT_URL secret in Replit just needs to be whatever URL the Pi ends up at.
+
+Want to approve Task #1 so we can start building the website side? The Pi endpoint URL can be configured later once you've sorted the tunnel.
+
+Im cofused why we need this, I want to hand them off the website like we do the other reports - cant we do that?
+
+Good question. You mean serve the report directly from the Stackstone website — the same way the briefing packs work at /pack/[slug] — rather than needing a Cloudflare tunnel and subdomain for the Pi?
+
+The website already does that. The report page lives at stackstoneconsulting.co.uk/report/[uuid] — that's hosted on Replit, not on the Pi.
+
+The Pi's only job is sending the email. The question is: how does the email get sent? Right now the plan says:
+
+Website generates the report and stores it
+Website calls the Pi's /send-report endpoint
+Pi sends the email via your Microsoft Graph mailbox (tom@stackstoneconsulting.co.uk)
+The Cloudflare tunnel is just so the website can reach the Pi to trigger that email send.
+
+But — if you'd rather not deal with tunnels and subdomains, there's a simpler alternative: have the Pi poll the website for new reports, the same way it already polls /api/integration/leads and /api/integration/packs for other data. The website would just add a new integration endpoint like /api/integration/reports that returns unsent reports, and the Pi picks them up on its next poll cycle and sends the emails.
+
+That would mean:
+
+No tunnel needed for the report flow
+No new subdomain
+Same pattern you already use for OpenClaw ↔ Stackstone communication
+Slight delay (however often the Pi polls — probably every few minutes)
+Would you prefer the polling approach, or is the slight delay a problem for the networking event use case where you want the email to arrive quickly?
+
+yeah, send the details to the Pi through an/the API - we have one setup
+
+That makes much more sense — use the existing integration API pattern that the Pi already polls. So instead of the Pi exposing an endpoint and needing a tunnel, the website just makes new reports available through the integration API, and the Pi picks them up on its next poll.
+
+Let me update the plan to reflect this simpler approach.

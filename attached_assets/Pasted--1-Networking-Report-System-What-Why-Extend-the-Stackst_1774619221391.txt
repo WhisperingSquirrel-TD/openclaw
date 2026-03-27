@@ -1,0 +1,50 @@
+#1 - Networking Report System
+What & Why
+Extend the Stackstone website with a networking event report system. When Tom meets someone at an event, he captures their name, email, and company website (optionally recording the conversation). The system runs a deep research pipeline — Companies House lookup, multi-page website crawl with brand colour extraction, optional Whisper transcription — then generates a bespoke AI opportunity report via Claude and serves it as a branded page at /report/[uuid]. An email with the report link is sent via the Pi's /send-report endpoint (fire-and-forget).
+
+This is a significant upgrade over the existing briefing pack: it adds Companies House verification, conversation transcript integration, brand colour personalisation, and a scoped email delivery flow through the Pi.
+
+Done looks like
+POST /api/intake accepts contact details + optional transcript, validates inputs, runs the full pipeline (Companies House → website crawl → Claude report generation → store → notify Pi), and returns the report URL
+GET /report/[uuid] renders a branded, responsive HTML report page with: company data strip (Companies House), executive summary, sector context, primary opportunity card, three quick-win cards, caveats, transcript insights (if present), PDF download button (print stylesheet), and CTA footer
+POST /api/transcribe accepts audio upload (webm/mp4, max 25MB) and returns a transcript via OpenAI Whisper
+The intake form is served at /intake as a mobile-first page with name/email/website fields, optional audio recording via MediaRecorder API, live validation, and submission history in localStorage
+New database table stores reports with UUID, contact info, transcript flag, full report JSON, and brand colour
+Environment secrets are requested: OPENAI_API_KEY, COMPANIES_HOUSE_API_KEY, PI_ENDPOINT_URL, INTAKE_SITE_SECRET
+Report pages work as clean A4 PDFs via window.print() with a print stylesheet
+Out of scope
+Pi/OpenClaw /send-report endpoint (built separately, not in this Replit project)
+Authentication or admin UI for reports (UUID is the access control)
+Email sending logic (the website just calls the Pi endpoint)
+Modifying the existing briefing pack system
+Tasks
+Database schema and storage — Add a networking_reports table (uuid, contact fields, hasTranscript, report JSON, brandColour, status, timestamps) and extend the storage interface with CRUD methods.
+
+Companies House service — Create a service that searches the Companies House API by company name (derived from domain), extracts registered name, company number, SIC codes, status, and incorporation date.
+
+Enhanced website scraper — Extend the existing scraper to also fetch /team and /our-team pages, extract brand colours from CSS (fetch primary stylesheet, find dominant hex colours excluding near-black/near-white), and return structured research data including colour.
+
+Whisper transcription endpoint — Add POST /api/transcribe that accepts multipart audio upload (max 25MB), sends to OpenAI Whisper API (whisper-1 model), and returns the transcript text.
+
+Intake pipeline and API route — Build POST /api/intake implementing the full 6-step pipeline: validate → Companies House → website crawl → Claude report generation (structured JSON with the specified schema) → store report → fire-and-forget POST to Pi /send-report. Return 202 with reportUrl and uuid.
+
+Report viewer page — Build the /report/[uuid] client page: branded header with Stackstone logo + contact name + date, Companies House data strip, executive summary, sector context, primary opportunity card with brand colour accent, three quick-win cards, caveats list, conditional transcript insights block, PDF download button (print stylesheet), and CTA mailto footer.
+
+Intake form page — Serve the mobile-first intake form at /intake with the provided design (charcoal/slate/amber theme), name/email/website fields, optional audio recording section using MediaRecorder API with transcription, live validation bar, submission status overlay, and localStorage history.
+
+Environment secrets and integration wiring — Request OPENAI_API_KEY, COMPANIES_HOUSE_API_KEY, PI_ENDPOINT_URL, INTAKE_SITE_SECRET from the user and configure them. Wire up the Pi notification call in the intake pipeline.
+
+Relevant files
+shared/schema.ts
+server/storage.ts
+server/routes.ts
+server/pack-routes.ts
+server/services/website-scraper.ts
+server/services/pack-generator.ts
+server/services/brand-fetch.ts
+server/integration.ts
+client/src/App.tsx
+client/src/pages/Pack.tsx
+attached_assets/replit-build-prompt_1774619043438.md
+attached_assets/index_1774619043439.html
+attached_assets/send-report-server_1774619043438.js

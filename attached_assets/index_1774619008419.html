@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Stackstone — Contact Intake</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --charcoal: #2C2C2E; --slate: #48484A; --amber: #D4A017;
+      --amber-light: #F5E6B0; --amber-dark: #A07810;
+      --surface: #F8F7F5; --border: #D1CFC8;
+      --text: #1C1C1E; --muted: #6C6C70;
+      --danger: #C0392B; --success: #1A7340; --success-bg: #EAF5EE;
+      --radius: 10px;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--charcoal); min-height: 100dvh; display: flex; flex-direction: column; align-items: center; padding: 16px; }
+    header { width: 100%; max-width: 480px; display: flex; align-items: center; gap: 12px; padding: 16px 0 20px; }
+    .logo-mark { width: 36px; height: 36px; flex-shrink: 0; }
+    .logo-text { font-size: 18px; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
+    .logo-tagline { font-size: 11px; color: var(--amber); letter-spacing: 0.05em; text-transform: uppercase; font-weight: 500; }
+    .card { width: 100%; max-width: 480px; background: var(--surface); border-radius: 16px; overflow: hidden; }
+    .card-header { background: var(--slate); padding: 16px 20px; }
+    .card-title { font-size: 15px; font-weight: 600; color: #fff; }
+    .card-subtitle { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+    .amber-rule { height: 2px; background: var(--amber); }
+    .form-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    label { font-size: 12px; font-weight: 600; color: var(--slate); letter-spacing: 0.04em; text-transform: uppercase; }
+    label .req { color: var(--amber-dark); margin-left: 2px; }
+    input { width: 100%; padding: 12px 13px; border: 1.5px solid var(--border); border-radius: var(--radius); font-size: 15px; color: var(--text); background: #fff; outline: none; transition: border-color 0.15s; -webkit-appearance: none; appearance: none; font-family: inherit; }
+    input:focus { border-color: var(--amber); }
+    input.error { border-color: var(--danger); background: #FEF8F7; }
+    .field-hint { font-size: 12px; color: var(--muted); }
+    .validation-bar { background: #fff; border: 1.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+    .bar-label { font-size: 12px; font-weight: 600; color: var(--slate); text-transform: uppercase; letter-spacing: 0.04em; }
+    .checks { display: flex; flex-direction: column; gap: 5px; }
+    .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+    .check.pass { color: var(--success); } .check.fail { color: var(--danger); }
+    .check-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
+    .check.pass .check-dot { background: var(--success); } .check.fail .check-dot { background: var(--danger); }
+    .submit-btn { width: 100%; padding: 15px; background: var(--amber); color: var(--charcoal); border: none; border-radius: var(--radius); font-size: 16px; font-weight: 700; cursor: pointer; letter-spacing: -0.2px; transition: background 0.15s; -webkit-tap-highlight-color: transparent; font-family: inherit; }
+    .submit-btn:active { background: var(--amber-dark); }
+    .submit-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .status-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); align-items: center; justify-content: center; padding: 24px; z-index: 100; }
+    .status-overlay.visible { display: flex; }
+    .status-card { background: var(--surface); border-radius: 16px; width: 100%; max-width: 400px; overflow: hidden; }
+    .status-header { padding: 20px 20px 0; }
+    .status-icon { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+    .status-icon.spinning { background: var(--amber-light); }
+    .status-icon.success { background: var(--success-bg); }
+    .status-icon.error { background: #FEE8E6; }
+    .status-title { font-size: 17px; font-weight: 700; color: var(--text); padding-bottom: 16px; }
+    .status-body { padding: 0 20px 16px; font-size: 14px; color: var(--muted); line-height: 1.5; }
+    .status-progress { height: 3px; background: var(--border); margin: 0 20px 16px; border-radius: 2px; overflow: hidden; }
+    .status-progress-bar { height: 100%; background: var(--amber); border-radius: 2px; transition: width 0.8s ease; width: 0%; }
+    .status-actions { padding: 0 20px 20px; display: flex; gap: 10px; }
+    .btn-secondary { flex: 1; padding: 12px; background: transparent; border: 1.5px solid var(--border); border-radius: var(--radius); font-size: 14px; font-weight: 600; color: var(--slate); cursor: pointer; font-family: inherit; }
+    .btn-primary { flex: 1; padding: 12px; background: var(--amber); border: none; border-radius: var(--radius); font-size: 14px; font-weight: 700; color: var(--charcoal); cursor: pointer; font-family: inherit; }
+    .config-toggle { width: 100%; max-width: 480px; text-align: center; padding: 14px 0 6px; }
+    .config-link { font-size: 12px; color: rgba(255,255,255,0.22); cursor: pointer; letter-spacing: 0.05em; }
+    .config-panel { display: none; width: 100%; max-width: 480px; background: rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; margin-top: 8px; gap: 12px; flex-direction: column; }
+    .config-panel.open { display: flex; }
+    .config-panel label { color: rgba(255,255,255,0.5); }
+    .config-panel input { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.12); color: #fff; font-size: 13px; font-family: 'Courier New', monospace; }
+    .config-panel input::placeholder { color: rgba(255,255,255,0.18); }
+    .config-panel input:focus { border-color: var(--amber); }
+    .config-save { padding: 10px; background: var(--amber); color: var(--charcoal); border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .history-section { width: 100%; max-width: 480px; margin-top: 16px; }
+    .history-label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.22); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; }
+    .history-item { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); border-radius: 10px; padding: 10px 14px; margin-bottom: 6px; }
+    .history-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .history-dot.sent { background: #4CD964; } .history-dot.failed { background: var(--danger); }
+    .history-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.8); flex: 1; }
+    .history-meta { font-size: 11px; color: rgba(255,255,255,0.28); }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg class="logo-mark" viewBox="0 0 36 36" fill="none">
+    <rect x="10" y="24" width="16" height="5" rx="2" fill="#D4A017"/>
+    <rect x="7"  y="18" width="22" height="5" rx="2" fill="#787878"/>
+    <rect x="12" y="12" width="12" height="5" rx="2" fill="#A0A0A0"/>
+    <rect x="15" y="6"  width="6"  height="5" rx="2" fill="#C0C0C0"/>
+  </svg>
+  <div>
+    <div class="logo-text">Stackstone</div>
+    <div class="logo-tagline">Networking intake</div>
+  </div>
+</header>
+
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">New contact</div>
+    <div class="card-subtitle">All fields required — report sends automatically</div>
+  </div>
+  <div class="amber-rule"></div>
+  <div class="form-body">
+
+    <div class="field-row">
+      <div class="field">
+        <label>First name <span class="req">*</span></label>
+        <input type="text" id="firstName" placeholder="Sarah" autocomplete="given-name">
+      </div>
+      <div class="field">
+        <label>Last name <span class="req">*</span></label>
+        <input type="text" id="lastName" placeholder="Jones" autocomplete="family-name">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Their email <span class="req">*</span></label>
+      <input type="email" id="email" placeholder="sarah@acmeltd.co.uk" autocomplete="email" inputmode="email">
+    </div>
+
+    <div class="field">
+      <label>Company website <span class="req">*</span></label>
+      <input type="text" id="website" placeholder="acmeltd.co.uk" inputmode="url" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <span class="field-hint">Personalises the report — no https needed.</span>
+    </div>
+
+    <div class="validation-bar">
+      <div class="bar-label">Ready to send?</div>
+      <div class="checks" id="checks"></div>
+    </div>
+
+    <button class="submit-btn" id="submitBtn" disabled>Generate &amp; send report</button>
+
+  </div>
+</div>
+
+<div class="config-toggle">
+  <span class="config-link" onclick="toggleConfig()">Configure endpoint</span>
+</div>
+
+<div class="config-panel" id="configPanel">
+  <div class="field">
+    <label>L1 endpoint URL</label>
+    <input type="text" id="cfgEndpoint" placeholder="https://xxxx.trycloudflare.com/intake">
+  </div>
+  <div class="field">
+    <label>API token</label>
+    <input type="password" id="cfgToken" placeholder="shared secret">
+  </div>
+  <button class="config-save" onclick="saveConfig()">Save</button>
+</div>
+
+<div class="history-section" id="historySection" style="display:none">
+  <div class="history-label">Sent today</div>
+  <div id="historyList"></div>
+</div>
+
+<div class="status-overlay" id="statusOverlay">
+  <div class="status-card">
+    <div class="status-header">
+      <div class="status-icon" id="statusIcon"></div>
+      <div class="status-title" id="statusTitle"></div>
+    </div>
+    <div class="status-body" id="statusBody"></div>
+    <div class="status-progress" id="statusProgressWrap">
+      <div class="status-progress-bar" id="statusProgress"></div>
+    </div>
+    <div class="status-actions" id="statusActions"></div>
+  </div>
+</div>
+
+<script>
+const getConfig = () => ({ endpoint: localStorage.getItem('ss_ep') || '', token: localStorage.getItem('ss_tk') || '' });
+
+function saveConfig() {
+  const ep = document.getElementById('cfgEndpoint').value.trim();
+  const tk = document.getElementById('cfgToken').value.trim();
+  if (!ep) { alert('Enter the endpoint URL.'); return; }
+  localStorage.setItem('ss_ep', ep);
+  localStorage.setItem('ss_tk', tk);
+  toggleConfig(); validate();
+}
+
+function toggleConfig() {
+  const p = document.getElementById('configPanel');
+  if (p.classList.toggle('open')) {
+    const c = getConfig();
+    document.getElementById('cfgEndpoint').value = c.endpoint;
+    document.getElementById('cfgToken').value = c.token;
+  }
+}
+
+const RULES = [
+  { id: 'firstName', label: 'First name',      test: v => v.trim().length >= 2 },
+  { id: 'lastName',  label: 'Last name',        test: v => v.trim().length >= 2 },
+  { id: 'email',     label: 'Email address',    test: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) },
+  { id: 'website',   label: 'Company website',  test: v => v.trim().length >= 4 && v.trim().includes('.') },
+];
+
+function validate() {
+  const results = [
+    ...RULES.map(r => {
+      const el = document.getElementById(r.id);
+      const v = el ? el.value : '';
+      const pass = r.test(v);
+      if (el) el.classList.toggle('error', !pass && v.length > 0);
+      return { label: r.label, pass };
+    }),
+    { label: 'Endpoint configured', pass: getConfig().endpoint.startsWith('http') }
+  ];
+  document.getElementById('checks').innerHTML = results.map(r =>
+    `<div class="check ${r.pass ? 'pass' : 'fail'}"><div class="check-dot"></div>${r.label}</div>`
+  ).join('');
+  const ok = results.every(r => r.pass);
+  document.getElementById('submitBtn').disabled = !ok;
+  return ok;
+}
+
+RULES.forEach(r => { const el = document.getElementById(r.id); if (el) el.addEventListener('input', validate); });
+validate();
+
+const getHistory = () => { try { return JSON.parse(localStorage.getItem('ss_hist') || '[]'); } catch { return []; } };
+
+function addHistory(c, status) {
+  const h = getHistory();
+  h.unshift({ name: `${c.firstName} ${c.lastName}`, site: c.website, status, time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) });
+  localStorage.setItem('ss_hist', JSON.stringify(h.slice(0, 20)));
+  renderHistory();
+}
+
+function renderHistory() {
+  const h = getHistory();
+  const sec = document.getElementById('historySection');
+  if (!h.length) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  document.getElementById('historyList').innerHTML = h.map(i =>
+    `<div class="history-item"><div class="history-dot ${i.status}"></div><div><div class="history-name">${i.name}</div><div class="history-meta">${i.site}</div></div><div class="history-meta">${i.time}</div></div>`
+  ).join('');
+}
+renderHistory();
+
+function showStatus(phase, data) {
+  document.getElementById('statusOverlay').classList.add('visible');
+  const icon = document.getElementById('statusIcon');
+  const bar = document.getElementById('statusProgress');
+  const barWrap = document.getElementById('statusProgressWrap');
+  const actions = document.getElementById('statusActions');
+  barWrap.style.display = 'block'; actions.innerHTML = '';
+
+  if (phase === 'generating') {
+    icon.className = 'status-icon spinning';
+    icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 22 22" fill="none" style="animation:spin 1s linear infinite"><circle cx="11" cy="11" r="9" stroke="#D4A017" stroke-width="2.5" stroke-dasharray="28 14" stroke-linecap="round"/><style>@keyframes spin{to{transform:rotate(360deg)}}</style></svg>`;
+    document.getElementById('statusTitle').textContent = 'Building report\u2026';
+    document.getElementById('statusBody').textContent = `Researching ${data.website} and generating a bespoke AI opportunity report for ${data.firstName}. Usually done in under 60 seconds.`;
+    bar.style.width = '8%';
+    let pct = 8;
+    window._pt = setInterval(() => { pct = Math.min(pct + Math.random() * 3, 80); bar.style.width = pct + '%'; }, 1500);
+  }
+  if (phase === 'success') {
+    clearInterval(window._pt); bar.style.width = '100%';
+    setTimeout(() => barWrap.style.display = 'none', 500);
+    icon.className = 'status-icon success';
+    icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M4 11l5.5 5.5 8.5-9" stroke="#1A7340" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    document.getElementById('statusTitle').textContent = 'Report sent';
+    document.getElementById('statusBody').textContent = `The branded .docx AI opportunity report has been sent to ${data.email}.`;
+    actions.innerHTML = `<button class="btn-secondary" onclick="closeStatus()">Done</button><button class="btn-primary" onclick="newContact()">New contact</button>`;
+  }
+  if (phase === 'error') {
+    clearInterval(window._pt); barWrap.style.display = 'none';
+    icon.className = 'status-icon error';
+    icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M5 5l12 12M17 5L5 17" stroke="#C0392B" stroke-width="2" stroke-linecap="round"/></svg>`;
+    document.getElementById('statusTitle').textContent = 'Send failed';
+    document.getElementById('statusBody').textContent = data.message || 'Could not reach the Pi. Check endpoint configuration.';
+    actions.innerHTML = `<button class="btn-secondary" onclick="closeStatus()">Cancel</button><button class="btn-primary" onclick="retrySubmit()">Retry</button>`;
+  }
+}
+
+function closeStatus() { document.getElementById('statusOverlay').classList.remove('visible'); clearInterval(window._pt); }
+
+function newContact() {
+  closeStatus();
+  RULES.forEach(r => { const el = document.getElementById(r.id); if (el) { el.value = ''; el.classList.remove('error'); } });
+  validate();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+let lastPayload = null;
+
+document.getElementById('submitBtn').addEventListener('click', async () => {
+  if (!validate()) return;
+  const cfg = getConfig();
+  const payload = {
+    firstName: document.getElementById('firstName').value.trim(),
+    lastName:  document.getElementById('lastName').value.trim(),
+    email:     document.getElementById('email').value.trim().toLowerCase(),
+    website:   document.getElementById('website').value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''),
+    sentAt:    new Date().toISOString()
+  };
+  lastPayload = payload;
+  showStatus('generating', payload);
+
+  try {
+    const resp = await fetch(cfg.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.token}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(180000)
+    });
+    if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error(`L1 returned ${resp.status}${t ? ': ' + t : ''}`); }
+    addHistory(payload, 'sent');
+    showStatus('success', payload);
+  } catch (err) {
+    addHistory(payload, 'failed');
+    showStatus('error', { message: err.message });
+  }
+});
+
+function retrySubmit() { closeStatus(); setTimeout(() => document.getElementById('submitBtn').click(), 300); }
+</script>
+</body>
+</html>
