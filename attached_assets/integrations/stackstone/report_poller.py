@@ -411,6 +411,7 @@ def main() -> None:
         reports = fetch_unsent_reports()
     except Exception as e:
         log_err(f"Failed to fetch reports: {e}")
+        notify(f"FAILED to poll integration API for unsent reports: {e}")
         return
 
     if not reports:
