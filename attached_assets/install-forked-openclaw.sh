@@ -468,6 +468,28 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Stackstone networking report poller
+# Polls /api/integration/reports every 5 minutes and sends unsent reports
+# as branded emails via MS Graph. No tunnel or endpoint needed on the Pi.
+# ---------------------------------------------------------------------------
+SS_POLLER_SRC="$HOME/openclaw/attached_assets/integrations/stackstone/report_poller.py"
+SS_POLLER_DST="$HOME/.openclaw/integrations/stackstone/report_poller.py"
+SS_POLLER_LOG="$HOME/.openclaw/integrations/stackstone/poller.log"
+
+if [ -f "$SS_POLLER_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/stackstone"
+    cp "$SS_POLLER_SRC" "$SS_POLLER_DST"
+    chmod +x "$SS_POLLER_DST"
+    info "Stackstone report poller deployed: $SS_POLLER_DST"
+
+    SS_CRON="*/5 * * * * python3 $SS_POLLER_DST >> $SS_POLLER_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "stackstone/report_poller.py"; echo "$SS_CRON" ) | crontab -
+    info "Stackstone report poller cron installed: runs every 5 minutes"
+else
+    warn "Stackstone report poller not found at $SS_POLLER_SRC — skipping"
+fi
+
+# ---------------------------------------------------------------------------
 # WhatsApp rolling recent file
 # Generates WHATSAPP_RECENT.md (last 48h) from the full WHATSAPP_LOG.md.
 # L1 reads WHATSAPP_RECENT.md — keeps context small without losing history.
@@ -812,4 +834,13 @@ echo "    bash ~/install-forked-openclaw.sh"
 echo ""
 echo "  To check status:"
 echo "    openclaw doctor"
+echo ""
+echo "  Stackstone report poller:"
+echo "    Runs every 5 min — polls stackstoneconsulting.co.uk/api/integration/reports"
+echo "    Uses INTEGRATION_API_KEY (already configured) and the MS Graph token."
+echo "    If STACKSTONE_BASE_URL is not set it defaults to https://stackstoneconsulting.co.uk"
+echo "    To override (e.g. for testing against a Replit dev URL):"
+echo "      export STACKSTONE_BASE_URL=https://your-replit-dev-url.replit.dev"
+echo "    Logs: ~/.openclaw/integrations/stackstone/poller.log"
+echo "    Test manually: python3 ~/.openclaw/integrations/stackstone/report_poller.py"
 echo ""
