@@ -253,120 +253,101 @@ def get_access_token() -> str:
 
 
 # ── Email HTML template ───────────────────────────────────────────────────────
-# Cross-client safe: fully inline styles, table layout, VML button for Outlook.
-# No <style> blocks — Gmail strips them. No SVG — most clients don't render it.
+# Personal text-style email — matches Tom's cold outreach style.
+# No images, no background colours, no button boxes. Just text, amber links,
+# and horizontal rules. Renders identically everywhere and degrades to plain text.
 
 def build_email_html(first_name: str, company_name: str, report_url: str,
                      sender_email: str, sender_name: str) -> str:
-    # All styles are inline — Gmail strips <style> blocks entirely.
-    # Layout uses tables throughout — no divs, no flexbox, no CSS classes.
-    # CTA button uses the bulletproof VML pattern so Outlook renders it correctly.
+    # Minimal personal-feel HTML — matches the style of Tom's cold outreach emails.
+    # No images, no background colours, no button boxes. Just text, links, and rules.
+    # Renders consistently in Gmail, Outlook, Apple Mail and dark mode because
+    # there is nothing to fail — it degrades gracefully to plain text.
+    F = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;"
     return f"""<!DOCTYPE html>
-<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="x-apple-disable-message-reformatting">
 <title>Your AI Opportunity Report</title>
-<!--[if mso]>
-<noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
-<![endif]-->
 </head>
-<body style="margin:0;padding:0;background-color:#F0EEE9;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<body style="margin:0;padding:0;background-color:#ffffff;{F}-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
 
-<!-- Outer wrapper -->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F0EEE9;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
   <tr>
-    <td align="center" style="padding:32px 16px;">
+    <td align="center" style="padding:32px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
 
-      <!-- Card -->
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;background-color:#ffffff;border-radius:8px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
-
-        <!-- Header: charcoal background with logo -->
+        <!-- Headline -->
         <tr>
-          <td style="background-color:#2C2C2E;padding:24px 32px 22px 32px;">
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-              <tr>
-                <!-- Bar chart icon: 4 coloured rectangles side by side -->
-                <td style="padding-right:10px;vertical-align:middle;">
-                  <table role="presentation" cellpadding="0" cellspacing="1" border="0" style="display:inline-table;">
-                    <tr>
-                      <td style="width:5px;height:10px;background-color:#C0C0C0;vertical-align:bottom;"></td>
-                      <td style="width:5px;height:14px;background-color:#A0A0A0;vertical-align:bottom;"></td>
-                      <td style="width:5px;height:18px;background-color:#787878;vertical-align:bottom;"></td>
-                      <td style="width:5px;height:22px;background-color:#D4A017;vertical-align:bottom;"></td>
-                    </tr>
-                  </table>
-                </td>
-                <td style="vertical-align:middle;">
-                  <span style="color:#ffffff;font-size:17px;font-weight:700;letter-spacing:-0.3px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Stackstone Consulting</span>
-                </td>
-              </tr>
+          <td style="padding-bottom:6px;">
+            <p style="margin:0;{F}font-size:26px;font-weight:700;line-height:1.2;color:#1C1C1E;">Your AI opportunity report</p>
+            <p style="margin:6px 0 0 0;{F}font-size:18px;font-weight:600;line-height:1.3;color:#D4A017;">for {company_name}.</p>
+          </td>
+        </tr>
+
+        <!-- Rule -->
+        <tr>
+          <td style="padding:20px 0 20px 0;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr><td style="height:1px;background-color:#E0DDD6;font-size:0;line-height:0;">&nbsp;</td></tr>
             </table>
           </td>
         </tr>
 
-        <!-- Amber rule -->
+        <!-- Body -->
         <tr>
-          <td style="height:3px;background-color:#D4A017;font-size:0;line-height:0;">&nbsp;</td>
-        </tr>
-
-        <!-- Hero: dark slate with greeting -->
-        <tr>
-          <td style="background-color:#48484A;padding:28px 32px 24px 32px;">
-            <p style="margin:0 0 10px 0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Hi {first_name},</p>
-            <p style="margin:0;color:rgba(255,255,255,0.65);font-size:14px;line-height:1.65;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Great to meet you. I've put together a personalised AI opportunity report for you — specific to {company_name} and where you are right now.</p>
+          <td>
+            <p style="margin:0 0 16px 0;{F}font-size:15px;line-height:1.75;color:#1C1C1E;">Hi {first_name},</p>
+            <p style="margin:0 0 16px 0;{F}font-size:15px;line-height:1.75;color:#1C1C1E;">Great to meet you. I've put together a personalised AI opportunity report based on our conversation — specific to where {company_name} is right now.</p>
+            <p style="margin:0 0 16px 0;{F}font-size:15px;line-height:1.75;color:#1C1C1E;">It covers where AI can make the biggest practical difference for a business in your position. No jargon, no vendor pitches &mdash; just realistic opportunities with honest context on what to watch out for.</p>
+            <p style="margin:0 0 16px 0;{F}font-size:15px;line-height:1.75;color:#1C1C1E;">Inside: your sector context, a primary opportunity specific to you, three things you could act on in the next 90 days, and honest things to consider so you go in with eyes open.</p>
           </td>
         </tr>
 
-        <!-- Body copy -->
+        <!-- CTA link -->
         <tr>
-          <td style="background-color:#ffffff;padding:32px 32px 8px 32px;">
-            <p style="margin:0 0 18px 0;color:#3C3C3E;font-size:15px;line-height:1.7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">It covers where AI can make the biggest practical difference for a business in your position, with realistic timelines and no fluff.</p>
-            <p style="margin:0 0 28px 0;color:#3C3C3E;font-size:15px;line-height:1.7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Inside: your sector context, a primary opportunity specific to you, three quick wins you could act on in the next 90 days, and honest things to consider so you go in with eyes open.</p>
-
-            <!-- Bulletproof CTA button -->
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
-              <tr>
-                <td style="border-radius:6px;background-color:#D4A017;" align="center">
-                  <!--[if mso]>
-                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"
-                    href="{report_url}"
-                    style="height:48px;v-text-anchor:middle;width:200px;"
-                    arcsize="10%" stroke="f" fillcolor="#D4A017">
-                    <w:anchorlock/>
-                    <center style="color:#2C2C2E;font-family:sans-serif;font-size:15px;font-weight:700;">View your report</center>
-                  </v:roundrect>
-                  <![endif]-->
-                  <!--[if !mso]><!-->
-                  <a href="{report_url}" target="_blank"
-                     style="display:inline-block;background-color:#D4A017;color:#2C2C2E;text-decoration:none;padding:14px 32px;border-radius:6px;font-size:15px;font-weight:700;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;mso-hide:all;">View your report</a>
-                  <!--<![endif]-->
-                </td>
-              </tr>
-            </table>
-
-            <p style="margin:0 0 32px 0;color:#AEAEB2;font-size:12px;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">The report also has a PDF download button if you'd like to save or share it internally. The link doesn't expire.</p>
-          </td>
-        </tr>
-
-        <!-- Footer -->
-        <tr>
-          <td style="background-color:#F0EEE9;padding:20px 32px 24px 32px;border-top:1px solid #E0DDD6;">
-            <p style="margin:0 0 4px 0;color:#6C6C70;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;"><strong style="color:#48484A;">{sender_name}</strong> &mdash; Founder, Stackstone Consulting</p>
-            <p style="margin:0 0 4px 0;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
-              <a href="mailto:{sender_email}" style="color:#6C6C70;text-decoration:none;">{sender_email}</a>
-              <span style="color:#AEAEB2;">&nbsp;&nbsp;|&nbsp;&nbsp;</span>
-              <a href="https://stackstoneconsulting.co.uk" style="color:#6C6C70;text-decoration:none;">stackstoneconsulting.co.uk</a>
+          <td style="padding:8px 0 24px 0;">
+            <p style="margin:0;{F}font-size:15px;line-height:1.75;color:#1C1C1E;">
+              <a href="{report_url}" target="_blank" style="color:#D4A017;font-weight:700;text-decoration:underline;">Read your report &rarr;</a>
             </p>
-            <p style="margin:0;color:#AEAEB2;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Abingdon, Oxfordshire</p>
+            <p style="margin:8px 0 0 0;{F}font-size:13px;line-height:1.6;color:#8E8E93;">There's a PDF download button on the page if you'd like to save or share it. The link doesn't expire.</p>
+          </td>
+        </tr>
+
+        <!-- Rule -->
+        <tr>
+          <td style="padding:4px 0 20px 0;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr><td style="height:1px;background-color:#E0DDD6;font-size:0;line-height:0;">&nbsp;</td></tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Signature -->
+        <tr>
+          <td>
+            <p style="margin:0 0 2px 0;{F}font-size:14px;font-weight:700;color:#1C1C1E;">{sender_name}</p>
+            <p style="margin:0 0 2px 0;{F}font-size:13px;color:#6C6C70;">Founder, Stackstone Consulting</p>
+            <p style="margin:0 0 2px 0;{F}font-size:13px;">
+              <a href="https://stackstoneconsulting.co.uk" style="color:#D4A017;text-decoration:none;">stackstoneconsulting.co.uk</a>
+            </p>
+            <p style="margin:0 0 2px 0;{F}font-size:13px;">
+              <a href="mailto:{sender_email}" style="color:#6C6C70;text-decoration:none;">{sender_email}</a>
+            </p>
+            <p style="margin:0;{F}font-size:13px;color:#6C6C70;">Abingdon, Oxfordshire</p>
+          </td>
+        </tr>
+
+        <!-- Unsubscribe note -->
+        <tr>
+          <td style="padding-top:28px;">
+            <p style="margin:0;{F}font-size:11px;color:#AEAEB2;font-style:italic;">If you'd rather not hear from us, just reply &ldquo;unsubscribe&rdquo;.</p>
           </td>
         </tr>
 
       </table>
-      <!-- /Card -->
-
     </td>
   </tr>
 </table>
