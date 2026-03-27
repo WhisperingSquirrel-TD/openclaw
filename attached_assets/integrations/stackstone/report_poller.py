@@ -37,6 +37,30 @@ LOCK_FILE  = Path("/tmp/openclaw-stackstone-report-poller.lock")
 LOG_PREFIX = "[stackstone-report-poller]"
 
 
+# ── Load .env early — cron runs with a minimal shell environment ──────────────
+# Reads ~/.openclaw/.env (key=value format, # comments, no shell expansion).
+# Only sets vars that aren't already in the environment so explicit exports win.
+
+def _load_dotenv() -> None:
+    env_file = STATE_DIR / ".env"
+    if not env_file.exists():
+        return
+    try:
+        for raw_line in env_file.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key   = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except Exception:
+        pass
+
+_load_dotenv()
+
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 def ts() -> str:
@@ -360,6 +384,8 @@ def fetch_unsent_reports() -> list[dict]:
 
 
 def mark_report_sent(uuid: str) -> None:
+    """Mark a report as email-sent on the website. Raises on failure so the
+    caller can treat an un-acknowledged send as a failure and retry next poll."""
     base    = get_base_url()
     api_key = get_api_key()
     resp = requests.patch(
@@ -368,7 +394,10 @@ def mark_report_sent(uuid: str) -> None:
         timeout=10,
     )
     if not resp.ok:
-        log_err(f"Failed to mark {uuid} as sent: {resp.status_code} {resp.text}")
+        raise RuntimeError(
+            f"PATCH /api/integration/reports/{uuid}/sent failed: "
+            f"{resp.status_code} {resp.text}"
+        )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
