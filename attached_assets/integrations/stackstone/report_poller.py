@@ -252,68 +252,125 @@ def get_access_token() -> str:
     return _refresh_access_token(token_data, token_file)
 
 
-# ── Email HTML template (matches send-report-server.js exactly) ───────────────
+# ── Email HTML template ───────────────────────────────────────────────────────
+# Cross-client safe: fully inline styles, table layout, VML button for Outlook.
+# No <style> blocks — Gmail strips them. No SVG — most clients don't render it.
 
 def build_email_html(first_name: str, company_name: str, report_url: str,
                      sender_email: str, sender_name: str) -> str:
+    # All styles are inline — Gmail strips <style> blocks entirely.
+    # Layout uses tables throughout — no divs, no flexbox, no CSS classes.
+    # CTA button uses the bulletproof VML pattern so Outlook renders it correctly.
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="x-apple-disable-message-reformatting">
 <title>Your AI Opportunity Report</title>
-<style>
-  body{{margin:0;padding:0;background:#F0EEE9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}}
-  .wrap{{max-width:580px;margin:32px auto;background:#fff;border-radius:8px;overflow:hidden}}
-  .top{{background:#2C2C2E;padding:24px 32px 0}}
-  .logo-row{{display:flex;align-items:center;gap:10px;margin-bottom:20px}}
-  .logo-name{{color:#fff;font-size:17px;font-weight:700;letter-spacing:-0.3px}}
-  .rule{{height:3px;background:#D4A017}}
-  .hero{{background:#48484A;padding:24px 32px}}
-  .hero h1{{color:#fff;font-size:20px;font-weight:700;margin:0 0 8px}}
-  .hero p{{color:rgba(255,255,255,0.6);font-size:14px;margin:0;line-height:1.6}}
-  .body{{padding:32px}}
-  .body p{{font-size:15px;color:#3C3C3E;line-height:1.7;margin:0 0 16px}}
-  .cta-wrap{{margin:24px 0 0}}
-  .cta-btn{{display:inline-block;background:#D4A017;color:#2C2C2E;text-decoration:none;padding:14px 28px;border-radius:6px;font-size:15px;font-weight:700}}
-  .note{{font-size:12px;color:#AEAEB2;margin-top:16px !important}}
-  .footer{{background:#F0EEE9;padding:20px 32px;border-top:1px solid #E0DDD6}}
-  .footer p{{font-size:12px;color:#8E8E93;margin:0 0 3px;line-height:1.5}}
-  .footer a{{color:#8E8E93}}
-</style>
+<!--[if mso]>
+<noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+<![endif]-->
 </head>
-<body>
-<div class="wrap">
-  <div class="top">
-    <div class="logo-row">
-      <svg width="26" height="26" viewBox="0 0 36 36" fill="none">
-        <rect x="10" y="24" width="16" height="5" rx="2" fill="#D4A017"/>
-        <rect x="7" y="18" width="22" height="5" rx="2" fill="#787878"/>
-        <rect x="12" y="12" width="12" height="5" rx="2" fill="#A0A0A0"/>
-        <rect x="15" y="6" width="6" height="5" rx="2" fill="#C0C0C0"/>
-      </svg>
-      <span class="logo-name">Stackstone Consulting</span>
-    </div>
-  </div>
-  <div class="rule"></div>
-  <div class="hero">
-    <h1>Hi {first_name},</h1>
-    <p>Great to meet you. I've put together a personalised AI opportunity report for you — specific to {company_name} and where you are right now.</p>
-  </div>
-  <div class="body">
-    <p>It covers where AI can make the biggest practical difference for a business in your position, with realistic timelines and no fluff.</p>
-    <p>Inside: your sector context, a primary opportunity specific to you, three quick wins you could act on in the next 90 days, and honest things to consider so you go in with eyes open.</p>
-    <div class="cta-wrap">
-      <a href="{report_url}" class="cta-btn">View your report</a>
-    </div>
-    <p class="note">The report also has a PDF download button if you'd like to save or share it internally. The link doesn't expire.</p>
-  </div>
-  <div class="footer">
-    <p><strong>{sender_name}</strong> — Founder, Stackstone Consulting</p>
-    <p><a href="mailto:{sender_email}">{sender_email}</a> &nbsp;|&nbsp; <a href="https://stackstoneconsulting.co.uk">stackstoneconsulting.co.uk</a></p>
-    <p>Abingdon, Oxfordshire</p>
-  </div>
-</div>
+<body style="margin:0;padding:0;background-color:#F0EEE9;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+
+<!-- Outer wrapper -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F0EEE9;">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+
+      <!-- Card -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;background-color:#ffffff;border-radius:8px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+
+        <!-- Header: charcoal background with logo -->
+        <tr>
+          <td style="background-color:#2C2C2E;padding:24px 32px 22px 32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <!-- Bar chart icon: 4 coloured rectangles side by side -->
+                <td style="padding-right:10px;vertical-align:middle;">
+                  <table role="presentation" cellpadding="0" cellspacing="1" border="0" style="display:inline-table;">
+                    <tr>
+                      <td style="width:5px;height:10px;background-color:#C0C0C0;vertical-align:bottom;"></td>
+                      <td style="width:5px;height:14px;background-color:#A0A0A0;vertical-align:bottom;"></td>
+                      <td style="width:5px;height:18px;background-color:#787878;vertical-align:bottom;"></td>
+                      <td style="width:5px;height:22px;background-color:#D4A017;vertical-align:bottom;"></td>
+                    </tr>
+                  </table>
+                </td>
+                <td style="vertical-align:middle;">
+                  <span style="color:#ffffff;font-size:17px;font-weight:700;letter-spacing:-0.3px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Stackstone Consulting</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Amber rule -->
+        <tr>
+          <td style="height:3px;background-color:#D4A017;font-size:0;line-height:0;">&nbsp;</td>
+        </tr>
+
+        <!-- Hero: dark slate with greeting -->
+        <tr>
+          <td style="background-color:#48484A;padding:28px 32px 24px 32px;">
+            <p style="margin:0 0 10px 0;color:#ffffff;font-size:22px;font-weight:700;line-height:1.2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Hi {first_name},</p>
+            <p style="margin:0;color:rgba(255,255,255,0.65);font-size:14px;line-height:1.65;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Great to meet you. I've put together a personalised AI opportunity report for you — specific to {company_name} and where you are right now.</p>
+          </td>
+        </tr>
+
+        <!-- Body copy -->
+        <tr>
+          <td style="background-color:#ffffff;padding:32px 32px 8px 32px;">
+            <p style="margin:0 0 18px 0;color:#3C3C3E;font-size:15px;line-height:1.7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">It covers where AI can make the biggest practical difference for a business in your position, with realistic timelines and no fluff.</p>
+            <p style="margin:0 0 28px 0;color:#3C3C3E;font-size:15px;line-height:1.7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Inside: your sector context, a primary opportunity specific to you, three quick wins you could act on in the next 90 days, and honest things to consider so you go in with eyes open.</p>
+
+            <!-- Bulletproof CTA button -->
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+              <tr>
+                <td style="border-radius:6px;background-color:#D4A017;" align="center">
+                  <!--[if mso]>
+                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"
+                    href="{report_url}"
+                    style="height:48px;v-text-anchor:middle;width:200px;"
+                    arcsize="10%" stroke="f" fillcolor="#D4A017">
+                    <w:anchorlock/>
+                    <center style="color:#2C2C2E;font-family:sans-serif;font-size:15px;font-weight:700;">View your report</center>
+                  </v:roundrect>
+                  <![endif]-->
+                  <!--[if !mso]><!-->
+                  <a href="{report_url}" target="_blank"
+                     style="display:inline-block;background-color:#D4A017;color:#2C2C2E;text-decoration:none;padding:14px 32px;border-radius:6px;font-size:15px;font-weight:700;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;mso-hide:all;">View your report</a>
+                  <!--<![endif]-->
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 32px 0;color:#AEAEB2;font-size:12px;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">The report also has a PDF download button if you'd like to save or share it internally. The link doesn't expire.</p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background-color:#F0EEE9;padding:20px 32px 24px 32px;border-top:1px solid #E0DDD6;">
+            <p style="margin:0 0 4px 0;color:#6C6C70;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;"><strong style="color:#48484A;">{sender_name}</strong> &mdash; Founder, Stackstone Consulting</p>
+            <p style="margin:0 0 4px 0;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+              <a href="mailto:{sender_email}" style="color:#6C6C70;text-decoration:none;">{sender_email}</a>
+              <span style="color:#AEAEB2;">&nbsp;&nbsp;|&nbsp;&nbsp;</span>
+              <a href="https://stackstoneconsulting.co.uk" style="color:#6C6C70;text-decoration:none;">stackstoneconsulting.co.uk</a>
+            </p>
+            <p style="margin:0;color:#AEAEB2;font-size:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Abingdon, Oxfordshire</p>
+          </td>
+        </tr>
+
+      </table>
+      <!-- /Card -->
+
+    </td>
+  </tr>
+</table>
+
 </body>
 </html>"""
 
