@@ -29,10 +29,34 @@
     .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     label { font-size: 12px; font-weight: 600; color: var(--slate); letter-spacing: 0.04em; text-transform: uppercase; }
     label .req { color: var(--amber-dark); margin-left: 2px; }
-    input { width: 100%; padding: 12px 13px; border: 1.5px solid var(--border); border-radius: var(--radius); font-size: 15px; color: var(--text); background: #fff; outline: none; transition: border-color 0.15s; -webkit-appearance: none; appearance: none; font-family: inherit; }
+    label .opt { color: var(--muted); font-weight: 400; margin-left: 4px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+    input[type="text"], input[type="email"] { width: 100%; padding: 12px 13px; border: 1.5px solid var(--border); border-radius: var(--radius); font-size: 15px; color: var(--text); background: #fff; outline: none; transition: border-color 0.15s; -webkit-appearance: none; appearance: none; font-family: inherit; }
     input:focus { border-color: var(--amber); }
     input.error { border-color: var(--danger); background: #FEF8F7; }
     .field-hint { font-size: 12px; color: var(--muted); }
+
+    /* Conversation section */
+    .conv-section { background: #fff; border: 1.5px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .conv-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 13px; border-bottom: 1px solid var(--border); }
+    .conv-label { font-size: 12px; font-weight: 600; color: var(--slate); text-transform: uppercase; letter-spacing: 0.04em; }
+    .conv-who { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+    .conv-who strong { color: var(--slate); font-weight: 600; }
+    .record-btn { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1.5px solid var(--border); border-radius: 20px; background: transparent; font-size: 12px; font-weight: 600; color: var(--slate); cursor: pointer; font-family: inherit; transition: all 0.15s; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+    .record-btn:hover { border-color: var(--amber); }
+    .record-btn.recording { border-color: var(--danger); color: var(--danger); background: #FEF8F7; }
+    .record-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background 0.15s; }
+    .record-btn.recording .record-dot { background: var(--danger); animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .conv-body { position: relative; }
+    textarea#convNotes { width: 100%; min-height: 110px; padding: 12px 13px; border: none; outline: none; resize: vertical; font-size: 14px; color: var(--text); font-family: inherit; line-height: 1.55; background: transparent; }
+    textarea#convNotes::placeholder { color: #B0AFAC; }
+    .interim-overlay { position: absolute; bottom: 8px; left: 13px; right: 13px; font-size: 13px; color: #B0AFAC; font-style: italic; pointer-events: none; line-height: 1.4; }
+    .conv-footer { padding: 7px 13px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .conv-hint { font-size: 11px; color: var(--muted); }
+    .conv-chars { font-size: 11px; color: var(--muted); }
+    .sr-unavailable { padding: 10px 13px; font-size: 13px; color: var(--danger); }
+
+    /* Validation */
     .validation-bar { background: #fff; border: 1.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
     .bar-label { font-size: 12px; font-weight: 600; color: var(--slate); text-transform: uppercase; letter-spacing: 0.04em; }
     .checks { display: flex; flex-direction: column; gap: 5px; }
@@ -43,6 +67,8 @@
     .submit-btn { width: 100%; padding: 15px; background: var(--amber); color: var(--charcoal); border: none; border-radius: var(--radius); font-size: 16px; font-weight: 700; cursor: pointer; letter-spacing: -0.2px; transition: background 0.15s; -webkit-tap-highlight-color: transparent; font-family: inherit; }
     .submit-btn:active { background: var(--amber-dark); }
     .submit-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* Status overlay */
     .status-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); align-items: center; justify-content: center; padding: 24px; z-index: 100; }
     .status-overlay.visible { display: flex; }
     .status-card { background: var(--surface); border-radius: 16px; width: 100%; max-width: 400px; overflow: hidden; }
@@ -57,7 +83,10 @@
     .status-progress-bar { height: 100%; background: var(--amber); border-radius: 2px; transition: width 0.8s ease; width: 0%; }
     .status-actions { padding: 0 20px 20px; display: flex; gap: 10px; }
     .btn-secondary { flex: 1; padding: 12px; background: transparent; border: 1.5px solid var(--border); border-radius: var(--radius); font-size: 14px; font-weight: 600; color: var(--slate); cursor: pointer; font-family: inherit; }
-    .btn-primary { flex: 1; padding: 12px; background: var(--amber); border: none; border-radius: var(--radius); font-size: 14px; font-weight: 700; color: var(--charcoal); cursor: pointer; font-family: inherit; }
+    .btn-primary { flex: 1; padding: 14px; background: var(--amber); border: none; border-radius: var(--radius); font-size: 15px; font-weight: 700; color: var(--charcoal); cursor: pointer; font-family: inherit; }
+    .btn-primary:active { background: var(--amber-dark); }
+
+    /* Config panel */
     .config-toggle { width: 100%; max-width: 480px; text-align: center; padding: 14px 0 6px; }
     .config-link { font-size: 12px; color: rgba(255,255,255,0.22); cursor: pointer; letter-spacing: 0.05em; }
     .config-panel { display: none; width: 100%; max-width: 480px; background: rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; margin-top: 8px; gap: 12px; flex-direction: column; }
@@ -67,6 +96,8 @@
     .config-panel input::placeholder { color: rgba(255,255,255,0.18); }
     .config-panel input:focus { border-color: var(--amber); }
     .config-save { padding: 10px; background: var(--amber); color: var(--charcoal); border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
+
+    /* History */
     .history-section { width: 100%; max-width: 480px; margin-top: 16px; }
     .history-label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.22); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; }
     .history-item { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); border-radius: 10px; padding: 10px 14px; margin-bottom: 6px; }
@@ -94,7 +125,7 @@
 <div class="card">
   <div class="card-header">
     <div class="card-title">New contact</div>
-    <div class="card-subtitle">All fields required — report sends automatically</div>
+    <div class="card-subtitle">Fill in, record the conversation, generate report</div>
   </div>
   <div class="amber-rule"></div>
   <div class="form-body">
@@ -121,6 +152,39 @@
       <span class="field-hint">Personalises the report — no https needed.</span>
     </div>
 
+    <div class="field">
+      <label>Event <span class="opt">(optional)</span></label>
+      <input type="text" id="eventName" placeholder="e.g. Tech Leaders Manchester" autocorrect="off">
+    </div>
+
+    <!-- Conversation recording -->
+    <div class="field">
+      <label>Conversation</label>
+      <div class="conv-section" id="convSection">
+        <div class="conv-header">
+          <span class="conv-label">Notes / transcript</span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="conv-who" id="convWho"></span>
+            <button class="record-btn" id="recordBtn" type="button" onclick="toggleRecording()">
+              <span class="record-dot" id="recordDot"></span>
+              <span id="recordLabel">Record</span>
+            </button>
+          </div>
+        </div>
+        <div id="srUnavailable" class="sr-unavailable" style="display:none">
+          Speech transcription not available in this browser. Type notes manually, or use Chrome on Android/iOS.
+        </div>
+        <div class="conv-body" id="convBody">
+          <textarea id="convNotes" placeholder="Type notes here, or tap Record to transcribe the conversation live. Everything said — by you and the contact — will appear here." rows="5"></textarea>
+          <div class="interim-overlay" id="interimOverlay"></div>
+        </div>
+        <div class="conv-footer">
+          <span class="conv-hint" id="convHint">Optional — adds context to the report</span>
+          <span class="conv-chars" id="convChars"></span>
+        </div>
+      </div>
+    </div>
+
     <div class="validation-bar">
       <div class="bar-label">Ready to send?</div>
       <div class="checks" id="checks"></div>
@@ -137,8 +201,8 @@
 
 <div class="config-panel" id="configPanel">
   <div class="field">
-    <label>L1 endpoint URL</label>
-    <input type="text" id="cfgEndpoint" placeholder="https://xxxx.trycloudflare.com/intake">
+    <label>API endpoint URL</label>
+    <input type="text" id="cfgEndpoint" placeholder="https://stackstoneconsulting.co.uk/api/intake">
   </div>
   <div class="field">
     <label>API token</label>
@@ -167,7 +231,12 @@
 </div>
 
 <script>
-const getConfig = () => ({ endpoint: localStorage.getItem('ss_ep') || '', token: localStorage.getItem('ss_tk') || '' });
+// ── Config ────────────────────────────────────────────────────────────────────
+
+const getConfig = () => ({
+  endpoint: localStorage.getItem('ss_ep') || '',
+  token:    localStorage.getItem('ss_tk') || ''
+});
 
 function saveConfig() {
   const ep = document.getElementById('cfgEndpoint').value.trim();
@@ -187,14 +256,22 @@ function toggleConfig() {
   }
 }
 
+// ── Validation ────────────────────────────────────────────────────────────────
+
 const RULES = [
-  { id: 'firstName', label: 'First name',      test: v => v.trim().length >= 2 },
-  { id: 'lastName',  label: 'Last name',        test: v => v.trim().length >= 2 },
-  { id: 'email',     label: 'Email address',    test: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) },
-  { id: 'website',   label: 'Company website',  test: v => v.trim().length >= 4 && v.trim().includes('.') },
+  { id: 'firstName', label: 'First name',     test: v => v.trim().length >= 2 },
+  { id: 'lastName',  label: 'Last name',       test: v => v.trim().length >= 2 },
+  { id: 'email',     label: 'Email address',   test: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) },
+  { id: 'website',   label: 'Company website', test: v => v.trim().length >= 4 && v.trim().includes('.') },
 ];
 
 function validate() {
+  // Update "currently capturing" label in conversation header
+  const fn = document.getElementById('firstName').value.trim();
+  const ln = document.getElementById('lastName').value.trim();
+  const who = document.getElementById('convWho');
+  who.innerHTML = (fn || ln) ? `Capturing: <strong>${fn} ${ln}</strong>`.trim() : '';
+
   const results = [
     ...RULES.map(r => {
       const el = document.getElementById(r.id);
@@ -216,6 +293,96 @@ function validate() {
 RULES.forEach(r => { const el = document.getElementById(r.id); if (el) el.addEventListener('input', validate); });
 validate();
 
+// ── Conversation char count ───────────────────────────────────────────────────
+
+document.getElementById('convNotes').addEventListener('input', () => {
+  const len = document.getElementById('convNotes').value.length;
+  document.getElementById('convChars').textContent = len > 0 ? `${len} chars` : '';
+});
+
+// ── Speech recognition ────────────────────────────────────────────────────────
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let isRecording = false;
+let committedText = '';  // text already finalised and written to textarea
+
+if (!SR) {
+  document.getElementById('srUnavailable').style.display = 'block';
+  document.getElementById('recordBtn').style.display = 'none';
+} else {
+  recognition = new SR();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-GB';
+  recognition.maxAlternatives = 1;
+
+  recognition.onresult = (event) => {
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        committedText += transcript + ' ';
+      } else {
+        interim = transcript;
+      }
+    }
+    document.getElementById('convNotes').value = committedText;
+    document.getElementById('interimOverlay').textContent = interim;
+    document.getElementById('convChars').textContent =
+      committedText.length > 0 ? `${committedText.length} chars` : '';
+  };
+
+  recognition.onerror = (event) => {
+    // network error or no-speech — just stop cleanly
+    if (event.error !== 'no-speech') {
+      stopRecording();
+    }
+  };
+
+  recognition.onend = () => {
+    // Auto-restart if still in recording state (browser stops after silence)
+    if (isRecording) {
+      try { recognition.start(); } catch(e) { stopRecording(); }
+    }
+  };
+}
+
+function startRecording() {
+  if (!recognition) return;
+  isRecording = true;
+  // Seed committed text from whatever is already in the textarea
+  committedText = document.getElementById('convNotes').value;
+  if (committedText && !committedText.endsWith(' ')) committedText += ' ';
+  try {
+    recognition.start();
+  } catch(e) {
+    isRecording = false;
+    return;
+  }
+  document.getElementById('recordBtn').classList.add('recording');
+  document.getElementById('recordLabel').textContent = 'Stop';
+  document.getElementById('convHint').textContent = 'Transcribing — speak freely, all voices captured';
+}
+
+function stopRecording() {
+  isRecording = false;
+  if (recognition) { try { recognition.stop(); } catch(e) {} }
+  document.getElementById('interimOverlay').textContent = '';
+  document.getElementById('recordBtn').classList.remove('recording');
+  document.getElementById('recordLabel').textContent = 'Record';
+  document.getElementById('convHint').textContent = 'Optional — adds context to the report';
+  // Commit whatever interim text was in the textarea value
+  const ta = document.getElementById('convNotes');
+  if (committedText) ta.value = committedText.trimEnd();
+}
+
+function toggleRecording() {
+  if (isRecording) { stopRecording(); } else { startRecording(); }
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+
 const getHistory = () => { try { return JSON.parse(localStorage.getItem('ss_hist') || '[]'); } catch { return []; } };
 
 function addHistory(c, status) {
@@ -236,10 +403,12 @@ function renderHistory() {
 }
 renderHistory();
 
+// ── Status overlay ────────────────────────────────────────────────────────────
+
 function showStatus(phase, data) {
   document.getElementById('statusOverlay').classList.add('visible');
-  const icon = document.getElementById('statusIcon');
-  const bar = document.getElementById('statusProgress');
+  const icon    = document.getElementById('statusIcon');
+  const bar     = document.getElementById('statusProgress');
   const barWrap = document.getElementById('statusProgressWrap');
   const actions = document.getElementById('statusActions');
   barWrap.style.display = 'block'; actions.innerHTML = '';
@@ -258,16 +427,16 @@ function showStatus(phase, data) {
     setTimeout(() => barWrap.style.display = 'none', 500);
     icon.className = 'status-icon success';
     icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M4 11l5.5 5.5 8.5-9" stroke="#1A7340" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    document.getElementById('statusTitle').textContent = 'Report sent';
-    document.getElementById('statusBody').textContent = `The branded .docx AI opportunity report has been sent to ${data.email}.`;
-    actions.innerHTML = `<button class="btn-secondary" onclick="closeStatus()">Done</button><button class="btn-primary" onclick="newContact()">New contact</button>`;
+    document.getElementById('statusTitle').textContent = 'Report sent \u2014 done!';
+    document.getElementById('statusBody').textContent = `Report on its way to ${data.email}. Tap below to capture your next contact.`;
+    actions.innerHTML = `<button class="btn-primary" onclick="newContact()" style="flex:2">New contact</button><button class="btn-secondary" onclick="closeStatus()">Stay</button>`;
   }
   if (phase === 'error') {
     clearInterval(window._pt); barWrap.style.display = 'none';
     icon.className = 'status-icon error';
     icon.innerHTML = `<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M5 5l12 12M17 5L5 17" stroke="#C0392B" stroke-width="2" stroke-linecap="round"/></svg>`;
     document.getElementById('statusTitle').textContent = 'Send failed';
-    document.getElementById('statusBody').textContent = data.message || 'Could not reach the Pi. Check endpoint configuration.';
+    document.getElementById('statusBody').textContent = data.message || 'Could not reach the endpoint. Check configuration.';
     actions.innerHTML = `<button class="btn-secondary" onclick="closeStatus()">Cancel</button><button class="btn-primary" onclick="retrySubmit()">Retry</button>`;
   }
 }
@@ -276,22 +445,36 @@ function closeStatus() { document.getElementById('statusOverlay').classList.remo
 
 function newContact() {
   closeStatus();
+  stopRecording();
+  committedText = '';
   RULES.forEach(r => { const el = document.getElementById(r.id); if (el) { el.value = ''; el.classList.remove('error'); } });
+  document.getElementById('eventName').value = '';
+  document.getElementById('convNotes').value = '';
+  document.getElementById('convChars').textContent = '';
+  document.getElementById('interimOverlay').textContent = '';
   validate();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  // Auto-focus first name so keyboard opens immediately
+  setTimeout(() => document.getElementById('firstName').focus(), 300);
 }
+
+// ── Submit ────────────────────────────────────────────────────────────────────
 
 let lastPayload = null;
 
 document.getElementById('submitBtn').addEventListener('click', async () => {
   if (!validate()) return;
+  // Stop recording before submit so transcript is finalised
+  if (isRecording) stopRecording();
+
   const cfg = getConfig();
   const payload = {
-    firstName: document.getElementById('firstName').value.trim(),
-    lastName:  document.getElementById('lastName').value.trim(),
-    email:     document.getElementById('email').value.trim().toLowerCase(),
-    website:   document.getElementById('website').value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''),
-    sentAt:    new Date().toISOString()
+    firstName:   document.getElementById('firstName').value.trim(),
+    lastName:    document.getElementById('lastName').value.trim(),
+    email:       document.getElementById('email').value.trim().toLowerCase(),
+    website:     document.getElementById('website').value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, ''),
+    eventName:   document.getElementById('eventName').value.trim() || null,
+    notes:       document.getElementById('convNotes').value.trim() || null,
   };
   lastPayload = payload;
   showStatus('generating', payload);
@@ -303,7 +486,7 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(180000)
     });
-    if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error(`L1 returned ${resp.status}${t ? ': ' + t : ''}`); }
+    if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error(`Server returned ${resp.status}${t ? ': ' + t : ''}`); }
     addHistory(payload, 'sent');
     showStatus('success', payload);
   } catch (err) {
