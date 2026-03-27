@@ -298,11 +298,11 @@ def build_email_html(first_name: str, company_name: str, report_url: str,
   <div class="rule"></div>
   <div class="hero">
     <h1>Hi {first_name},</h1>
-    <p>Great to meet you. Your bespoke AI opportunity report for {company_name} is ready.</p>
+    <p>Great to meet you. I've put together a personalised AI opportunity report for you — specific to {company_name} and where you are right now.</p>
   </div>
   <div class="body">
-    <p>I've put together a report based on research into {company_name} — covering where AI can make the biggest practical difference for a business in your position, with realistic timelines and no fluff.</p>
-    <p>It includes your sector context, a primary opportunity specific to you, three quick wins you could act on in the next 90 days, and honest caveats about what to watch out for.</p>
+    <p>It covers where AI can make the biggest practical difference for a business in your position, with realistic timelines and no fluff.</p>
+    <p>Inside: your sector context, a primary opportunity specific to you, three quick wins you could act on in the next 90 days, and honest things to consider so you go in with eyes open.</p>
     <div class="cta-wrap">
       <a href="{report_url}" class="cta-btn">View your report</a>
     </div>
@@ -322,8 +322,10 @@ def build_email_html(first_name: str, company_name: str, report_url: str,
 
 def send_report_email(access_token: str, report: dict) -> None:
     """Send the branded report email for a single report record."""
-    to_email    = report["to"]["email"]
-    to_name     = report["to"]["name"]
+    to_email    = (report.get("to") or {}).get("email") or ""
+    to_name     = (report.get("to") or {}).get("name") or ""
+    if not to_email:
+        raise ValueError("Report has no recipient email address — skipping")
     first_name  = report["firstName"]
     company     = report["companyName"]
     report_url  = report["reportUrl"]
