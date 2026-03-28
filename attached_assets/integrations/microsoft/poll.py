@@ -183,7 +183,14 @@ def refresh_access_token(token_data: dict) -> str:
         timeout=15,
     )
     resp.raise_for_status()
-    new_data = resp.json()
+    try:
+        new_data = resp.json()
+    except Exception as e:
+        raise ValueError(
+            f"Token refresh failed: Microsoft returned non-JSON response "
+            f"(status {resp.status_code}). Raw: {resp.text[:200]!r}\nError: {e}\n"
+            "FLAG TO TOM: poll.py token refresh got unexpected response — check Microsoft auth."
+        ) from e
     token_data["access_token"]  = new_data["access_token"]
     token_data["refresh_token"] = new_data.get("refresh_token", token_data["refresh_token"])
     _write_token_atomic(TOKEN_FILE, token_data)
@@ -204,7 +211,14 @@ def fetch_emails(access_token: str, folder: str = "inbox", top: int = MAX_RESULT
         time.sleep(retry_after)
         resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"}, params=params, timeout=15)
     resp.raise_for_status()
-    return resp.json().get("value", [])
+    try:
+        return resp.json().get("value", [])
+    except Exception as e:
+        raise ValueError(
+            f"Email fetch failed: Microsoft Graph returned non-JSON response "
+            f"(status {resp.status_code}, folder={folder!r}). Raw: {resp.text[:200]!r}\nError: {e}\n"
+            "FLAG TO TOM: poll.py email fetch got unexpected response — check Microsoft auth or Graph API status."
+        ) from e
 
 
 def load_last_seen() -> dict:

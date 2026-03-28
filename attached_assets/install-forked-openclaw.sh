@@ -207,7 +207,7 @@ CONFIG_FILE="/home/tomdean88/.openclaw/openclaw.json"
 sudo chattr -i "$CONFIG_FILE" 2>/dev/null || true
 
 python3 -c "
-import json, sys
+import json, os, sys
 
 config_path = '$CONFIG_FILE'
 
@@ -250,6 +250,34 @@ else:
         for acc in (tg.get('accounts') or {}).values()
     )
     print(f'Telegram config preserved (botToken present: {has_token})')
+
+# Lock down Discord DM channel to owner only (prevents unsolicited exec/read requests)
+# Set DISCORD_OWNER_USER_ID in ~/.openclaw/.env to enable this lockdown.
+# Find your Discord user ID: Settings -> Advanced -> Enable Developer Mode,
+# then right-click your username anywhere and click 'Copy User ID'.
+discord_owner_id = os.environ.get('DISCORD_OWNER_USER_ID', '').strip()
+if 'discord' in c.get('channels', {}):
+    dc = c['channels']['discord']
+    if not isinstance(dc, dict):
+        dc = {}
+        c['channels']['discord'] = dc
+    if discord_owner_id:
+        current_policy = dc.get('dmPolicy', 'open')
+        if current_policy == 'allowlist' and dc.get('allowFrom') == [f'discord:{discord_owner_id}']:
+            print(f'Discord dmPolicy: already locked to allowlist for user {discord_owner_id}')
+        else:
+            dc['dmPolicy'] = 'allowlist'
+            dc['allowFrom'] = [f'discord:{discord_owner_id}']
+            print(f'Discord dmPolicy: locked to allowlist for user {discord_owner_id} (was: {current_policy})')
+    else:
+        print('WARNING: DISCORD_OWNER_USER_ID not set in environment.')
+        print('  Discord DM channel is NOT locked down — anyone who finds the bot can trigger sessions.')
+        print('  To fix: add DISCORD_OWNER_USER_ID=<your_discord_user_id> to ~/.openclaw/.env')
+        print('  Then source ~/.openclaw/.env and re-run this script.')
+elif discord_owner_id:
+    print('INFO: DISCORD_OWNER_USER_ID set but no Discord channel in config — skipping lockdown')
+else:
+    print('INFO: No Discord channel in config and DISCORD_OWNER_USER_ID not set — skipping Discord lockdown')
 
 # denyCommands:
 # - message.send: removed (watch mode enforces it instead)
