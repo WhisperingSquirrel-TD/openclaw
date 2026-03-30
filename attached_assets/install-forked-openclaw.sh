@@ -436,14 +436,19 @@ print(f'Token efficiency: lightContext={hb[\"lightContext\"]}, heartbeat every={
       f'bootstrapMaxChars={agent_defaults[\"bootstrapMaxChars\"]}')
 
 # Set up QMD as the memory backend
-# backend: "qmd" + searchMode: "search" (BM25, lightweight, works on Pi 4 8GB)
+# Explicitly sets backend="qmd" (migrates from builtin or any other value).
+# searchMode="search" = BM25 keyword (lightweight, works on Pi 4 8GB).
 # To upgrade to semantic search: change searchMode to "vsearch" in openclaw.json
 # and run: systemctl --user restart openclaw-gateway.service
-c.setdefault('memory', {})
-if not isinstance(c['memory'], dict):
+if not isinstance(c.get('memory'), dict):
     c['memory'] = {}
 memory = c['memory']
-memory.setdefault('backend', 'qmd')
+prev_backend = memory.get('backend', 'unset')
+memory['backend'] = 'qmd'
+if prev_backend != 'qmd':
+    print(f'Memory backend: {prev_backend} -> qmd (migrated)')
+else:
+    print('Memory backend: qmd (already set)')
 qmd_cfg = memory.setdefault('qmd', {})
 if not isinstance(qmd_cfg, dict):
     memory['qmd'] = {}
@@ -459,7 +464,7 @@ if not isinstance(scope, dict):
     qmd_cfg['scope'] = {}
     scope = qmd_cfg['scope']
 scope.setdefault('default', 'allow')
-print(f'Memory backend: {memory[\"backend\"]} (searchMode={qmd_cfg[\"searchMode\"]}, timeout={limits[\"timeoutMs\"]}ms)')
+print(f'Memory QMD config: searchMode={qmd_cfg[\"searchMode\"]}, timeout={limits[\"timeoutMs\"]}ms, scope.default={scope[\"default\"]}')
 
 with open(config_path, 'w') as f:
     json.dump(c, f, indent=2)
