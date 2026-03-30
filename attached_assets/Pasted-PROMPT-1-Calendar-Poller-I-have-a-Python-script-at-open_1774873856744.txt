@@ -1,0 +1,40 @@
+PROMPT 1 — Calendar Poller
+
+I have a Python script at ~/.openclaw/integrations/microsoft/poll.py that polls Microsoft Graph API for emails and writes to a markdown file. I need a similar script for calendar events.
+
+Create ~/.openclaw/integrations/microsoft/poll-calendar.py that:
+
+1. Reuses the same token loading/refresh logic as poll.py (load_token, refresh_access_token functions — copy them directly)
+2. Uses the same token file: ~/.openclaw/integrations/microsoft/token-microsoft.json
+3. Fetches calendar events from Microsoft Graph API:
+   GET /me/calendarView?startDateTime=NOW&endDateTime=NOW+14days
+   Fields: subject, start, end, location, attendees, bodyPreview
+4. Writes output to ~/.openclaw/workspace/OUTLOOK_CALENDAR.md in this format:
+
+# Outlook Calendar (Next 14 Days)
+Last updated: YYYY-MM-DD HH:MM
+
+- **[Event title]**
+  [start datetime] --> [end datetime]
+  Location: [location or "—"]
+  Attendees: [email1, email2]
+
+5. Runs in a loop, polling every 15 minutes (sleep 900)
+6. Logs to ~/.openclaw/workspace/memory/poll-calendar-log.txt — MAX 1000 lines (truncate oldest when limit hit)
+7. Uses the same atomic write pattern as poll.py to avoid file corruption
+8. Exits cleanly if token file not found
+
+The script should be a drop-in companion to poll.py — same structure, same error handling style.
+───
+
+PROMPT 2 — Fix poll log runaway growth
+
+I have a Python script at ~/.openclaw/integrations/microsoft/poll.py. It has a log() function that appends to a log file indefinitely. The log file is now 4 million lines and growing.
+
+Fix the log() function to implement log rotation:
+- Max 1000 lines in the log file
+- When appending would exceed 1000 lines, drop the oldest 200 lines (keep the newest 800, then append)
+- Do this in-memory — read, trim, rewrite atomically (use the existing _write_token_atomic pattern but for text)
+- No external dependencies — pure Python stdlib only
+
+Also apply the same fix to any other scripts in the same directory that use a similar append-to-log pattern.
