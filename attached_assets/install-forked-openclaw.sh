@@ -435,36 +435,40 @@ print(f'Token efficiency: lightContext={hb[\"lightContext\"]}, heartbeat every={
       f'activeHours={active_hours[\"start\"]}-{active_hours[\"end\"]}, ' +
       f'bootstrapMaxChars={agent_defaults[\"bootstrapMaxChars\"]}')
 
-# Set up QMD as the memory backend
-# Explicitly sets backend="qmd" (migrates from builtin or any other value).
+# Set up QMD as the memory backend — only when qmd binary is available.
+# Migrates from builtin or any other value. Falls back with a clear warning
+# if the qmd install above failed so the config stays consistent.
 # searchMode="search" = BM25 keyword (lightweight, works on Pi 4 8GB).
-# To upgrade to semantic search: change searchMode to "vsearch" in openclaw.json
-# and run: systemctl --user restart openclaw-gateway.service
+import shutil as _shutil
 if not isinstance(c.get('memory'), dict):
     c['memory'] = {}
 memory = c['memory']
 prev_backend = memory.get('backend', 'unset')
-memory['backend'] = 'qmd'
-if prev_backend != 'qmd':
-    print(f'Memory backend: {prev_backend} -> qmd (migrated)')
+if _shutil.which('qmd'):
+    memory['backend'] = 'qmd'
+    if prev_backend != 'qmd':
+        print(f'Memory backend: {prev_backend} -> qmd (migrated)')
+    else:
+        print('Memory backend: qmd (already set)')
+    qmd_cfg = memory.setdefault('qmd', {})
+    if not isinstance(qmd_cfg, dict):
+        memory['qmd'] = {}
+        qmd_cfg = memory['qmd']
+    qmd_cfg.setdefault('searchMode', 'search')
+    limits = qmd_cfg.setdefault('limits', {})
+    if not isinstance(limits, dict):
+        qmd_cfg['limits'] = {}
+        limits = qmd_cfg['limits']
+    limits.setdefault('timeoutMs', 15000)
+    scope = qmd_cfg.setdefault('scope', {})
+    if not isinstance(scope, dict):
+        qmd_cfg['scope'] = {}
+        scope = qmd_cfg['scope']
+    scope.setdefault('default', 'allow')
+    print(f'Memory QMD config: searchMode={qmd_cfg[\"searchMode\"]}, timeout={limits[\"timeoutMs\"]}ms, scope.default={scope[\"default\"]}')
 else:
-    print('Memory backend: qmd (already set)')
-qmd_cfg = memory.setdefault('qmd', {})
-if not isinstance(qmd_cfg, dict):
-    memory['qmd'] = {}
-    qmd_cfg = memory['qmd']
-qmd_cfg.setdefault('searchMode', 'search')
-limits = qmd_cfg.setdefault('limits', {})
-if not isinstance(limits, dict):
-    qmd_cfg['limits'] = {}
-    limits = qmd_cfg['limits']
-limits.setdefault('timeoutMs', 15000)
-scope = qmd_cfg.setdefault('scope', {})
-if not isinstance(scope, dict):
-    qmd_cfg['scope'] = {}
-    scope = qmd_cfg['scope']
-scope.setdefault('default', 'allow')
-print(f'Memory QMD config: searchMode={qmd_cfg[\"searchMode\"]}, timeout={limits[\"timeoutMs\"]}ms, scope.default={scope[\"default\"]}')
+    print('WARNING: qmd binary not found — memory backend left as builtin (FLAG TO TOM: QMD install failed, re-run script after fixing npm)')
+    memory.setdefault('backend', 'builtin')
 
 with open(config_path, 'w') as f:
     json.dump(c, f, indent=2)
