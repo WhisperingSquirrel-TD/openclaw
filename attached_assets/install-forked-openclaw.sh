@@ -440,6 +440,7 @@ deploy_integration() {
 deploy_integration "$INTEGRATIONS_SRC/config-check/check.py"      "$INTEGRATIONS_DST/config-check/check.py"
 deploy_integration "$INTEGRATIONS_SRC/docx-converter/convert.py"   "$INTEGRATIONS_DST/docx-converter/convert.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/poll.py"           "$INTEGRATIONS_DST/microsoft/poll.py"
+deploy_integration "$INTEGRATIONS_SRC/microsoft/poll-calendar.py"  "$INTEGRATIONS_DST/microsoft/poll-calendar.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/send.py"           "$INTEGRATIONS_DST/microsoft/send.py"
 # Also deploy send.py to the microsoft-l1 folder so the assistant account can send
 mkdir -p "$INTEGRATIONS_DST/microsoft-l1"
@@ -714,6 +715,29 @@ StandardError=append:$AS_LOG
 WantedBy=default.target
 SVCEOF
 
+CAL_POLLER="$HOME/.openclaw/integrations/microsoft/poll-calendar.py"
+CAL_LOG="$HOME/.openclaw/workspace/memory/poll-calendar-log.txt"
+
+cat > "$SYSTEMD_USER_DIR/openclaw-calendar-microsoft.service" << SVCEOF
+[Unit]
+Description=OpenClaw Microsoft Calendar Poller (next 14 days)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=$PYTHON3_BIN $CAL_POLLER
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:$CAL_LOG
+StandardError=append:$CAL_LOG
+
+[Install]
+WantedBy=default.target
+SVCEOF
+
 cat > "$SYSTEMD_USER_DIR/openclaw-email-gmail.service" << SVCEOF
 [Unit]
 Description=OpenClaw Gmail Email Poller
@@ -808,6 +832,16 @@ else
     info "Gmail poller not started (credentials not configured yet)"
 fi
 
+# Calendar poller — shares the same token as the personal Microsoft email poller
+systemctl --user enable openclaw-calendar-microsoft.service 2>/dev/null || true
+if [ -f "$NEW_MS_TOKEN" ] || [ -f "$OLD_MS_TOKEN" ]; then
+    systemctl --user restart openclaw-calendar-microsoft.service && \
+        info "Calendar poller running — writing OUTLOOK_CALENDAR.md every 15 min" || \
+        warn "Calendar poller failed to start — check $CAL_LOG"
+else
+    warn "Calendar poller enabled but not started — Microsoft token missing, run auth first"
+fi
+
 # Step 12a: Set audit log append-only (tamper protection)
 AUDIT_DIR="$HOME/.openclaw/audit"
 if [ -d "$AUDIT_DIR" ]; then
@@ -871,4 +905,10 @@ echo "    To override (e.g. for testing against a Replit dev URL):"
 echo "      export STACKSTONE_BASE_URL=https://your-replit-dev-url.replit.dev"
 echo "    Logs: ~/.openclaw/integrations/stackstone/poller.log"
 echo "    Test manually: python3 ~/.openclaw/integrations/stackstone/report_poller.py"
+echo ""
+echo "  Calendar poller (systemd service: openclaw-calendar-microsoft):"
+echo "    Polls Outlook calendar every 15 min — writes OUTLOOK_CALENDAR.md (next 14 days)"
+echo "    Shares the Microsoft OAuth token (token-microsoft.json)"
+echo "    Logs: ~/.openclaw/workspace/memory/poll-calendar-log.txt"
+echo "    Status: systemctl --user status openclaw-calendar-microsoft.service"
 echo ""
