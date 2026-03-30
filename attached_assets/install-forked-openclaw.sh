@@ -198,6 +198,31 @@ else
     warn "openclaw command not in PATH — use ~/l1-start.sh to run instead"
 fi
 
+# Step 9b: Install QMD memory backend
+# QMD provides local-first semantic memory search — no API keys, no cloud.
+# Default: BM25 keyword search (lightweight, works on all Pi hardware).
+# The Pi 4 8GB is sufficient for full semantic (vsearch) mode — see DONE summary.
+echo ""
+warn "Installing QMD memory backend..."
+if ! command -v qmd &> /dev/null; then
+    npm install -g @tobilu/qmd || warn "QMD install failed — memory backend will fall back to builtin"
+    if command -v qmd &> /dev/null; then
+        info "QMD installed: $(qmd --version 2>/dev/null || echo 'ok')"
+    fi
+else
+    info "QMD already installed: $(qmd --version 2>/dev/null || echo 'installed')"
+fi
+
+# Index the workspace collection (idempotent — re-adding an existing collection is safe)
+QMD_WORKSPACE="$HOME/.openclaw/workspace"
+if command -v qmd &> /dev/null && [ -d "$QMD_WORKSPACE" ]; then
+    qmd collection add "$QMD_WORKSPACE" --name workspace 2>/dev/null && \
+        info "QMD workspace collection indexed: $QMD_WORKSPACE" || \
+        warn "QMD collection indexing failed — L1 will use builtin memory until resolved"
+else
+    warn "QMD not available or workspace missing — skipping collection indexing"
+fi
+
 # Step 10: Update config — set WhatsApp to watch mode
 echo ""
 warn "Updating openclaw.json — setting WhatsApp to watch mode..."
@@ -409,6 +434,32 @@ pruning.setdefault('keepLastAssistants', 5)
 print(f'Token efficiency: lightContext={hb[\"lightContext\"]}, heartbeat every={hb[\"every\"]}, ' +
       f'activeHours={active_hours[\"start\"]}-{active_hours[\"end\"]}, ' +
       f'bootstrapMaxChars={agent_defaults[\"bootstrapMaxChars\"]}')
+
+# Set up QMD as the memory backend
+# backend: "qmd" + searchMode: "search" (BM25, lightweight, works on Pi 4 8GB)
+# To upgrade to semantic search: change searchMode to "vsearch" in openclaw.json
+# and run: systemctl --user restart openclaw-gateway.service
+c.setdefault('memory', {})
+if not isinstance(c['memory'], dict):
+    c['memory'] = {}
+memory = c['memory']
+memory.setdefault('backend', 'qmd')
+qmd_cfg = memory.setdefault('qmd', {})
+if not isinstance(qmd_cfg, dict):
+    memory['qmd'] = {}
+    qmd_cfg = memory['qmd']
+qmd_cfg.setdefault('searchMode', 'search')
+limits = qmd_cfg.setdefault('limits', {})
+if not isinstance(limits, dict):
+    qmd_cfg['limits'] = {}
+    limits = qmd_cfg['limits']
+limits.setdefault('timeoutMs', 15000)
+scope = qmd_cfg.setdefault('scope', {})
+if not isinstance(scope, dict):
+    qmd_cfg['scope'] = {}
+    scope = qmd_cfg['scope']
+scope.setdefault('default', 'allow')
+print(f'Memory backend: {memory[\"backend\"]} (searchMode={qmd_cfg[\"searchMode\"]}, timeout={limits[\"timeoutMs\"]}ms)')
 
 with open(config_path, 'w') as f:
     json.dump(c, f, indent=2)
@@ -911,4 +962,14 @@ echo "    Polls Outlook calendar every 15 min — writes OUTLOOK_CALENDAR.md (ne
 echo "    Shares the Microsoft OAuth token (token-microsoft.json)"
 echo "    Logs: ~/.openclaw/workspace/memory/poll-calendar-log.txt"
 echo "    Status: systemctl --user status openclaw-calendar-microsoft.service"
+echo ""
+echo "  Memory backend: QMD (local-first search, no API keys, no cloud)"
+echo "    Mode: search (BM25 keyword — fast, reliable, Pi-safe)"
+echo "    L1 can now search SOUL.md, notes, and workspace files across sessions"
+echo "    Verify: ask L1 to search her memory for something you know is saved"
+echo "    Upgrade to semantic search (Pi 4 8GB supports it):"
+echo "      sudo chattr -i ~/.openclaw/openclaw.json"
+echo "      # edit: memory.qmd.searchMode = \"vsearch\""
+echo "      sudo chattr +i ~/.openclaw/openclaw.json"
+echo "      systemctl --user restart openclaw-gateway.service"
 echo ""
