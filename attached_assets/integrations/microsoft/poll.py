@@ -75,12 +75,30 @@ def load_known_contacts() -> list[str]:
     return [l.strip().lower() for l in lines if l.strip() and not l.strip().startswith("#")]
 
 
+LOG_MAX_LINES = 1000
+LOG_TRIM_TO   = 800   # keep newest 800 when limit hit (drops oldest 200)
+
+
 def log(msg: str):
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}\n"
-    with open(LOG_FILE, "a") as f:
-        f.write(line)
+    try:
+        existing = LOG_FILE.read_text().splitlines(keepends=True)
+    except FileNotFoundError:
+        existing = []
+    if len(existing) >= LOG_MAX_LINES:
+        existing = existing[-LOG_TRIM_TO:]
+    existing.append(line)
+    tmp = LOG_FILE.with_suffix(".tmp")
+    try:
+        tmp.write_text("".join(existing))
+        tmp.replace(LOG_FILE)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
     print(line, end="")
 
 
