@@ -507,6 +507,47 @@ mkdir -p "$INTEGRATIONS_DST/microsoft-l1"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/send.py"           "$INTEGRATIONS_DST/microsoft-l1/send.py"
 deploy_integration "$INTEGRATIONS_SRC/google/gmail_poll.py"        "$INTEGRATIONS_DST/google/gmail_poll.py"
 
+# ---------------------------------------------------------------------------
+# Garmin Connect daily health poller
+# Fetches resting HR, HRV, sleep, stress, body battery, steps, last activity.
+# Writes GARMIN_DAILY.md once per day at 06:10.
+# First-run: tokens are cached interactively; subsequent runs are unattended.
+# Requires GARMIN_EMAIL and GARMIN_PASSWORD in ~/.openclaw/.env
+# ---------------------------------------------------------------------------
+GARMIN_POLLER_SRC="$HOME/openclaw/attached_assets/integrations/garmin/poll-garmin.py"
+GARMIN_POLLER_DST="$HOME/.openclaw/integrations/garmin/poll-garmin.py"
+GARMIN_TOKEN_STORE="$HOME/.openclaw/integrations/garmin/tokens"
+GARMIN_LOG="$HOME/.openclaw/workspace/memory/poll-garmin-log.txt"
+
+if [ -f "$GARMIN_POLLER_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/garmin"
+    mkdir -p "$GARMIN_TOKEN_STORE"
+    cp "$GARMIN_POLLER_SRC" "$GARMIN_POLLER_DST"
+    chmod +x "$GARMIN_POLLER_DST"
+    info "Garmin poller deployed: $GARMIN_POLLER_DST"
+
+    # Install garminconnect library (idempotent)
+    if pip3 show garminconnect &>/dev/null; then
+        info "garminconnect already installed: $(pip3 show garminconnect | grep ^Version | awk '{print $2}')"
+    else
+        warn "Installing garminconnect Python library..."
+        pip3 install --quiet garminconnect || warn "garminconnect install failed — run manually: pip3 install garminconnect"
+    fi
+
+    # Cron job at 06:10 daily (idempotent)
+    if [ -n "${GARMIN_EMAIL:-}" ] && [ -n "${GARMIN_PASSWORD:-}" ]; then
+        GARMIN_CRON="10 6 * * * GARMIN_EMAIL=$GARMIN_EMAIL GARMIN_PASSWORD=$GARMIN_PASSWORD python3 $GARMIN_POLLER_DST >> $GARMIN_LOG 2>&1"
+        ( crontab -l 2>/dev/null | grep -v "poll-garmin.py"; echo "$GARMIN_CRON" ) | crontab -
+        info "Garmin cron installed: daily at 06:10"
+    else
+        warn "GARMIN_EMAIL / GARMIN_PASSWORD not set — Garmin cron not installed."
+        warn "  Add them to ~/.openclaw/.env, source it, then re-run this script."
+        warn "  First run: python3 $GARMIN_POLLER_DST  (interactive MFA if required)"
+    fi
+else
+    warn "Garmin poller not found at $GARMIN_POLLER_SRC — skipping"
+fi
+
 # Deploy Google Tasks credentials template (only if no credentials file exists yet)
 GOOGLE_CREDS="$HOME/.openclaw/oauth/google/credentials.json"
 if [ ! -f "$GOOGLE_CREDS" ]; then
@@ -971,6 +1012,12 @@ echo "    Polls Outlook calendar every 15 min — writes OUTLOOK_CALENDAR.md (ne
 echo "    Shares the Microsoft OAuth token (token-microsoft.json)"
 echo "    Logs: ~/.openclaw/workspace/memory/poll-calendar-log.txt"
 echo "    Status: systemctl --user status openclaw-calendar-microsoft.service"
+echo ""
+echo "  Garmin Connect poller:"
+echo "    Runs daily at 06:10 — writes GARMIN_DAILY.md (resting HR, HRV, sleep, stress, body battery, steps, last activity)"
+echo "    Requires GARMIN_EMAIL and GARMIN_PASSWORD in ~/.openclaw/.env"
+echo "    First-run (interactive MFA if needed): python3 ~/.openclaw/integrations/garmin/poll-garmin.py"
+echo "    Logs: ~/.openclaw/workspace/memory/poll-garmin-log.txt"
 echo ""
 echo "  Memory backend: QMD (local-first search, no API keys, no cloud)"
 echo "    Mode: search (BM25 keyword — fast, reliable, Pi-safe)"
