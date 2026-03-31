@@ -549,6 +549,27 @@ else
     warn "Garmin poller not found at $GARMIN_POLLER_SRC — skipping"
 fi
 
+# ── CRM lead importer (no LLM, replaces agentTurn cron) ──────────────────────
+# Scheduled at 08:00 — after the prospector runs at 06:00, before Garmin at 09:00.
+# NOT 06:xx (prospector/CRM cron) and NOT 07:xx (another job runs there).
+CRM_POLLER_SRC="$HOME/openclaw/attached_assets/integrations/crm/poll-crm.py"
+CRM_POLLER_DST="$HOME/.openclaw/integrations/crm/poll-crm.py"
+CRM_LOG="$HOME/.openclaw/workspace/memory/poll-crm-log.txt"
+
+if [ -f "$CRM_POLLER_SRC" ]; then
+    mkdir -p "$(dirname "$CRM_POLLER_DST")"
+    cp "$CRM_POLLER_SRC" "$CRM_POLLER_DST"
+    chmod +x "$CRM_POLLER_DST"
+    info "CRM importer deployed: $CRM_POLLER_DST"
+
+    # Idempotent cron registration at 08:00 daily
+    CRM_CRON="0 8 * * * python3 $CRM_POLLER_DST >> $CRM_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "poll-crm.py"; echo "$CRM_CRON" ) | crontab -
+    info "CRM cron installed: daily at 08:00"
+else
+    warn "CRM importer not found at $CRM_POLLER_SRC — skipping"
+fi
+
 # Deploy Google Tasks credentials template (only if no credentials file exists yet)
 GOOGLE_CREDS="$HOME/.openclaw/oauth/google/credentials.json"
 if [ ! -f "$GOOGLE_CREDS" ]; then
@@ -1016,10 +1037,18 @@ echo "    Status: systemctl --user status openclaw-calendar-microsoft.service"
 echo ""
 echo "  Garmin Connect poller:"
 echo "    Runs daily at 09:00 — writes GARMIN_DAILY.md (resting HR, HRV, sleep, stress, body battery, steps, last activity)"
+echo "    Also writes GARMIN_ARCHIVE.md — rolling 28-day compact history for L1 trend analysis"
 echo "    (09:00 chosen — 06:xx busy with CRM, 07:xx busy with another job)"
 echo "    Requires GARMIN_EMAIL and GARMIN_PASSWORD in ~/.openclaw/.env"
 echo "    First-run (interactive MFA if needed): python3 ~/.openclaw/integrations/garmin/poll-garmin.py"
 echo "    Logs: ~/.openclaw/workspace/memory/poll-garmin-log.txt"
+echo ""
+echo "  CRM lead importer (no LLM — replaces agentTurn cron):"
+echo "    Runs daily at 08:00 — imports new leads from ~/prospects/YYYYMMDD/ CSVs into crm.md"
+echo "    Zero LLM overhead — pure Python CSV parse + markdown append (~1 second runtime)"
+echo "    Bounce/unsubscribe/reply detection still handled by L1 during inbox reads"
+echo "    Logs: ~/.openclaw/workspace/memory/poll-crm-log.txt"
+echo "    Test manually: python3 ~/.openclaw/integrations/crm/poll-crm.py"
 echo ""
 echo "  Memory backend: QMD (local-first search, no API keys, no cloud)"
 echo "    Mode: search (BM25 keyword — fast, reliable, Pi-safe)"
