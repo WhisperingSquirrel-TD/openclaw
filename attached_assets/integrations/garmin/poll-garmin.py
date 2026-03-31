@@ -11,7 +11,12 @@ Fetches today's data from Garmin Connect:
   - Step count
   - Most recent activity (name, distance, duration, avg HR)
 
-Writes to ~/.openclaw/workspace/GARMIN_DAILY.md atomically.
+Writes two files:
+  GARMIN_DAILY.md   — today's full snapshot, overwritten each run (never grows)
+  GARMIN_ARCHIVE.md — rolling 28-day history, one compact entry per day,
+                      auto-trimmed on each run. Always in workspace so L1
+                      can spot trends and advise on health patterns.
+
 Caches session tokens to avoid MFA on every run.
 
 Scheduled at 09:00 daily (NOT 06:xx — the CRM runs at 06:00, and 07:00 is
@@ -34,13 +39,15 @@ import json
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
-STATE_DIR   = Path.home() / ".openclaw"
-TOKEN_STORE = STATE_DIR / "integrations/garmin/tokens"
-OUTPUT_MD   = STATE_DIR / "workspace/GARMIN_DAILY.md"
-LOG_FILE    = STATE_DIR / "workspace/memory/poll-garmin-log.txt"
+STATE_DIR          = Path.home() / ".openclaw"
+TOKEN_STORE        = STATE_DIR / "integrations/garmin/tokens"
+OUTPUT_MD          = STATE_DIR / "workspace/GARMIN_DAILY.md"
+ARCHIVE_MD         = STATE_DIR / "workspace/GARMIN_ARCHIVE.md"
+LOG_FILE           = STATE_DIR / "workspace/memory/poll-garmin-log.txt"
 
-LOG_MAX_LINES = 1000
-LOG_TRIM_TO   = 800
+LOG_MAX_LINES      = 1000
+LOG_TRIM_TO        = 800
+ARCHIVE_RETAIN_DAYS = 28     # rolling window — entries older than this are dropped
 
 
 # ── Logging (same rotation pattern as poll.py) ──────────────────────────────
@@ -334,6 +341,95 @@ def build_markdown(stats: dict, hrv: dict, sleep: dict, body_battery_raw,
     return "\n".join(lines)
 
 
+# ── Rolling archive (28-day compact history) ─────────────────────────────────
+
+def build_archive_entry(stats: dict, hrv: dict, sleep: dict, body_battery_raw,
+                        activity: dict) -> str:
+    """One compact line per day — enough for L1 to spot trends."""
+    resting_hr  = _safe(stats.get("restingHeartRate"), " bpm")
+    steps       = stats.get("totalSteps")
+    steps_fmt   = f"{int(steps):,}" if steps else "N/A"
+    avg_stress  = _safe(stats.get("averageStressLevel"), "/100")
+
+    hrv_summary = hrv.get("hrvSummary") or {}
+    hrv_val     = _safe(hrv_summary.get("lastNight"), " ms")
+    hrv_status  = _safe(hrv_summary.get("status"))
+    hrv_str     = f"{hrv_val} ({hrv_status})" if hrv_val != "N/A" else "N/A"
+
+    sleep_dto   = sleep.get("dailySleepDTO") or {}
+    scores      = sleep_dto.get("sleepScores") or {}
+    overall     = scores.get("overall") or {}
+    sleep_score = _safe(overall.get("value"), "/100")
+    sleep_secs  = sleep_dto.get("sleepTimeSeconds") or sleep_dto.get("sleepTimeTotalSeconds")
+    sleep_dur   = _fmt_duration_seconds(sleep_secs)
+    sleep_str   = f"{sleep_dur} ({sleep_score})" if sleep_dur != "N/A" else "N/A"
+
+    bb          = parse_body_battery_peak(body_battery_raw)
+
+    act_name    = activity.get("activityName") or "N/A"
+    act_dist    = _fmt_distance_m(activity.get("distance"))
+    act_str     = f"{act_name} {act_dist}".strip() if activity else "N/A"
+
+    return (
+        f"HR: {resting_hr} | HRV: {hrv_str} | Sleep: {sleep_str} | "
+        f"Stress: {avg_stress} | BB: {bb} | Steps: {steps_fmt} | Activity: {act_str}"
+    )
+
+
+def update_archive(entry_line: str, today: str):
+    """
+    Upsert today's entry into GARMIN_ARCHIVE.md and trim to ARCHIVE_RETAIN_DAYS.
+    Sections are delimited by '## YYYY-MM-DD' headings — one per day.
+    """
+    import re
+    cutoff = (date.today() - timedelta(days=ARCHIVE_RETAIN_DAYS)).strftime("%Y-%m-%d")
+
+    # Load existing archive or start fresh
+    try:
+        raw = ARCHIVE_MD.read_text(encoding="utf-8") if ARCHIVE_MD.exists() else ""
+    except Exception as e:
+        log(f"WARNING: Could not read archive: {e} — starting fresh")
+        raw = ""
+
+    # Split into sections: each starts with '## YYYY-MM-DD'
+    date_pattern = re.compile(r"^## (\d{4}-\d{2}-\d{2})$", re.MULTILINE)
+    matches = list(date_pattern.finditer(raw))
+
+    sections: dict[str, str] = {}  # date_str → body lines (excluding the heading)
+    for i, m in enumerate(matches):
+        sec_date = m.group(1)
+        start    = m.end()
+        end      = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        sections[sec_date] = raw[start:end].strip()
+
+    # Upsert today
+    sections[today] = entry_line
+
+    # Trim to retain window (drop anything older than cutoff)
+    sections = {d: v for d, v in sections.items() if d >= cutoff}
+
+    # Rebuild — newest first
+    updated  = datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines    = [
+        "# Garmin Archive — Rolling 28 Days",
+        f"_Last updated: {updated}_",
+        "",
+        "_One entry per day. HR = resting heart rate. BB = body battery peak. "
+        "Sleep shown as duration (score/100)._",
+        "",
+    ]
+    for d in sorted(sections.keys(), reverse=True):
+        lines.append(f"## {d}")
+        lines.append(sections[d])
+        lines.append("")
+
+    try:
+        write_atomic(ARCHIVE_MD, "\n".join(lines))
+        log(f"Archive updated: {len(sections)} entries (rolling {ARCHIVE_RETAIN_DAYS} days) → {ARCHIVE_MD}")
+    except Exception as e:
+        log(f"WARNING: Could not write archive: {e}")
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -367,6 +463,13 @@ def main():
         log(f"ERROR: Failed to write {OUTPUT_MD}: {e}")
         log("FLAG TO TOM: poll-garmin.py could not write GARMIN_DAILY.md.")
         sys.exit(1)
+
+    # Update rolling 28-day archive (non-fatal — daily file is the priority)
+    try:
+        archive_entry = build_archive_entry(stats, hrv, sleep, body_bat, activity)
+        update_archive(archive_entry, today)
+    except Exception as e:
+        log(f"WARNING: Archive update failed: {e} — daily file is unaffected")
 
     log("Garmin poller complete")
 
