@@ -534,11 +534,12 @@ if [ -f "$GARMIN_POLLER_SRC" ]; then
         pip3 install --quiet garminconnect || warn "garminconnect install failed — run manually: pip3 install garminconnect"
     fi
 
-    # Cron job at 06:10 daily (idempotent)
+    # Cron job at 07:00 daily (idempotent).
+    # NOT 06:xx — the CRM runs at 06:00 and must not be disrupted by competing jobs.
     if [ -n "${GARMIN_EMAIL:-}" ] && [ -n "${GARMIN_PASSWORD:-}" ]; then
-        GARMIN_CRON="10 6 * * * GARMIN_EMAIL=$GARMIN_EMAIL GARMIN_PASSWORD=$GARMIN_PASSWORD python3 $GARMIN_POLLER_DST >> $GARMIN_LOG 2>&1"
+        GARMIN_CRON="0 7 * * * GARMIN_EMAIL=$GARMIN_EMAIL GARMIN_PASSWORD=$GARMIN_PASSWORD python3 $GARMIN_POLLER_DST >> $GARMIN_LOG 2>&1"
         ( crontab -l 2>/dev/null | grep -v "poll-garmin.py"; echo "$GARMIN_CRON" ) | crontab -
-        info "Garmin cron installed: daily at 06:10"
+        info "Garmin cron installed: daily at 07:00 (after CRM window)"
     else
         warn "GARMIN_EMAIL / GARMIN_PASSWORD not set — Garmin cron not installed."
         warn "  Add them to ~/.openclaw/.env, source it, then re-run this script."
@@ -1014,7 +1015,8 @@ echo "    Logs: ~/.openclaw/workspace/memory/poll-calendar-log.txt"
 echo "    Status: systemctl --user status openclaw-calendar-microsoft.service"
 echo ""
 echo "  Garmin Connect poller:"
-echo "    Runs daily at 06:10 — writes GARMIN_DAILY.md (resting HR, HRV, sleep, stress, body battery, steps, last activity)"
+echo "    Runs daily at 07:00 — writes GARMIN_DAILY.md (resting HR, HRV, sleep, stress, body battery, steps, last activity)"
+echo "    (07:00 chosen deliberately — CRM runs at 06:00 and must not be disrupted)"
 echo "    Requires GARMIN_EMAIL and GARMIN_PASSWORD in ~/.openclaw/.env"
 echo "    First-run (interactive MFA if needed): python3 ~/.openclaw/integrations/garmin/poll-garmin.py"
 echo "    Logs: ~/.openclaw/workspace/memory/poll-garmin-log.txt"

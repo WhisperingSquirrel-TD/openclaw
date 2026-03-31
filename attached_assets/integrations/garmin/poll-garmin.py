@@ -14,6 +14,9 @@ Fetches today's data from Garmin Connect:
 Writes to ~/.openclaw/workspace/GARMIN_DAILY.md atomically.
 Caches session tokens to avoid MFA on every run.
 
+Scheduled at 07:00 daily (NOT 06:xx — the CRM runs at 06:00 and must not be
+disrupted by competing background jobs).
+
 FIRST-RUN SETUP (run once interactively to cache tokens):
   export GARMIN_EMAIL=you@example.com
   export GARMIN_PASSWORD=yourpassword

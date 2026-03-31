@@ -238,6 +238,9 @@ Lessons from applying upstream changes — follow this checklist every sync.
 - **`manage-package-manager-versions=false`** in `.npmrc`: Must never be removed.
 - Run `pnpm run build` and verify the dist file count is comparable to last sync (~600 files). A large drop means entry points were lost.
 
+### Scheduling constraint — avoid 06:xx
+The CRM runs at 06:00 every morning. No background jobs (cron, pollers, heavy installs) should be scheduled in the 06:xx window — doing so risks disrupting it. All timed tasks should be scheduled at 07:00 or later. The Garmin poller is set to 07:00 for this reason. Enforce this for any new pollers or cron jobs added in future.
+
 ### Background services (Pi)
 - Python pollers must run as **systemd user services**, not bare background processes. They will not survive a Pi reboot or openclaw restart otherwise. The install script creates `openclaw-email-microsoft` and `openclaw-email-gmail` services automatically.
 - `loginctl enable-linger $USER` is required so user services start at boot without a login session. The install script applies this.
