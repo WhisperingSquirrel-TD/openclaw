@@ -32,7 +32,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 OPENCLAW      = Path.home() / ".openclaw"
@@ -100,7 +100,7 @@ def load_state() -> dict:
 def save_state(folder: str):
     state = {
         "last_imported_folder": folder,
-        "last_imported_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "last_imported_at": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     write_atomic(STATE_FILE, json.dumps(state, indent=2))
 
