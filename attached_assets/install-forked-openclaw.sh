@@ -188,14 +188,27 @@ if ! grep -q 'PNPM_HOME' ~/.bashrc 2>/dev/null; then
     info "Added PNPM_HOME to ~/.bashrc"
 fi
 
-pnpm link --global || sudo npm link || warn "Global link failed — L1 will still work via l1-start.sh"
+pnpm link --global || sudo npm link || warn "Global link failed — attempting manual symlink"
+
+# Ensure openclaw is reachable from system PATH (not just ~/.local/share/pnpm/)
+# l1-start.sh runs as a plain script — it never sources .bashrc, so PNPM_HOME
+# won't be on PATH unless we symlink into /usr/local/bin.
+PNPM_BIN="$PNPM_HOME/openclaw"
+SYSTEM_BIN="/usr/local/bin/openclaw"
+if [ -f "$PNPM_BIN" ]; then
+    sudo ln -sf "$PNPM_BIN" "$SYSTEM_BIN" && info "Symlinked $PNPM_BIN → $SYSTEM_BIN"
+elif [ -L "$SYSTEM_BIN" ] || [ -f "$SYSTEM_BIN" ]; then
+    : # already there from a previous run
+else
+    warn "Could not find openclaw binary to symlink — l1-start.sh may fail"
+fi
 info "OpenClaw linked"
 
 # Step 9: Verify + keep install script up to date
 if command -v openclaw &> /dev/null; then
     info "OpenClaw available: $(openclaw --version 2>/dev/null || echo 'installed')"
 else
-    warn "openclaw command not in PATH — use ~/l1-start.sh to run instead"
+    warn "openclaw command not in PATH — run: sudo ln -sf ~/.local/share/pnpm/openclaw /usr/local/bin/openclaw"
 fi
 
 # Step 9b: Install QMD memory backend
