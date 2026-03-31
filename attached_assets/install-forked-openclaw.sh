@@ -531,7 +531,7 @@ if [ -f "$GARMIN_POLLER_SRC" ]; then
         info "garminconnect already installed: $(pip3 show garminconnect | grep ^Version | awk '{print $2}')"
     else
         warn "Installing garminconnect Python library..."
-        pip3 install --quiet garminconnect || warn "garminconnect install failed — run manually: pip3 install garminconnect"
+        pip3 install --quiet --break-system-packages garminconnect || warn "garminconnect install failed — run manually: pip3 install --break-system-packages garminconnect"
     fi
 
     # Cron job at 09:00 daily (idempotent).
