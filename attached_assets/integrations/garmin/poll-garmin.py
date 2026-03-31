@@ -166,10 +166,15 @@ def _mfa_login(client, token_store_str: str):
         client.login()
     except Exception as e:
         err_str = str(e)
-        if "MFA" in err_str or "NEEDS_MFA" in err_str or "auth" in err_str.lower():
+        # Check rate-limit first — the URL contains 'auth' so this must come before
+        # the MFA check, otherwise 429s are misidentified as MFA challenges.
+        if "429" in err_str or "Too Many Requests" in err_str:
+            log(f"ERROR: Garmin rate-limited (429). Wait 5–10 minutes then retry.")
+            raise
+        if "MFA" in err_str or "NEEDS_MFA" in err_str:
             log("Garmin: MFA required — prompting for one-time code")
             mfa = input("Enter Garmin MFA code: ").strip()
-            client.garth.resume(token_store_str)
+            # garth ≥ 0.5 does not have .resume() — pass mfa_code to login directly
             client.login(mfa_code=mfa)
         else:
             raise
