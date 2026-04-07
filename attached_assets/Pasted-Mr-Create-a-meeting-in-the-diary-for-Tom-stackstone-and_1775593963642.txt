@@ -1,0 +1,117 @@
+Mr:
+Create a meeting in the diary for Tom@stackstone and George Dean
+ georgedean27@gmail.com 
+Teams meeting tomorrow at 10am
+
+Lobstromonous1 - Pi:
+Ready to create:
+
+• Title: Teams meeting
+• When: Tomorrow, 10:00
+• Attendees: tom@stackstoneconsulting.co.uk, georgedean27@gmail.com
+• Platform: Microsoft Teams
+
+If you want, I’d suggest a clearer title:
+
+• Tom Dean / George Dean
+or
+• Catch-up with George
+
+Send me the final title you want plus the 6-digit TOTP, and I’ll create it.
+
+Mr:
+Tom x George is fine
+
+Lobstromonous1 - Pi:
+Got it.
+
+Calendar invite to create
+
+• Title: Tom x George
+• Time: Tomorrow, 10:00
+• Attendees: tom@stackstoneconsulting.co.uk, georgedean27@gmail.com
+• Platform: Microsoft Teams
+
+Send the 6-digit TOTP and I’ll create it.
+
+Mr:
+883754
+
+Lobstromonous1 - Pi:
+✅ Approved. Window open for 5 minutes (until 21:34:39).
+All gated actions will proceed without further codes until the window expires.
+
+Mr:
+Window is open
+
+Lobstromonous1 - Pi:
+I’ve checked the Microsoft integration that’s available here.
+
+Current state:
+
+• I can see mail send
+• I can see calendar polling
+• but the Microsoft auth/config that’s in place appears to be read-only calendar access (Calendars.Read), not write access
+
+So I shouldn’t pretend I can safely create the invite yet without confirming the write path first.
+
+Most likely blocker:
+
+• current Microsoft auth is set up for reading calendars, not creating events/Teams invites
+
+So the honest answer is:
+
+• I’m not ready to fire that invite blindly
+• I need either:
+  1. the existing calendar invite command/script if you already have one, or
+  2. to update the Microsoft integration to support Calendars.ReadWrite
+
+If you want, I can do the fastest useful thing next:
+
+• draft the exact event details
+• and tell you the precise change needed so I can create Teams invites properly going forward
+
+For this invite, I have:
+
+• Title: Tom x George
+• Time: Wed 8 Apr, 10:00
+• Attendees: tom@stackstoneconsulting.co.uk, georgedean27@gmail.com
+• Type: Teams meeting
+
+If you want me to make this work permanently, the next fix is:
+
+• add a proper calendar-send/invite skill
+• and update Microsoft auth to Calendars.ReadWrite instead of read-only.
+
+Mr:
+Send from assistant@ you have this capability
+
+Lobstromonous1 - Pi:
+I don’t have a documented calendar-invite send path yet — only the email send path for assistant@.
+
+So for this specific request, what I can confirm is:
+
+• assistant@ email sending ✅
+• Teams calendar invite creation not yet documented/confirmed in a safe reusable way ❌
+
+If you want the meeting sorted right now, fastest fallback is:
+
+1. I draft a short assistant@ email to George with the proposed Teams meeting time, or
+2. you create the invite manually tonight, and I fix the proper invite capability afterward
+
+If you want, I can draft/send this immediately from assistant@:
+
+Subject: Tom x George — Teams tomorrow at 10am
+
+Body:
+Hi George,
+
+Tom has suggested a Teams catch-up tomorrow at 10:00.
+
+If that still works for you, he’ll send over the meeting details.
+
+PA to Tom Dean
+assistant@stackstoneconsulting.co.uk
+StackstoneConsulting.co.uk
+
+If you want that sent, say so and send/open TOTP.
