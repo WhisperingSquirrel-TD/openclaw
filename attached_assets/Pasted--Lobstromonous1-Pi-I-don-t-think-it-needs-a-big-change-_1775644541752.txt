@@ -1,0 +1,151 @@
+> Lobstromonous1 - Pi:
+I don’t think it needs a big change.
+
+My view
+
+SOUL.md should stay about:
+
+• intent
+• judgement
+• priorities
+• operating principles
+
+Not:
+
+• command paths
+• file locations
+• temp-file flows
+• script names
+
+Those belong in:
+
+• skills
+• memory
+• implementation files
+
+What I’d say after review
+
+No major SOUL.md change needed
+
+Because the new stuff is mostly:
+
+• operational plumbing
+• script-level behaviour
+• skill-level instructions
+
+At most, a tiny addition could help
+
+Only if you want one short principle like:
+
+• Direct website enquiries are revenue-critical and must be surfaced immediately
+• For app work, default workflow is Plan → Build → Self-test → Preview → Tom QA → Deploy
+
+That’s the level SOUL.md should hold.
+
+So answer:
+
+No major change needed.
+If anything, just one or two short principles, not the detailed mechanics.
+
+> Mr:
+give me the command to get the soul.md file from the pi
+
+> Lobstromonous1 - Pi:
+cat /home/tomdean88/.openclaw/workspace/SOUL.md
+
+> Mr:
+its encoded, says no such file
+
+> Lobstromonous1 - Pi:
+Use this exact command:
+
+cat ~/.openclaw/workspace/SOUL.md
+
+If that still says no such file, then it probably doesn’t exist yet. In that case check with:
+
+ls -la ~/.openclaw/workspace | grep SOUL
+
+> Mr:
+tomdean88@raspberrypi:~$ ls -la ~/.openclaw/workspace | grep SOUL
+lrwxrwxrwx  1 tomdean88 tomdean88     22 Mar 31 17:17 SOUL.md -> /mnt/l1-secure/SOUL.md
+-rw-rw-r--  1 tomdean88 tomdean88   8911 Apr  8 10:17 SOUL_PENDING.md
+tomdean88@raspberrypi:~$
+
+> Lobstromonous1 - Pi:
+Got it — SOUL.md is a symlink.
+
+So use:
+
+cat /mnt/l1-secure/SOUL.md
+
+If you want to edit it directly, that’s the real path too.
+
+> Mr:
+tomdean88@raspberrypi:~$ ls -la ~/.openclaw/workspace | grep SOUL
+lrwxrwxrwx  1 tomdean88 tomdean88     22 Mar 31 17:17 SOUL.md -> /mnt/l1-secure/SOUL.md
+-rw-rw-r--  1 tomdean88 tomdean88   8911 Apr  8 10:17 SOUL_PENDING.md
+tomdean88@raspberrypi:~$ cat /mnt/l1-secure/SOUL.md
+cat: /mnt/l1-secure/SOUL.md: No such file or directory
+tomdean88@raspberrypi:~$ ^C
+tomdean88@raspberrypi:~$
+
+> Lobstromonous1 - Pi:
+Then the symlink is broken.
+
+Check where it points and whether /mnt/l1-secure exists:
+
+readlink -f ~/.openclaw/workspace/SOUL.md
+ls -la /mnt
+ls -la /mnt/l1-secure
+
+If /mnt/l1-secure is gone, that explains it. At that point, SOUL.md effectively doesn’t exist right now.
+
+> Mr:
+tomdean88@raspberrypi:~$ ls -la ~/.openclaw/workspace | grep SOUL
+lrwxrwxrwx  1 tomdean88 tomdean88     22 Mar 31 17:17 SOUL.md -> /mnt/l1-secure/SOUL.md
+-rw-rw-r--  1 tomdean88 tomdean88   8911 Apr  8 10:17 SOUL_PENDING.md
+tomdean88@raspberrypi:~$ cat /mnt/l1-secure/SOUL.md
+cat: /mnt/l1-secure/SOUL.md: No such file or directory
+tomdean88@raspberrypi:~$ ^C
+tomdean88@raspberrypi:~$ readlink -f ~/.openclaw/workspace/SOUL.md
+ls -la /mnt
+ls -la /mnt/l1-secure
+total 16
+drwxr-xr-x  4 root root 4096 Apr  5 18:37 .
+drwxr-xr-x 18 root root 4096 Dec  4 14:40 ..
+drwxr-xr-x  2 root root 4096 Feb  3 11:40 goflex
+drwxr-xr-x  3 root root 4096 Feb  5 12:01 media
+ls: cannot access '/mnt/l1-secure': No such file or directory
+tomdean88@raspberrypi:~$ ^C
+tomdean88@raspberrypi:~$
+
+> Lobstromonous1 - Pi:
+Yep — confirmed: SOUL.md is currently broken.
+
+What’s happening:
+
+• ~/.openclaw/workspace/SOUL.md is a symlink to /mnt/l1-secure/SOUL.md
+• /mnt/l1-secure no longer exists
+• so SOUL.md is effectively missing
+
+What this means
+
+When I said “review SOUL.md”, there was actually no live file to review.
+
+Fastest fix
+
+Replace the broken symlink with a real file in the workspace:
+
+rm ~/.openclaw/workspace/SOUL.md
+nano ~/.openclaw/workspace/SOUL.md
+
+Or if you want an empty starter:
+
+rm ~/.openclaw/workspace/SOUL.md
+touch ~/.openclaw/workspace/SOUL.md
+
+Better fix
+
+If you still want it stored somewhere special, you need to recreate the mount/path first. But for now, I’d just restore it as a normal workspace file so it actually exists.
+
+If you want, I can draft a clean starter SOUL.md for you to paste in right now.
