@@ -24,16 +24,15 @@ SOUL_MD_BACKUP="/tmp/openclaw-soul-backup.md"
 
 # --- Detect and remove broken symlink BEFORE backup ---
 # -L is true if the path is a symlink (even broken); -e is false if target missing.
+# NOTE: SOUL_PENDING.md is a staging/backlog file — NOT a backup of SOUL.md.
+# It contains unreviewed proposals and must NEVER be auto-promoted to SOUL.md.
 if [ -L "$SOUL_MD_PATH" ] && [ ! -e "$SOUL_MD_PATH" ]; then
     echo "[soul] WARNING: SOUL.md is a broken symlink (mount gone). Removing symlink."
     rm -f "$SOUL_MD_PATH"
-    # Promote SOUL_PENDING.md to SOUL.md if it exists and is non-empty
-    if [ -f "$SOUL_PENDING_PATH" ] && [ -s "$SOUL_PENDING_PATH" ]; then
-        cp "$SOUL_PENDING_PATH" "$SOUL_MD_PATH"
-        echo "[soul] SOUL.md restored from SOUL_PENDING.md ($(wc -c < "$SOUL_MD_PATH") bytes)"
-    else
-        echo "[soul] No SOUL_PENDING.md found — will create starter SOUL.md at end of install."
-    fi
+    echo "[soul] SOUL.md removed — a starter will be created at end of install."
+    echo "[soul] IMPORTANT: SOUL_PENDING.md is your backlog of proposed changes."
+    echo "[soul]   Do NOT use it as a replacement for SOUL.md — it contains unreviewed items."
+    echo "[soul]   After install, manually restore your SOUL.md content."
 fi
 
 # Back up only if the file is a real, non-empty file
