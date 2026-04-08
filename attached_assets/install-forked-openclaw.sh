@@ -664,6 +664,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Stackstone website enquiry poller  [REVENUE CRITICAL]
+# Polls /api/integration/enquiries every 2 minutes.
+# Fires immediate Telegram alert for each new contact-form lead.
+# Separate from report views — this is direct inbound, must alert immediately.
+# ---------------------------------------------------------------------------
+SS_ENQ_SRC="$HOME/openclaw/attached_assets/integrations/stackstone/enquiry_poller.py"
+SS_ENQ_DST="$HOME/.openclaw/integrations/stackstone/enquiry_poller.py"
+SS_ENQ_LOG="$HOME/.openclaw/integrations/stackstone/enquiry-poller.log"
+
+if [ -f "$SS_ENQ_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/stackstone"
+    cp "$SS_ENQ_SRC" "$SS_ENQ_DST"
+    chmod +x "$SS_ENQ_DST"
+    info "Stackstone enquiry poller deployed: $SS_ENQ_DST"
+
+    SS_ENQ_CRON="*/2 * * * * python3 $SS_ENQ_DST >> $SS_ENQ_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "stackstone/enquiry_poller.py"; echo "$SS_ENQ_CRON" ) | crontab -
+    info "Stackstone enquiry poller cron installed: runs every 2 minutes"
+else
+    warn "Stackstone enquiry poller not found at $SS_ENQ_SRC — skipping"
+fi
+
+# ---------------------------------------------------------------------------
 # WhatsApp rolling recent file
 # Generates WHATSAPP_RECENT.md (last 48h) from the full WHATSAPP_LOG.md.
 # L1 reads WHATSAPP_RECENT.md — keeps context small without losing history.
@@ -1050,6 +1073,22 @@ echo "    To override (e.g. for testing against a Replit dev URL):"
 echo "      export STACKSTONE_BASE_URL=https://your-replit-dev-url.replit.dev"
 echo "    Logs: ~/.openclaw/integrations/stackstone/poller.log"
 echo "    Test manually: python3 ~/.openclaw/integrations/stackstone/report_poller.py"
+echo ""
+echo "  Stackstone WEBSITE ENQUIRY poller [REVENUE CRITICAL — separate from report views]:"
+echo "    Runs every 2 min — polls stackstoneconsulting.co.uk/api/integration/enquiries"
+echo "    Fires immediate Telegram alert for each new contact form / website lead"
+echo "    Alert includes: name, company, role, email, phone, message summary"
+echo "    Staleness alert fires if no enquiries seen in 24h (every 6h max)"
+echo "    Requires website to expose: GET /api/integration/enquiries"
+echo "                                PATCH /api/integration/enquiries/:id/alerted"
+echo "    State:  ~/.openclaw/integrations/stackstone/enquiry-poller-state.json"
+echo "    Logs:   ~/.openclaw/integrations/stackstone/enquiry-poller.log"
+echo "    Test manually: python3 ~/.openclaw/integrations/stackstone/enquiry_poller.py"
+echo ""
+echo "  Morning system health check — L1 should verify each morning:"
+echo "    - enquiry-poller.log: check for recent API errors or stale-feed warnings"
+echo "    - report-poller.log: check for delivery failures"
+echo "    - poll-microsoft-log.txt: check for token/graph errors"
 echo ""
 echo "  Calendar poller (systemd service: openclaw-calendar-microsoft):"
 echo "    Polls Outlook calendar every 15 min — writes OUTLOOK_CALENDAR.md (next 14 days)"
