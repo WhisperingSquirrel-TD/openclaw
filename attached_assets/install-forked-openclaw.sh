@@ -572,8 +572,8 @@ deploy_integration "$INTEGRATIONS_SRC/microsoft/poll.py"           "$INTEGRATION
 deploy_integration "$INTEGRATIONS_SRC/microsoft/poll-calendar.py"  "$INTEGRATIONS_DST/microsoft/poll-calendar.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/send.py"           "$INTEGRATIONS_DST/microsoft/send.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/create-event.py"   "$INTEGRATIONS_DST/microsoft/create-event.py"
-deploy_integration "$INTEGRATIONS_SRC/microsoft/sharepoint.py"     "$INTEGRATIONS_DST/microsoft/sharepoint.py"
-# Also deploy to microsoft-l1 (assistant account) — audit trail runs as assistant@
+# sharepoint.py is intentionally NOT deployed to microsoft/ — all SharePoint
+# writes must go through assistant@ only (audit trail, version history ownership).
 mkdir -p "$INTEGRATIONS_DST/microsoft-l1"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/send.py"           "$INTEGRATIONS_DST/microsoft-l1/send.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/create-event.py"   "$INTEGRATIONS_DST/microsoft-l1/create-event.py"
