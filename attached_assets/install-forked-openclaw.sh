@@ -578,6 +578,20 @@ mkdir -p "$INTEGRATIONS_DST/microsoft-l1"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/send.py"           "$INTEGRATIONS_DST/microsoft-l1/send.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/create-event.py"   "$INTEGRATIONS_DST/microsoft-l1/create-event.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/sharepoint.py"     "$INTEGRATIONS_DST/microsoft-l1/sharepoint.py"
+
+# SharePoint env-var check (host is required; site_path and drive_name have sensible defaults)
+if [ -z "${SHAREPOINT_HOST:-}" ]; then
+    warn "SHAREPOINT_HOST not set — SharePoint commands will fail."
+    warn "  Add to ~/.openclaw/.env:"
+    warn "    SHAREPOINT_HOST=seerepeat.sharepoint.com"
+    warn "    SHAREPOINT_SITE_PATH=/sites/StackstoneConsulting   # optional — this is the default"
+    warn "    SHAREPOINT_DRIVE_NAME=Documents                    # optional — this is the default"
+    warn "  Then re-run this script."
+    warn "  One-time re-auth also required:"
+    warn "    python3 $INTEGRATIONS_DST/microsoft-l1/sharepoint.py reauth"
+else
+    info "SHAREPOINT_HOST=$SHAREPOINT_HOST (SharePoint ready)"
+fi
 deploy_integration "$INTEGRATIONS_SRC/google/gmail_poll.py"        "$INTEGRATIONS_DST/google/gmail_poll.py"
 
 # ---------------------------------------------------------------------------
@@ -1181,6 +1195,19 @@ echo "    Polls Outlook calendar every 15 min — writes OUTLOOK_CALENDAR.md (ne
 echo "    Shares the Microsoft OAuth token (token-microsoft.json)"
 echo "    Logs: ~/.openclaw/workspace/memory/poll-calendar-log.txt"
 echo "    Status: systemctl --user status openclaw-calendar-microsoft.service"
+echo ""
+echo "  SharePoint document management (assistant@ identity — write-only via L1):"
+echo "    Script: ~/.openclaw/integrations/microsoft-l1/sharepoint.py"
+echo "    Commands: list <path> | read <path> | create <path> --content-file <tmp>"
+echo "              update <path> --content-file <tmp> | append <path> --content-file <tmp>"
+echo "    No delete / rename / move — excluded by design. Clean up originals manually in the SP web UI."
+echo "    Requires in ~/.openclaw/.env:"
+echo "      SHAREPOINT_HOST=seerepeat.sharepoint.com"
+echo "      SHAREPOINT_SITE_PATH=/sites/StackstoneConsulting   # this is already the default"
+echo "      SHAREPOINT_DRIVE_NAME=Documents                    # this is already the default"
+echo "    One-time re-auth (device code — works on Pi without a browser):"
+echo "      python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py reauth"
+echo "    Test: python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py list /"
 echo ""
 echo "  Garmin Connect poller:"
 echo "    Runs daily at 09:00 — writes GARMIN_DAILY.md (resting HR, HRV, sleep, stress, body battery, steps, last activity)"

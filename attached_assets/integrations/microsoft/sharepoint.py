@@ -23,8 +23,8 @@ delete / rename / move — not implemented by design.
 
 REQUIRED ENV VARS (in ~/.openclaw/.env)
 ---------------------------------------
-  SHAREPOINT_HOST        e.g.  stackstoneconsulting.sharepoint.com
-  SHAREPOINT_SITE_PATH   optional, default /   (e.g. /sites/Stackstone)
+  SHAREPOINT_HOST        e.g.  seerepeat.sharepoint.com
+  SHAREPOINT_SITE_PATH   optional, default /sites/StackstoneConsulting
   SHAREPOINT_DRIVE_NAME  optional, default Documents  (the library name)
 
 GRAPH PERMISSIONS REQUIRED
@@ -310,13 +310,13 @@ import os
 def _get_sp_config() -> tuple[str, str, str]:
     """Return (host, site_path, drive_name) from env."""
     host       = os.environ.get("SHAREPOINT_HOST", "").strip()
-    site_path  = os.environ.get("SHAREPOINT_SITE_PATH",  "/").strip()
+    site_path  = os.environ.get("SHAREPOINT_SITE_PATH",  "/sites/StackstoneConsulting").strip()
     drive_name = os.environ.get("SHAREPOINT_DRIVE_NAME", "Documents").strip()
     if not host:
         print(
             "ERROR: SHAREPOINT_HOST not set.\n"
             "Add it to ~/.openclaw/.env, e.g.:\n"
-            "  SHAREPOINT_HOST=stackstoneconsulting.sharepoint.com",
+            "  SHAREPOINT_HOST=seerepeat.sharepoint.com",
             file=sys.stderr,
         )
         sys.exit(3)
