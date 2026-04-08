@@ -1,0 +1,54 @@
+tomdean88@raspberrypi:~$ python3 ~/.openclaw/integrations/garmin/poll-garmin.py
+[2026-04-08 21:06:52] Garmin poller starting
+[2026-04-08 21:06:53] Garmin: no valid saved session — performing login
+Login failed: Error in request: 429 Client Error: Too Many Requests for url: https://sso.garmin.com/sso/signin?id=gauth-widget&embedWidget=true&gauthHost=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&service=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&source=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&redirectAfterAccountLoginUrl=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&redirectAfterAccountCreationUrl=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed (status=None)
+Traceback (most recent call last):
+  File "/home/tomdean88/.local/lib/python3.13/site-packages/garth/http.py", line 182, in request
+    self.last_resp.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3/dist-packages/requests/models.py", line 1024, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 429 Client Error: Too Many Requests for url: https://sso.garmin.com/sso/signin?id=gauth-widget&embedWidget=true&gauthHost=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&service=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&source=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&redirectAfterAccountLoginUrl=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&redirectAfterAccountCreationUrl=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/tomdean88/.local/lib/python3.13/site-packages/garminconnect/__init__.py", line 498, in login
+    token1, token2 = self.garth.login(
+                     ~~~~~~~~~~~~~~~~^
+        self.username,
+        ^^^^^^^^^^^^^^
+        self.password,
+        ^^^^^^^^^^^^^^
+        prompt_mfa=self.prompt_mfa,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/tomdean88/.local/lib/python3.13/site-packages/garth/http.py", line 203, in login
+    self.oauth1_token, self.oauth2_token = sso.login(
+                                           ~~~~~~~~~^
+        *args, **kwargs, client=self
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/tomdean88/.local/lib/python3.13/site-packages/garth/sso.py", line 115, in login
+    client.post(
+    ~~~~~~~~~~~^
+        "sso",
+        ^^^^^^
+    ...<8 lines>...
+        ),
+        ^^
+    )
+    ^
+  File "/home/tomdean88/.local/lib/python3.13/site-packages/garth/http.py", line 194, in post
+    return self.request("POST", *args, **kwargs)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tomdean88/.local/lib/python3.13/site-packages/garth/http.py", line 184, in request
+    raise GarthHTTPError(
+    ...<2 lines>...
+    )
+garth.exc.GarthHTTPError: Error in request: 429 Client Error: Too Many Requests for url: https://sso.garmin.com/sso/signin?id=gauth-widget&embedWidget=true&gauthHost=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&service=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&source=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&redirectAfterAccountLoginUrl=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&redirectAfterAccountCreationUrl=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed
+[2026-04-08 21:06:54] ERROR: Garmin rate-limited (429). Stop retrying and wait several hours.
+[2026-04-08 21:06:54] ERROR: Garmin login failed: Login failed: Error in request: 429 Client Error: Too Many Requests for url: https://sso.garmin.com/sso/signin?id=gauth-widget&embedWidget=true&gauthHost=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&service=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&source=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&redirectAfterAccountLoginUrl=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed&redirectAfterAccountCreationUrl=https%3A%2F%2Fsso.garmin.com%2Fsso%2Fembed
+[2026-04-08 21:06:54] FLAG TO TOM: poll-garmin.py could not authenticate with Garmin Connect.
