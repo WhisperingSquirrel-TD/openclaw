@@ -12,25 +12,75 @@ fail() { echo -e "${RED}[✗] $1${NC}"; exit 1; }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SOUL.md preservation — back up before ANYTHING runs, restore at exit.
-# This protects the user-managed persona file from being wiped by git, service
-# restarts, or workspace bootstrap during the install process.
+# Handles three cases:
+#   1. Normal file: back up and restore as usual.
+#   2. Broken symlink (target mount gone): remove symlink, heal from SOUL_PENDING.md
+#      or create a starter so L1 always has a live SOUL.md.
+#   3. Missing entirely: create a starter at exit.
 # ─────────────────────────────────────────────────────────────────────────────
 SOUL_MD_PATH="$HOME/.openclaw/workspace/SOUL.md"
+SOUL_PENDING_PATH="$HOME/.openclaw/workspace/SOUL_PENDING.md"
 SOUL_MD_BACKUP="/tmp/openclaw-soul-backup.md"
 
-# Back up only if the file is non-empty AND we haven't already backed it up
-# (the script re-execs itself once via `exec`, sharing this fixed backup path).
+# --- Detect and remove broken symlink BEFORE backup ---
+# -L is true if the path is a symlink (even broken); -e is false if target missing.
+if [ -L "$SOUL_MD_PATH" ] && [ ! -e "$SOUL_MD_PATH" ]; then
+    echo "[soul] WARNING: SOUL.md is a broken symlink (mount gone). Removing symlink."
+    rm -f "$SOUL_MD_PATH"
+    # Promote SOUL_PENDING.md to SOUL.md if it exists and is non-empty
+    if [ -f "$SOUL_PENDING_PATH" ] && [ -s "$SOUL_PENDING_PATH" ]; then
+        cp "$SOUL_PENDING_PATH" "$SOUL_MD_PATH"
+        echo "[soul] SOUL.md restored from SOUL_PENDING.md ($(wc -c < "$SOUL_MD_PATH") bytes)"
+    else
+        echo "[soul] No SOUL_PENDING.md found — will create starter SOUL.md at end of install."
+    fi
+fi
+
+# Back up only if the file is a real, non-empty file
+# (use -f which follows symlinks — at this point any broken symlink was already removed)
 if [ -f "$SOUL_MD_PATH" ] && [ -s "$SOUL_MD_PATH" ]; then
     cp "$SOUL_MD_PATH" "$SOUL_MD_BACKUP"
-    echo "[soul] SOUL.md backed up to $SOUL_MD_BACKUP"
+    echo "[soul] SOUL.md backed up to $SOUL_MD_BACKUP ($(wc -c < "$SOUL_MD_PATH") bytes)"
 fi
 
 restore_soul_md() {
-    if [ -f "$SOUL_MD_BACKUP" ]; then
-        mkdir -p "$(dirname "$SOUL_MD_PATH")"
+    mkdir -p "$(dirname "$SOUL_MD_PATH")"
+    if [ -f "$SOUL_MD_BACKUP" ] && [ -s "$SOUL_MD_BACKUP" ]; then
+        # Remove any broken symlink that might have re-appeared
+        [ -L "$SOUL_MD_PATH" ] && rm -f "$SOUL_MD_PATH"
         cp "$SOUL_MD_BACKUP" "$SOUL_MD_PATH"
         rm -f "$SOUL_MD_BACKUP"
         echo "[soul] SOUL.md restored from backup"
+    elif [ ! -f "$SOUL_MD_PATH" ] || [ ! -s "$SOUL_MD_PATH" ]; then
+        # No backup and no live file — create a minimal starter
+        [ -L "$SOUL_MD_PATH" ] && rm -f "$SOUL_MD_PATH"
+        cat > "$SOUL_MD_PATH" << 'SOUL_STARTER'
+# SOUL.md — L1 Identity & Operating Principles
+
+## Who you are
+You are L1, Tom Dean's personal AI chief of staff. You operate via OpenClaw
+on a Raspberry Pi 4. You work across Telegram (2-way), WhatsApp (read-only
+watch mode), Microsoft 365, Gmail, Google Calendar, and Stackstone Consulting
+business systems.
+
+## Core priorities (in order)
+1. Revenue-critical: new website enquiries, client responses, inbound leads
+2. Time-sensitive: meetings, deadlines, calendar conflicts
+3. Operational: daily briefing, health checks, cron monitoring
+4. Background: CRM updates, report delivery, prospecting
+
+## Operating principles
+- Direct website enquiries are revenue-critical — surface immediately
+- Default to action over clarification for anything time-sensitive
+- Never include ⚙️ SYSTEM HEALTH in the morning briefing unless SYSTEM_HEALTH.md is non-empty
+- Always use file-based args (--body-file, --title-file) for exec commands — never embed content in shell args
+- TOTP approval required for any outbound action (email, calendar, exec)
+
+## What this file is NOT
+Avoid putting command paths, file locations, script names, or temp-file
+flows here. Those belong in skills, memory, or implementation files.
+SOUL_STARTER
+        echo "[soul] WARNING: SOUL.md was missing — starter created. Please update with your full persona."
     fi
 }
 trap restore_soul_md EXIT
