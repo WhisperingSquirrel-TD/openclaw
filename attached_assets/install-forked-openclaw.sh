@@ -592,6 +592,30 @@ else
     warn "CRM importer not found at $CRM_POLLER_SRC — skipping"
 fi
 
+# ---------------------------------------------------------------------------
+# System health check
+# Runs at 06:55 daily — BEFORE the morning briefing active-hours window (07:00).
+# Checks all cron logs and feed files for staleness / errors.
+# Writes SYSTEM_HEALTH.md to the workspace — L1 reads it during morning briefing
+# and prepends ⚙️ SYSTEM HEALTH section only when there are issues to report.
+# ---------------------------------------------------------------------------
+HEALTH_SRC="$HOME/openclaw/attached_assets/integrations/health/health_check.py"
+HEALTH_DST="$HOME/.openclaw/integrations/health/health_check.py"
+HEALTH_LOG="$HOME/.openclaw/integrations/health/health-check.log"
+
+if [ -f "$HEALTH_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/health"
+    cp "$HEALTH_SRC" "$HEALTH_DST"
+    chmod +x "$HEALTH_DST"
+    info "System health check deployed: $HEALTH_DST"
+
+    HEALTH_CRON="55 6 * * * python3 $HEALTH_DST >> $HEALTH_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "health_check.py"; echo "$HEALTH_CRON" ) | crontab -
+    info "System health check cron installed: daily at 06:55"
+else
+    warn "System health check not found at $HEALTH_SRC — skipping"
+fi
+
 # Deploy Google Tasks credentials template (only if no credentials file exists yet)
 GOOGLE_CREDS="$HOME/.openclaw/oauth/google/credentials.json"
 if [ ! -f "$GOOGLE_CREDS" ]; then
@@ -1085,10 +1109,21 @@ echo "    State:  ~/.openclaw/integrations/stackstone/enquiry-poller-state.json"
 echo "    Logs:   ~/.openclaw/integrations/stackstone/enquiry-poller.log"
 echo "    Test manually: python3 ~/.openclaw/integrations/stackstone/enquiry_poller.py"
 echo ""
-echo "  Morning system health check — L1 should verify each morning:"
-echo "    - enquiry-poller.log: check for recent API errors or stale-feed warnings"
-echo "    - report-poller.log: check for delivery failures"
-echo "    - poll-microsoft-log.txt: check for token/graph errors"
+echo "  System health check (automated — runs at 06:55 daily):"
+echo "    Checks: all cron logs (staleness + ERROR patterns), all feed files (freshness)"
+echo "    Writes: ~/.openclaw/workspace/SYSTEM_HEALTH.md (empty = all OK)"
+echo "    L1 reads this file at morning briefing start and includes ⚙️ SYSTEM HEALTH"
+echo "    section only when non-empty. No section shown when everything is fine."
+echo "    Logs:   ~/.openclaw/integrations/health/health-check.log"
+echo "    Test manually: python3 ~/.openclaw/integrations/health/health_check.py"
+echo "    Force a warning (for testing): touch -d '2 hours ago' ~/.openclaw/workspace/MICROSOFT_INBOX.md"
+echo "    ── SOUL.md instruction to add (morning briefing section): ──────────────"
+echo "    At the start of your morning briefing, read SYSTEM_HEALTH.md."
+echo "    If it is non-empty, prepend this BEFORE anything else:"
+echo "      ⚙️ SYSTEM HEALTH"
+echo "      [paste content verbatim — one bullet per issue]"
+echo "    If SYSTEM_HEALTH.md is empty or missing, omit this section entirely."
+echo "    ─────────────────────────────────────────────────────────────────────────"
 echo ""
 echo "  Calendar poller (systemd service: openclaw-calendar-microsoft):"
 echo "    Polls Outlook calendar every 15 min — writes OUTLOOK_CALENDAR.md (next 14 days)"
