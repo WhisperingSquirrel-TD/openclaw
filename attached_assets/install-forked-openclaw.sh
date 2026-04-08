@@ -572,10 +572,12 @@ deploy_integration "$INTEGRATIONS_SRC/microsoft/poll.py"           "$INTEGRATION
 deploy_integration "$INTEGRATIONS_SRC/microsoft/poll-calendar.py"  "$INTEGRATIONS_DST/microsoft/poll-calendar.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/send.py"           "$INTEGRATIONS_DST/microsoft/send.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/create-event.py"   "$INTEGRATIONS_DST/microsoft/create-event.py"
-# Also deploy send.py and create-event.py to the microsoft-l1 folder (assistant account)
+deploy_integration "$INTEGRATIONS_SRC/microsoft/sharepoint.py"     "$INTEGRATIONS_DST/microsoft/sharepoint.py"
+# Also deploy to microsoft-l1 (assistant account) — audit trail runs as assistant@
 mkdir -p "$INTEGRATIONS_DST/microsoft-l1"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/send.py"           "$INTEGRATIONS_DST/microsoft-l1/send.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/create-event.py"   "$INTEGRATIONS_DST/microsoft-l1/create-event.py"
+deploy_integration "$INTEGRATIONS_SRC/microsoft/sharepoint.py"     "$INTEGRATIONS_DST/microsoft-l1/sharepoint.py"
 deploy_integration "$INTEGRATIONS_SRC/google/gmail_poll.py"        "$INTEGRATIONS_DST/google/gmail_poll.py"
 
 # ---------------------------------------------------------------------------
