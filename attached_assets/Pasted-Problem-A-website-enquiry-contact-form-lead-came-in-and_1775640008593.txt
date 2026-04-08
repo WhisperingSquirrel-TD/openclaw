@@ -1,0 +1,71 @@
+Problem:
+
+A website enquiry / contact-form lead came in and was not alerted to you on Telegram.
+This is a separate failure from report views.
+
+So the fix needed is:
+
+1. identify where website enquiries land
+  • inbox
+  • file
+  • DB
+  • API/webhook
+2. make new website enquiry = immediate Telegram alert
+3. make stale/broken website enquiry feed = immediate Telegram alert
+4. include this in the morning system health check
+
+Use this prompt in Replit:
+
+───
+
+Replit prompt:
+
+We have a critical alerting gap in OpenClaw.
+
+A direct inbound website enquiry / contact-form lead from Stackstone Consulting was not surfaced to Tom on Telegram. This is NOT the same as the existing report-views issue. Treat it as a separate high-priority website-lead alerting failure.
+
+Please investigate and fix the website enquiry alert path.
+
+Requirements
+
+1. Identify where website enquiries currently land:
+  • email inbox
+  • markdown/file
+  • database
+  • API/webhook
+  • any other source
+2. Implement a reliable check so that:
+  • any new website enquiry / contact form submission triggers an immediate Telegram alert
+  • the alert includes:
+    • name
+    • company
+    • role/title
+    • email
+    • phone if present
+    • message summary
+  • mark these as high priority / revenue-critical
+3. Add feed health monitoring:
+  • if the website enquiry source has not updated when expected
+  • or if the check fails / times out
+  • or if parsing breaks
+  • then alert Tom on Telegram that the website enquiry pipeline may be broken
+4. Keep this separate from report views:
+  • report views are analytics / interest signals
+  • website enquiries are direct leads and must alert immediately
+5. Integrate with existing OpenClaw workflows if appropriate:
+  • if this should be folded into inbox-watch, do that explicitly
+  • if it needs its own cron, create/use a dedicated one
+  • do not rely on passive review
+6. Add a short documented note in the relevant skill / script explaining:
+  • source of website enquiries
+  • how the alert works
+  • failure/staleness behaviour
+
+Output wanted
+
+• Tell me exactly where website enquiries were landing
+• Tell me what was broken
+• Tell me what you changed
+• Tell me how to test it with a known sample enquiry
+
+This is revenue-critical. Optimise for reliability and immediate alerting.
