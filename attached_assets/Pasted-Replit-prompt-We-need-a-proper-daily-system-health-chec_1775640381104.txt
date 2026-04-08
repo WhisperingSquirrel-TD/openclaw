@@ -1,0 +1,92 @@
+Replit prompt:
+
+We need a proper daily system-health check added to the morning briefing flow in OpenClaw.
+
+Problem
+
+At the moment, important cron/feed failures can happen silently and Tom may not know. We need the daily briefing to explicitly report if any key cron, feed, or alerting path is broken, stale, timing out, or not delivering.
+
+Requirements
+
+Add a SYSTEM HEALTH section to the daily briefing, but only when something actually needs attention.
+
+What to monitor
+
+Check the health/status of these key systems:
+
+Crons
+
+• Inbox watch
+• Bounce & unsub detection
+• Daily briefing
+• LinkedIn post draft
+• Weekly reflection
+• Weekly AI briefing
+• Any website enquiry / inbound lead alerting cron/path once fixed
+• Any reminder jobs due in the last 24h that errored or failed to deliver
+
+Feeds / files
+
+• MICROSOFT_INBOX.md
+• GMAIL_INBOX.md
+• OUTLOOK_CALENDAR.md
+• STACKSTONE_LEADS.md
+• website enquiry source (once identified/fixed)
+• any other critical feed used for alerting
+
+What should count as a problem
+
+Surface issues if any of these are true:
+
+• cron errored
+• cron timed out
+• cron did not fire when due
+• cron ran but did not deliver when it should have
+• feed/file stale beyond expected threshold
+• parser/JSON error in logs
+• repeated consecutive errors
+• website enquiry path broken or stale
+
+Output format
+
+Only include this section if action is needed:
+
+⚙️ SYSTEM HEALTH
+
+• Inbox watch failed at 13:25 yesterday — check cron
+• Website enquiry feed stale (>24h) — lead alerts may be broken
+• Report views cron disabled after repeated timeouts
+
+Keep it short and actionable.
+
+Important behaviour
+
+• Do not include SYSTEM HEALTH if everything is OK
+• Do not confuse “no user-facing message” with a failed run
+• Distinguish between:
+  • run succeeded but had nothing to report
+  • run failed / timed out / didn’t deliver
+• Treat website enquiry alerting as revenue-critical
+
+Implementation detail
+
+Update the daily briefing generation so that before writing the briefing, it checks:
+
+1. key cron health
+2. critical feed freshness
+3. recent error patterns
+
+Then prepend SYSTEM HEALTH only if needed.
+
+Output wanted from you
+
+Please tell me:
+
+1. what files / scripts you changed
+2. how cron health is being checked
+3. how feed staleness is being checked
+4. how to test the system-health warning path manually
+
+───
+
+This should give you a reliable morning warning if something important broke overnight.
