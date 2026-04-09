@@ -571,6 +571,29 @@ else:
     print('WARNING: qmd binary not found — memory backend left as builtin (FLAG TO TOM: QMD install failed, re-run script after fixing npm)')
     memory.setdefault('backend', 'builtin')
 
+# ---------------------------------------------------------------------------
+# Model migration — replace any deprecated Anthropic model IDs with the
+# current one. Runs every install so pulling and re-running fixes it.
+# ---------------------------------------------------------------------------
+DEPRECATED_MODELS = [
+    'claude-3-5-sonnet-20241022',
+    'claude-3-7-sonnet-20250219',
+    'claude-3-5-haiku-20241022',
+]
+CURRENT_ANTHROPIC_MODEL = 'claude-sonnet-4-5'
+
+def _replace_model_recursive(obj):
+    if isinstance(obj, dict):
+        return {k: _replace_model_recursive(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_replace_model_recursive(v) for v in obj]
+    if isinstance(obj, str) and obj in DEPRECATED_MODELS:
+        print(f'Model migrated: {obj} -> {CURRENT_ANTHROPIC_MODEL}')
+        return CURRENT_ANTHROPIC_MODEL
+    return obj
+
+c = _replace_model_recursive(c)
+
 with open(config_path, 'w') as f:
     json.dump(c, f, indent=2)
 
@@ -760,6 +783,52 @@ if [ -f "$PROSPECTOR_SCRIPT_SRC" ]; then
     info "Cron job installed: runs every 30 minutes"
 else
     warn "Prospector script not found at $PROSPECTOR_SCRIPT_SRC — skipping queue processor setup"
+fi
+
+# ---------------------------------------------------------------------------
+# SharePoint cache poller — runs every 15 min, writes SHAREPOINT_INDEX.md
+# so L1 can read the document tree without exec.run / TOTP.
+# ---------------------------------------------------------------------------
+SP_CACHE_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_cache_poller.py"
+SP_CACHE_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_cache_poller.py"
+SP_CACHE_LOG="$HOME/.openclaw/integrations/microsoft/sp-cache-poller.log"
+
+if [ -f "$SP_CACHE_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/microsoft"
+    cp "$SP_CACHE_SRC" "$SP_CACHE_DST"
+    chmod +x "$SP_CACHE_DST"
+    info "SharePoint cache poller deployed: $SP_CACHE_DST"
+
+    SP_CACHE_CRON="*/15 * * * * python3 $SP_CACHE_DST >> $SP_CACHE_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "sharepoint_cache_poller.py"; echo "$SP_CACHE_CRON" ) | crontab -
+    info "SharePoint cache poller cron installed: every 15 minutes → SHAREPOINT_INDEX.md"
+else
+    warn "SharePoint cache poller not found at $SP_CACHE_SRC — skipping"
+fi
+
+# ---------------------------------------------------------------------------
+# SharePoint queue processor — runs every 1 min, executes ops L1 writes
+# to sharepoint-queue.json without exec.run / TOTP.
+# ---------------------------------------------------------------------------
+SP_QUEUE_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_queue_processor.py"
+SP_QUEUE_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_queue_processor.py"
+SP_QUEUE_LOG="$HOME/.openclaw/integrations/microsoft/sp-queue-processor.log"
+
+if [ -f "$SP_QUEUE_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/microsoft"
+    cp "$SP_QUEUE_SRC" "$SP_QUEUE_DST"
+    chmod +x "$SP_QUEUE_DST"
+    info "SharePoint queue processor deployed: $SP_QUEUE_DST"
+
+    # Initialise empty queue if it doesn't exist yet
+    QUEUE_FILE="$HOME/.openclaw/sharepoint-queue.json"
+    [ -f "$QUEUE_FILE" ] || echo "[]" > "$QUEUE_FILE"
+
+    SP_QUEUE_CRON="* * * * * python3 $SP_QUEUE_DST >> $SP_QUEUE_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "sharepoint_queue_processor.py"; echo "$SP_QUEUE_CRON" ) | crontab -
+    info "SharePoint queue processor cron installed: every 1 minute → SHAREPOINT_RESULT.md"
+else
+    warn "SharePoint queue processor not found at $SP_QUEUE_SRC — skipping"
 fi
 
 # ---------------------------------------------------------------------------
