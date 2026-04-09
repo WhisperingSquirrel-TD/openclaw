@@ -11,6 +11,21 @@ warn() { echo -e "${YELLOW}[!] $1${NC}"; }
 fail() { echo -e "${RED}[✗] $1${NC}"; exit 1; }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Auto-load ~/.openclaw/.env so callers never need to `source` manually.
+# set -a exports every variable defined while active; set +a turns it off.
+# ─────────────────────────────────────────────────────────────────────────────
+ENV_FILE="$HOME/.openclaw/.env"
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+    set +a
+    info ".env loaded from $ENV_FILE"
+else
+    warn ".env not found at $ENV_FILE — some integrations may not configure correctly"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SOUL.md preservation — back up before ANYTHING runs, restore at exit.
 # Handles three cases:
 #   1. Normal file: back up and restore as usual.

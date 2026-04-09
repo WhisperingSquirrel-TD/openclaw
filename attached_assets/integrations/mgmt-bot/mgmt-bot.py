@@ -445,7 +445,7 @@ def cmd_pull(token: str, chat_id: str) -> None:
     if not git_dir.exists():
         send(token, chat_id, f"❌ Git directory not found: `{git_dir}`")
         return
-    send(token, chat_id, f"⬇️ Pulling latest from GitHub…")
+    send(token, chat_id, "⬇️ Pulling latest from GitHub…")
     r = subprocess.run(
         ["git", "-C", str(git_dir), "pull"],
         capture_output=True, text=True, timeout=60,
@@ -454,9 +454,50 @@ def cmd_pull(token: str, chat_id: str) -> None:
     if r.returncode == 0:
         send(token, chat_id,
              f"✅ Pull complete:\n```{output}```\n\n"
-             f"_Run the install script on the Pi to deploy any updated files._")
+             f"_Send /install to deploy the updated files._")
     else:
         send(token, chat_id, f"❌ Pull failed:\n```{output}```")
+
+
+def cmd_install(token: str, chat_id: str) -> None:
+    """Pull latest from GitHub then run the install script.
+    The install script now auto-sources ~/.openclaw/.env so no
+    manual source step is needed."""
+    git_dir     = Path(_cfg("OPENCLAW_GIT_DIR", str(Path.home() / "openclaw")))
+    install_sh  = Path.home() / "install-forked-openclaw.sh"
+
+    if not git_dir.exists():
+        send(token, chat_id, f"❌ Git directory not found: `{git_dir}`")
+        return
+    if not install_sh.exists():
+        send(token, chat_id, f"❌ Install script not found: `{install_sh}`")
+        return
+
+    send(token, chat_id, "⬇️ Pulling latest from GitHub…")
+    pull = subprocess.run(
+        ["git", "-C", str(git_dir), "pull"],
+        capture_output=True, text=True, timeout=60,
+    )
+    pull_out = (pull.stdout + pull.stderr).strip()
+    if pull.returncode != 0:
+        send(token, chat_id, f"❌ Pull failed — install aborted:\n```{pull_out}```")
+        return
+
+    send(token, chat_id, f"✅ Pull complete:\n```{pull_out}```\n\n🔧 Running install script…")
+    install = subprocess.run(
+        ["bash", str(install_sh)],
+        capture_output=True, text=True, timeout=300,
+    )
+    output = (install.stdout + install.stderr).strip()
+    # Show last 40 lines — install output can be long
+    lines  = output.splitlines()
+    tail   = "\n".join(lines[-40:])
+    prefix = f"_(showing last 40 of {len(lines)} lines)_\n\n" if len(lines) > 40 else ""
+
+    if install.returncode == 0:
+        send(token, chat_id, f"✅ Install complete:\n\n{prefix}```{tail}```")
+    else:
+        send(token, chat_id, f"⚠️ Install finished with errors:\n\n{prefix}```{tail}```")
 
 
 def cmd_health(token: str, chat_id: str) -> None:
@@ -668,6 +709,7 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/restart — restart the L1 gateway\n"
          "/garmin — manually trigger the Garmin poller\n"
          "/pull — git pull latest from GitHub\n"
+         "/install — git pull + run install script (sources .env automatically)\n"
          "/reboot — reboot Pi (refused if not safe)\n\n"
          "*Identity*\n"
          "/soul — upload new SOUL.md as a .docx file\n\n"
@@ -686,6 +728,7 @@ COMMANDS = {
     "/restart":   cmd_restart,
     "/reboot":    cmd_reboot,
     "/pull":      cmd_pull,
+    "/install":   cmd_install,
     "/health":    cmd_health,
     "/logs":      cmd_logs,
     "/garmin":    cmd_garmin,
