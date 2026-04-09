@@ -34,7 +34,7 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
   MGMT_BOT_CHAT_ID          Your Telegram chat/user ID — only this ID is obeyed
   OPENCLAW_OPENAI_MODEL     Model ID for OpenAI API, e.g. openai/gpt-4o
   OPENCLAW_ANTHROPIC_MODEL  Model ID for Anthropic API, e.g. anthropic/claude-sonnet-4-5
-  OPENCLAW_CODEX_MODEL      Model ID for OpenAI Codex OAuth, e.g. openai-codex/gpt-4o
+  OPENCLAW_CODEX_MODEL      Model ID for OpenAI Codex OAuth, e.g. openai-codex/gpt-4.1
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
 OPTIONAL ENV VARS
@@ -64,7 +64,7 @@ SETUP
      MGMT_BOT_CHAT_ID=<your_numeric_id>
      OPENCLAW_OPENAI_MODEL=openai/gpt-4o
      OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5
-     OPENCLAW_CODEX_MODEL=openai-codex/gpt-4o
+     OPENCLAW_CODEX_MODEL=openai-codex/gpt-4.1
 4. Run the install script — deploys this file and installs the systemd service
 5. Verify: systemctl --user status openclaw-mgmt-bot.service
 """
@@ -420,7 +420,7 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
 
     # Ensure the model has a provider prefix — the gateway requires it and
     # will incorrectly prepend "anthropic/" to any bare model ID.
-    # If the .env value already contains "/" (e.g. openai-codex/gpt-4o),
+    # If the .env value already contains "/" (e.g. openai-codex/gpt-4.1),
     # use it verbatim. Only add the correct gateway prefix for bare names.
     gateway_prefix = {
         "openai":    "openai",
