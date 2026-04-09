@@ -35,6 +35,26 @@ import json
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 
+
+def _load_dotenv() -> None:
+    """Load ~/.openclaw/.env into os.environ so cron runs pick up credentials
+    without needing a manual 'source' step first."""
+    env_file = Path.home() / ".openclaw" / ".env"
+    if not env_file.exists():
+        return
+    with env_file.open() as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+_load_dotenv()
+
 OPENCLAW          = Path.home() / ".openclaw"
 GARTH_HOME        = Path.home() / ".garth"          # garth standard token store
 OUTPUT_MD         = OPENCLAW / "workspace/GARMIN_DAILY.md"
