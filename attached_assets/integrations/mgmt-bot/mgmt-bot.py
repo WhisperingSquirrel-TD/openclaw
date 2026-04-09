@@ -9,8 +9,9 @@ the gateway is completely down.
 COMMANDS
 --------
   /status       — current provider, service state, Pi uptime
-  /openai       — switch to OpenAI model and restart gateway
-  /anthropic    — switch to Anthropic model and restart gateway
+  /openai       — switch to OpenAI API model and restart gateway
+  /anthropic    — switch to Anthropic API model and restart gateway
+  /codex        — switch to OpenAI Codex OAuth model and restart gateway
   /restart      — restart the L1 gateway service
   /pull         — git pull latest from GitHub (does NOT reinstall)
   /reboot       — reboot the Pi (refused if auto-start safety check fails)
@@ -31,8 +32,9 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
                             (create a SECOND bot via BotFather — separate from the
                             main OpenClaw bot so the two don't conflict)
   MGMT_BOT_CHAT_ID          Your Telegram chat/user ID — only this ID is obeyed
-  OPENCLAW_OPENAI_MODEL     Model ID to use for OpenAI, e.g. gpt-4o
-  OPENCLAW_ANTHROPIC_MODEL  Model ID to use for Anthropic, e.g. anthropic/claude-sonnet-4-5
+  OPENCLAW_OPENAI_MODEL     Model ID for OpenAI API, e.g. openai/gpt-4o
+  OPENCLAW_ANTHROPIC_MODEL  Model ID for Anthropic API, e.g. anthropic/claude-sonnet-4-5
+  OPENCLAW_CODEX_MODEL      Model ID for OpenAI Codex OAuth, e.g. openai-codex/gpt-4o
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
 OPTIONAL ENV VARS
@@ -60,8 +62,9 @@ SETUP
 3. Add to ~/.openclaw/.env:
      MGMT_BOT_TOKEN=<token>
      MGMT_BOT_CHAT_ID=<your_numeric_id>
-     OPENCLAW_OPENAI_MODEL=gpt-4o
+     OPENCLAW_OPENAI_MODEL=openai/gpt-4o
      OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5
+     OPENCLAW_CODEX_MODEL=openai-codex/gpt-4o
 4. Run the install script — deploys this file and installs the systemd service
 5. Verify: systemctl --user status openclaw-mgmt-bot.service
 """
@@ -390,7 +393,11 @@ def cmd_status(token: str, chat_id: str) -> None:
 
 
 def cmd_switch(token: str, chat_id: str, provider: str) -> None:
-    model_key = "OPENCLAW_OPENAI_MODEL" if provider == "openai" else "OPENCLAW_ANTHROPIC_MODEL"
+    model_key = {
+        "openai":     "OPENCLAW_OPENAI_MODEL",
+        "anthropic":  "OPENCLAW_ANTHROPIC_MODEL",
+        "codex":      "OPENCLAW_CODEX_MODEL",
+    }.get(provider, "OPENCLAW_OPENAI_MODEL")
     model     = _cfg(model_key)
     if not model:
         send(token, chat_id,
@@ -722,8 +729,9 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/logs — recent errors across all poller logs\n"
          "/disk — disk space on the Pi\n\n"
          "*Provider*\n"
-         "/openai — switch to OpenAI model + restart gateway\n"
-         "/anthropic — switch to Anthropic model + restart gateway\n\n"
+         "/anthropic — switch to Anthropic API + restart gateway\n"
+         "/openai — switch to OpenAI API + restart gateway\n"
+         "/codex — switch to OpenAI Codex OAuth + restart gateway\n\n"
          "*Services*\n"
          "/restart — restart the L1 gateway\n"
          "/garmin — manually trigger the Garmin poller\n"
@@ -744,6 +752,7 @@ COMMANDS = {
     "/status":    cmd_status,
     "/openai":    lambda t, c: cmd_switch(t, c, "openai"),
     "/anthropic": lambda t, c: cmd_switch(t, c, "anthropic"),
+    "/codex":     lambda t, c: cmd_switch(t, c, "codex"),
     "/restart":   cmd_restart,
     "/reboot":    cmd_reboot,
     "/pull":      cmd_pull,
