@@ -483,11 +483,23 @@ def cmd_install(token: str, chat_id: str) -> None:
         send(token, chat_id, f"❌ Pull failed — install aborted:\n```{pull_out}```")
         return
 
-    send(token, chat_id, f"✅ Pull complete:\n```{pull_out}```\n\n🔧 Running install script…")
-    install = subprocess.run(
-        ["bash", str(install_sh)],
-        capture_output=True, text=True, timeout=300,
-    )
+    send(token, chat_id, f"✅ Pull complete:\n```{pull_out}```\n\n🔧 Running install script… _(this takes ~5 min on Pi — you'll get the result when it's done)_")
+    try:
+        install = subprocess.run(
+            ["bash", str(install_sh)],
+            capture_output=True, text=True, timeout=900,
+        )
+    except subprocess.TimeoutExpired:
+        send(token, chat_id,
+             "⏱ Install script timed out after 15 minutes.\n\n"
+             "The script may still be running in the background on the Pi.\n"
+             "Check status with: `journalctl --user -u openclaw-gateway.service -n 30`\n"
+             "or run the install manually: `bash ~/install-forked-openclaw.sh`")
+        return
+    except Exception as e:
+        send(token, chat_id, f"❌ Install failed unexpectedly:\n```{e}```")
+        return
+
     output = (install.stdout + install.stderr).strip()
     # Show last 40 lines — install output can be long
     lines  = output.splitlines()
