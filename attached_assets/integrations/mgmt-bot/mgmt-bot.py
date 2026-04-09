@@ -397,13 +397,12 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
              f"❌ `{model_key}` is not set in `~/.openclaw/.env`.\n"
              f"Add it and re-run the install script.")
         return
-    # Ensure the model has the correct provider prefix — the gateway requires
-    # it and will incorrectly prepend "anthropic/" to any bare model ID.
-    expected_prefix = f"{provider}/"
+    # Ensure the model has a provider prefix — the gateway requires it and
+    # will incorrectly prepend "anthropic/" to any bare model ID.
+    # If the .env value already contains "/" (e.g. openai-codex/gpt-4o),
+    # use it verbatim. Only add the default provider prefix for bare names.
     if "/" not in model:
-        model = f"{expected_prefix}{model}"
-    elif not model.startswith(expected_prefix):
-        model = f"{expected_prefix}{model.split('/', 1)[1]}"
+        model = f"{provider}/{model}"
     try:
         config  = _read_config()
         current = _get_current_model(config)
