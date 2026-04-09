@@ -286,10 +286,27 @@ fi
 # QMD provides local-first semantic memory search — no API keys, no cloud.
 # Default: BM25 keyword search (lightweight, works on all Pi hardware).
 # The Pi 4 8GB is sufficient for full semantic (vsearch) mode — see DONE summary.
+#
+# npm install -g requires root unless we redirect the global prefix to a
+# user-writable directory. We use ~/.npm-packages and add its bin to PATH.
 echo ""
 warn "Installing QMD memory backend..."
+
+QMD_NPM_PREFIX="$HOME/.npm-packages"
+mkdir -p "$QMD_NPM_PREFIX"
+npm config set prefix "$QMD_NPM_PREFIX" 2>/dev/null || true
+export PATH="$QMD_NPM_PREFIX/bin:$PATH"
+
+# Persist PATH addition so qmd is available in future shells
+PROFILE_LINE='export PATH="$HOME/.npm-packages/bin:$PATH"'
+for rcfile in "$HOME/.bashrc" "$HOME/.profile"; do
+    if [ -f "$rcfile" ] && ! grep -qF ".npm-packages/bin" "$rcfile"; then
+        echo "$PROFILE_LINE" >> "$rcfile"
+    fi
+done
+
 if ! command -v qmd &> /dev/null; then
-    npm install -g @tobilu/qmd || warn "QMD install failed — memory backend will fall back to builtin"
+    npm install -g @tobilu/qmd 2>&1 || warn "QMD install failed — memory backend will fall back to builtin"
     if command -v qmd &> /dev/null; then
         info "QMD installed: $(qmd --version 2>/dev/null || echo 'ok')"
     fi
