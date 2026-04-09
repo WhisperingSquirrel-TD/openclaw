@@ -590,7 +590,7 @@ DEPRECATED_MODELS = [
     'claude-3-7-sonnet-20250219',
     'claude-3-5-haiku-20241022',
 ]
-CURRENT_ANTHROPIC_MODEL = 'claude-sonnet-4-5'
+CURRENT_ANTHROPIC_MODEL = 'anthropic/claude-sonnet-4-5'
 
 def _replace_model_recursive(obj):
     if isinstance(obj, dict):
@@ -945,7 +945,7 @@ EOF
         warn "       MGMT_BOT_TOKEN=<token>"
         warn "       MGMT_BOT_CHAT_ID=<your_numeric_id>"
         warn "       OPENCLAW_OPENAI_MODEL=gpt-4o"
-        warn "       OPENCLAW_ANTHROPIC_MODEL=claude-sonnet-4-5"
+        warn "       OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5"
         warn "  4. Re-run this install script to start the service"
     else
         systemctl --user enable "$MGMT_SERVICE" 2>/dev/null || true
@@ -1398,7 +1398,7 @@ echo "    Requires in ~/.openclaw/.env:"
 echo "      MGMT_BOT_TOKEN=<second bot token from BotFather>"
 echo "      MGMT_BOT_CHAT_ID=<your numeric Telegram ID from @userinfobot>"
 echo "      OPENCLAW_OPENAI_MODEL=gpt-4o"
-echo "      OPENCLAW_ANTHROPIC_MODEL=claude-sonnet-4-5"
+echo "      OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5"
 echo "      OPENCLAW_VAULT_PASSPHRASE=<already set if vault is in use>"
 echo ""
 echo "  SharePoint document management (assistant@ identity — write-only via L1):"
