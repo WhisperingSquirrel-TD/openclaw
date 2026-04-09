@@ -32,7 +32,7 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
                             main OpenClaw bot so the two don't conflict)
   MGMT_BOT_CHAT_ID          Your Telegram chat/user ID — only this ID is obeyed
   OPENCLAW_OPENAI_MODEL     Model ID to use for OpenAI, e.g. gpt-4o
-  OPENCLAW_ANTHROPIC_MODEL  Model ID to use for Anthropic, e.g. claude-3-5-sonnet-20241022
+  OPENCLAW_ANTHROPIC_MODEL  Model ID to use for Anthropic, e.g. claude-sonnet-4-5
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
 OPTIONAL ENV VARS
@@ -61,7 +61,7 @@ SETUP
      MGMT_BOT_TOKEN=<token>
      MGMT_BOT_CHAT_ID=<your_numeric_id>
      OPENCLAW_OPENAI_MODEL=gpt-4o
-     OPENCLAW_ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+     OPENCLAW_ANTHROPIC_MODEL=claude-sonnet-4-5
 4. Run the install script — deploys this file and installs the systemd service
 5. Verify: systemctl --user status openclaw-mgmt-bot.service
 """
