@@ -170,10 +170,22 @@ def get_client():
     email    = os.environ.get("GARMIN_EMAIL", "").strip()
     password = os.environ.get("GARMIN_PASSWORD", "").strip()
 
+    interactive = sys.stdin.isatty()
+
     if not email:
-        email = input("Garmin email: ").strip()
+        if interactive:
+            email = input("Garmin email: ").strip()
+        else:
+            log("ERROR: GARMIN_EMAIL not set in ~/.openclaw/.env — cannot login non-interactively.")
+            log("FLAG TO TOM: Add GARMIN_EMAIL=your@email.com to ~/.openclaw/.env then re-run /garmin.")
+            sys.exit(1)
     if not password:
-        password = getpass.getpass("Garmin password: ")
+        if interactive:
+            password = getpass.getpass("Garmin password: ")
+        else:
+            log("ERROR: GARMIN_PASSWORD not set in ~/.openclaw/.env — cannot login non-interactively.")
+            log("FLAG TO TOM: Add GARMIN_PASSWORD=yourpassword to ~/.openclaw/.env then re-run /garmin.")
+            sys.exit(1)
 
     client = Garmin(email, password)
     try:
@@ -183,9 +195,14 @@ def get_client():
         if "429" in err or "Too Many Requests" in err:
             log("ERROR: Garmin rate-limited (429). Stop retrying and wait several hours.")
         elif "MFA" in err or "NEEDS_MFA" in err:
-            log("Garmin: MFA required")
-            mfa = input("Enter Garmin MFA code: ").strip()
-            client.login(mfa_code=mfa)
+            if interactive:
+                log("Garmin: MFA required")
+                mfa = input("Enter Garmin MFA code: ").strip()
+                client.login(mfa_code=mfa)
+            else:
+                log("ERROR: Garmin MFA required but running non-interactively — cannot prompt.")
+                log("FLAG TO TOM: Run poll-garmin.py manually in a terminal to complete MFA, then the saved session will be used for future runs.")
+                sys.exit(1)
         else:
             log(f"ERROR: Garmin login failed: {e}")
             raise
