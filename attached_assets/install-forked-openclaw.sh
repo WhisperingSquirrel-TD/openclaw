@@ -1293,6 +1293,27 @@ if [ -d "$TOTP_DIR" ]; then
     info "TOTP secret files protected"
 fi
 
+# Step 12b-pre: Patch gateway service unit to include ~/.npm-packages/bin in PATH.
+# The systemd user service doesn't inherit the shell PATH set in .bashrc, so
+# the gateway can't find qmd (installed to ~/.npm-packages/bin) at runtime.
+# We inject an Environment=PATH= line so every restart picks it up.
+GATEWAY_SVC="$HOME/.config/systemd/user/openclaw-gateway.service"
+NPM_BIN="$HOME/.npm-packages/bin"
+
+if [ -f "$GATEWAY_SVC" ]; then
+    if grep -q "npm-packages" "$GATEWAY_SVC"; then
+        info "Gateway service PATH already includes ~/.npm-packages/bin"
+    else
+        # Insert Environment line after [Service] section header
+        sed -i "/^\[Service\]/a Environment=\"PATH=$NPM_BIN:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"" \
+            "$GATEWAY_SVC"
+        systemctl --user daemon-reload
+        info "Gateway service patched — PATH now includes $NPM_BIN"
+    fi
+else
+    warn "Gateway service unit not found at $GATEWAY_SVC — skipping PATH patch"
+fi
+
 # Step 12b: Restart L1 — prefer the systemd gateway service; fall back to l1-start.sh
 echo ""
 warn "Restarting L1..."
