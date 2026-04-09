@@ -590,7 +590,7 @@ def cmd_disk(token: str, chat_id: str) -> None:
 
 
 def cmd_soul_start(token: str, chat_id: str) -> None:
-    """Step 1 of 2: prompt the user to send their .docx file."""
+    """Step 1 of 2: prompt the user to send their SOUL.md file."""
     passphrase = _cfg("OPENCLAW_VAULT_PASSPHRASE")
     if not passphrase:
         send(token, chat_id,
@@ -600,9 +600,9 @@ def cmd_soul_start(token: str, chat_id: str) -> None:
     SOUL_PENDING_FLAG.write_text("waiting")
     send(token, chat_id,
          "🧠 *Soul update ready.*\n\n"
-         "Send your new SOUL.md as a `.docx` file now.\n\n"
+         "Send your `SOUL.md` file now.\n\n"
          "I will:\n"
-         "1. Convert it from .docx to text\n"
+         "1. Read the markdown content directly\n"
          "2. Back up the current `SOUL.md.enc`\n"
          "3. Re-encrypt with the existing vault passphrase\n"
          "4. Restart the gateway\n\n"
@@ -610,14 +610,14 @@ def cmd_soul_start(token: str, chat_id: str) -> None:
 
 
 def cmd_soul_process(token: str, chat_id: str, document: dict) -> None:
-    """Step 2 of 2: receive .docx, convert, encrypt, install."""
+    """Step 2 of 2: receive SOUL.md, encrypt, install."""
     SOUL_PENDING_FLAG.unlink(missing_ok=True)
 
     file_name = document.get("file_name", "")
-    if not file_name.lower().endswith(".docx"):
+    if not file_name.lower().endswith(".md"):
         send(token, chat_id,
-             f"❌ Expected a `.docx` file, got `{file_name}`.\n"
-             "Send `/soul` again and upload a `.docx`.")
+             f"❌ Expected a `.md` file, got `{file_name}`.\n"
+             "Send `/soul` again and upload your `SOUL.md`.")
         return
 
     passphrase = _cfg("OPENCLAW_VAULT_PASSPHRASE")
@@ -626,7 +626,7 @@ def cmd_soul_process(token: str, chat_id: str, document: dict) -> None:
         return
 
     token_val = _require("MGMT_BOT_TOKEN")
-    send(token, chat_id, "⬇️ Downloading and converting .docx…")
+    send(token, chat_id, "⬇️ Downloading SOUL.md…")
 
     try:
         file_path_tg = get_file(token_val, document["file_id"])
@@ -634,20 +634,19 @@ def cmd_soul_process(token: str, chat_id: str, document: dict) -> None:
             raise RuntimeError("Could not get file path from Telegram.")
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            docx_path = Path(tmp_dir) / file_name
-            download_file(token_val, file_path_tg, docx_path)
-            send(token, chat_id, "🔄 Converting to text via LibreOffice…")
-            plaintext = _convert_docx_to_text(docx_path)
+            md_path = Path(tmp_dir) / file_name
+            download_file(token_val, file_path_tg, md_path)
+            plaintext = md_path.read_text(encoding="utf-8")
 
     except RuntimeError as e:
-        send(token, chat_id, f"❌ Conversion failed:\n```{e}```")
+        send(token, chat_id, f"❌ Download failed:\n```{e}```")
         return
     except Exception as e:
         send(token, chat_id, f"❌ Unexpected error:\n```{e}```")
         return
 
     if not plaintext.strip():
-        send(token, chat_id, "❌ Converted file is empty — no changes made.")
+        send(token, chat_id, "❌ File is empty — no changes made.")
         return
 
     send(token, chat_id, "🔐 Encrypting new SOUL…")
@@ -712,7 +711,7 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/install — git pull + run install script (sources .env automatically)\n"
          "/reboot — reboot Pi (refused if not safe)\n\n"
          "*Identity*\n"
-         "/soul — upload new SOUL.md as a .docx file\n\n"
+         "/soul — upload new SOUL.md (send as a .md file)\n\n"
          "/help — this message\n"
          "/cancel — cancel a pending operation")
 
