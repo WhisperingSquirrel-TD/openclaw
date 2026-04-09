@@ -776,6 +776,68 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# OpenClaw Management Bot
+# Separate Telegram bot that intercepts system commands BEFORE the LLM.
+# Works even when OpenAI is rate-limited or the gateway is completely down.
+# Commands: /status /openai /anthropic /restart /pull /reboot
+# Requires a SECOND Telegram bot token (separate from the main OpenClaw bot).
+# ---------------------------------------------------------------------------
+MGMT_BOT_SRC="$HOME/openclaw/attached_assets/integrations/mgmt-bot/mgmt-bot.py"
+MGMT_BOT_DST="$HOME/.openclaw/integrations/mgmt-bot/mgmt-bot.py"
+MGMT_SERVICE="openclaw-mgmt-bot.service"
+MGMT_SERVICE_FILE="$HOME/.config/systemd/user/$MGMT_SERVICE"
+
+if [ -f "$MGMT_BOT_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/mgmt-bot"
+    cp "$MGMT_BOT_SRC" "$MGMT_BOT_DST"
+    chmod +x "$MGMT_BOT_DST"
+    info "Management bot deployed: $MGMT_BOT_DST"
+
+    # Write systemd user service
+    mkdir -p "$HOME/.config/systemd/user"
+    cat > "$MGMT_SERVICE_FILE" << EOF
+[Unit]
+Description=OpenClaw Management Bot (provider switch, restart, reboot, pull)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 $MGMT_BOT_DST
+Restart=always
+RestartSec=10
+EnvironmentFile=-$HOME/.openclaw/.env
+StandardOutput=append:$HOME/.openclaw/integrations/mgmt-bot/mgmt-bot.log
+StandardError=append:$HOME/.openclaw/integrations/mgmt-bot/mgmt-bot.log
+
+[Install]
+WantedBy=default.target
+EOF
+    systemctl --user daemon-reload
+
+    # Env-var check before enabling
+    if [ -z "${MGMT_BOT_TOKEN:-}" ] || [ -z "${MGMT_BOT_CHAT_ID:-}" ]; then
+        warn "MGMT_BOT_TOKEN or MGMT_BOT_CHAT_ID not set — management bot not started."
+        warn "  Steps to set up:"
+        warn "  1. Message @BotFather on Telegram → /newbot → copy the token"
+        warn "  2. Message @userinfobot on Telegram → copy your numeric chat ID"
+        warn "  3. Add to ~/.openclaw/.env:"
+        warn "       MGMT_BOT_TOKEN=<token>"
+        warn "       MGMT_BOT_CHAT_ID=<your_numeric_id>"
+        warn "       OPENCLAW_OPENAI_MODEL=gpt-4o"
+        warn "       OPENCLAW_ANTHROPIC_MODEL=claude-3-5-sonnet-20241022"
+        warn "  4. Re-run this install script to start the service"
+    else
+        systemctl --user enable "$MGMT_SERVICE" 2>/dev/null || true
+        systemctl --user restart "$MGMT_SERVICE"
+        info "Management bot service enabled and started: $MGMT_SERVICE"
+        info "  Test: send /status to your management bot on Telegram"
+    fi
+else
+    warn "Management bot not found at $MGMT_BOT_SRC — skipping"
+fi
+
+# ---------------------------------------------------------------------------
 # WhatsApp rolling recent file
 # Generates WHATSAPP_RECENT.md (last 48h) from the full WHATSAPP_LOG.md.
 # L1 reads WHATSAPP_RECENT.md — keeps context small without losing history.
@@ -1195,6 +1257,22 @@ echo "    Polls Outlook calendar every 15 min — writes OUTLOOK_CALENDAR.md (ne
 echo "    Shares the Microsoft OAuth token (token-microsoft.json)"
 echo "    Logs: ~/.openclaw/workspace/memory/poll-calendar-log.txt"
 echo "    Status: systemctl --user status openclaw-calendar-microsoft.service"
+echo ""
+echo "  Management Bot (pre-LLM Telegram commands — works even when OpenAI is rate-limited):"
+echo "    Service: systemctl --user status openclaw-mgmt-bot.service"
+echo "    Logs:    ~/.openclaw/integrations/mgmt-bot/mgmt-bot.log"
+echo "    Commands (send to your SECOND Telegram bot, not the main L1 bot):"
+echo "      /status    — current model, gateway state, reboot safety check"
+echo "      /openai    — switch to OpenAI model + restart gateway"
+echo "      /anthropic — switch to Anthropic model + restart gateway"
+echo "      /restart   — restart L1 gateway"
+echo "      /pull      — git pull latest from GitHub"
+echo "      /reboot    — reboot Pi (refused if auto-start not configured)"
+echo "    Requires in ~/.openclaw/.env:"
+echo "      MGMT_BOT_TOKEN=<second bot token from BotFather>"
+echo "      MGMT_BOT_CHAT_ID=<your numeric Telegram ID from @userinfobot>"
+echo "      OPENCLAW_OPENAI_MODEL=gpt-4o"
+echo "      OPENCLAW_ANTHROPIC_MODEL=claude-3-5-sonnet-20241022"
 echo ""
 echo "  SharePoint document management (assistant@ identity — write-only via L1):"
 echo "    Script: ~/.openclaw/integrations/microsoft-l1/sharepoint.py"
