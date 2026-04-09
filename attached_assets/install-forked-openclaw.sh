@@ -944,7 +944,7 @@ EOF
         warn "  3. Add to ~/.openclaw/.env:"
         warn "       MGMT_BOT_TOKEN=<token>"
         warn "       MGMT_BOT_CHAT_ID=<your_numeric_id>"
-        warn "       OPENCLAW_OPENAI_MODEL=gpt-4o"
+        warn "       OPENCLAW_OPENAI_MODEL=openai/gpt-5.4"
         warn "       OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5"
         warn "  4. Re-run this install script to start the service"
     else
@@ -1418,7 +1418,7 @@ echo "    Soul update flow: send /soul → bot prompts → upload .docx → done
 echo "    Requires in ~/.openclaw/.env:"
 echo "      MGMT_BOT_TOKEN=<second bot token from BotFather>"
 echo "      MGMT_BOT_CHAT_ID=<your numeric Telegram ID from @userinfobot>"
-echo "      OPENCLAW_OPENAI_MODEL=gpt-4o"
+echo "      OPENCLAW_OPENAI_MODEL=openai/gpt-5.4"
 echo "      OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5"
 echo "      OPENCLAW_VAULT_PASSPHRASE=<already set if vault is in use>"
 echo ""
