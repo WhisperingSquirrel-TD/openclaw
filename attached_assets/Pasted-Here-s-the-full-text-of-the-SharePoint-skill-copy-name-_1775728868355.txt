@@ -1,0 +1,114 @@
+Here's the full text of the SharePoint skill:
+
+copy
+
+
+---
+name: crm-sharepoint
+description: Read, create, update, and append SharePoint-backed account and opportunity notes using the assistant@ Microsoft Graph identity. Use when managing rich CRM context in SharePoint while keeping local CRM files as summary metadata only.
+---
+
+# CRM SharePoint
+
+Use this skill when detailed account/opportunity context should live in SharePoint rather than local markdown summaries.
+
+## Purpose
+- SharePoint = source of truth for rich account/opportunity notes
+- Local CRM (`stackstone/crm.md`) = summary layer only
+- All document operations happen via assistant@ / Graph so changes are attributable and versioned
+
+## Allowed operations
+- list
+- read
+- create
+- update
+- append
+
+## Forbidden operations
+- delete
+- rename
+- move
+- silent destructive overwrite
+
+## Folder / file model
+Use a folder per entity with one canonical current file plus dated artifacts.
+
+### Opportunities
+- `sites/StackstoneConsulting/Shared Documents/Opportunities/<Company>/`
+- `sites/StackstoneConsulting/Shared Documents/Opportunities/<Company>/<Company> - Current.md`
+- `sites/StackstoneConsulting/Shared Documents/Opportunities/<Company>/YYYY-MM-DD - <Type> - <Description>.md`
+
+### Accounts
+- `sites/StackstoneConsulting/Shared Documents/Accounts/<Company>/`
+- `sites/StackstoneConsulting/Shared Documents/Accounts/<Company>/<Company> - Current.md`
+- `sites/StackstoneConsulting/Shared Documents/Accounts/<Company>/YYYY-MM-DD - <Type> - <Description>.md`
+
+### Rules
+- `Current.md` = latest truth / working summary
+- dated files = historical artifacts (call notes, emails, meeting summaries, proposals, updates)
+- read `Current.md` first
+- prefer newest dated artifacts if more detail is needed
+- never treat all old files as equally current
+
+## Commands
+Use the Microsoft L1 SharePoint helper script(s) via exec after TOTP/open gate when required by policy.
+
+Preferred unified pattern:
+```bash
+python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py list "<path>"
+python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py read "<file-path>"
+python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py create "<file-path>" --content-file /tmp/oc-sp-content.txt
+python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py update "<file-path>" --content-file /tmp/oc-sp-content.txt
+python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py append "<file-path>" --content-file /tmp/oc-sp-content.txt
+
+If the deployed implementation uses separate scripts instead, use those exact documented commands.
+
+Workflow
+
+1. Determine the entity stage from CRM logic:
+  • Opportunity -> sites/StackstoneConsulting/Shared Documents/Opportunities/<Company>/
+  • Active Engagement / Client -> sites/StackstoneConsulting/Shared Documents/Accounts/<Company>/
+2. Read/list SharePoint first and verify the live folder name/path before writing anything
+3. Before creating a new folder/file, search for an existing likely match using:
+  • exact name
+  • close spacing/punctuation variants
+  • compressed variants (e.g. CollingtonWinter vs Collington Winter)
+4. If an existing folder clearly represents the same entity, reuse it rather than creating a new one
+5. Only after a successful create/read/update in SharePoint may you state that a folder/file exists there
+6. Ensure the folder exists and ensure <Company> - Current.md exists
+7. For new notes/communications, create a dated artifact file:
+  • YYYY-MM-DD - <Type> - <Description>.md
+8. For evolving account/opportunity truth, update <Company> - Current.md
+9. Prefer append for logs and historical notes
+10. Use update for structured summary refreshes in Current.md
+11. Keep local CRM row updated with Shar
+ePoint paths
+only after the exact live path is verified
+12. Never delete or move files without explicit Tom approval
+
+Stage rules
+
+• Website enquiry + real conversation -> Opportunity folder in SharePoint
+• Paid work booked/committed -> migrate/create under Accounts in SharePoint
+• Active opportunities/accounts must be excluded from generic campaigns
+
+Migration rule: Opportunity -> Account
+
+When paid work is booked or committed:
+
+1. Change stage to Active Engagement or Client
+2. Ensure an account folder exists under /Stackstone CRM/Accounts/<Company>/
+3. Update/create <Company> - Current.md there
+4. Preserve historical context by copying or recreating essential summary/history from the opportunity into the account current file
+5. Continue all future notes in the Accounts folder
+6. Update local CRM summary to point at the Accounts path, not the old opportunity path
+7. Do not delete historical opportunity materials unless Tom explicitly asks
+
+Logging and safety
+
+• Use temp files for content; never inline long content into shell args
+• Return exact command/action attempted on failure
+• Treat SharePoint as the rich note layer and local CRM as metadata only
+• Never claim a SharePoint file/folder was created or updated unless the command actually succeeded
+• Never replace a placeholder path with a SharePoint path in CRM until the path is verified live
+• Never create a new entity folder until you have checked for sensible existing variants first
