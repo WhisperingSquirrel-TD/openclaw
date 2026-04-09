@@ -192,7 +192,11 @@ def save_offset(offset: int) -> None:
 # ---------------------------------------------------------------------------
 
 def _config_path() -> Path:
-    return Path(_cfg("OPENCLAW_CONFIG_PATH", str(STATE_DIR / "openclaw.json")))
+    explicit = _cfg("OPENCLAW_CONFIG_PATH")
+    if explicit:
+        return Path(explicit)
+    state_dir = Path(_cfg("OPENCLAW_STATE_DIR", str(STATE_DIR)))
+    return state_dir / "openclaw.json"
 
 
 def _read_config() -> dict:
@@ -314,7 +318,22 @@ def _encrypt_soul(plaintext: str, passphrase: str) -> bytes:
 
 
 def _vault_dir() -> Path:
-    return Path(_cfg("OPENCLAW_VAULT_DIR", str(STATE_DIR / "vault")))
+    """
+    Mirror soul-vault.ts resolveVaultDir() exactly:
+      resolveStateDir() → OPENCLAW_STATE_DIR ?? ~/.openclaw
+      resolveVaultDir() → {stateDir}/vault
+
+    OPENCLAW_VAULT_DIR can override the full path if needed, but
+    under normal circumstances OPENCLAW_STATE_DIR is the only var
+    the gateway respects, so we follow the same logic.
+    """
+    # Explicit override wins
+    override = _cfg("OPENCLAW_VAULT_DIR")
+    if override:
+        return Path(override)
+    # Otherwise: match the gateway — OPENCLAW_STATE_DIR ?? ~/.openclaw, then /vault
+    state_dir = Path(_cfg("OPENCLAW_STATE_DIR", str(STATE_DIR)))
+    return state_dir / "vault"
 
 
 def _convert_docx_to_text(docx_path: Path) -> str:
