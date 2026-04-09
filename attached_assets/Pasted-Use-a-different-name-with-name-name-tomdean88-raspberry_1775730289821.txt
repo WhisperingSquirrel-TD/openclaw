@@ -1,0 +1,22 @@
+Use a different name with --name <name>
+tomdean88@raspberrypi:~/openclaw$ systemctl --user status openclaw-gateway.service
+● openclaw-gateway.service - OpenClaw Gateway (fork v2026.2.26)
+     Loaded: loaded (/home/tomdean88/.config/systemd/user/openclaw-gateway.service; enabled; preset: enabled)
+     Active: active (running) since Thu 2026-04-09 11:21:49 BST; 2min 48s ago
+ Invocation: d02af52eea2d48dfbe2e301beeeaec63
+   Main PID: 65360 (openclaw-gatewa)
+      Tasks: 15 (limit: 8746)
+        CPU: 1min 7.121s
+     CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/openclaw-gateway.service
+             └─65360 openclaw-gateway
+
+Apr 09 11:22:27 raspberrypi node[65360]: 2026-04-09T11:22:27.686+01:00 [discord] failed to deploy native commands: Error (status=400, body={"37":["description"],"38":["description"],"40":["description"],"41":["description"],"42":["description"]>
+Apr 09 11:22:27 raspberrypi node[65360]: 2026-04-09T11:22:27.876+01:00 [discord] logged in to discord as 1485668914552635453 (Lobstromonous1)
+Apr 09 11:22:28 raspberrypi node[65360]: 2026-04-09T11:22:28.390+01:00 [model-selection] Model "claude-sonnet-4-5" specified without provider. Falling back to "anthropic/claude-sonnet-4-5". Please use "anthropic/claude-sonnet-4-5" in your confi>
+Apr 09 11:22:28 raspberrypi node[65360]: 2026-04-09T11:22:28.807+01:00 [model-selection] Model "claude-sonnet-4-5" specified without provider. Falling back to "anthropic/claude-sonnet-4-5". Please use "anthropic/claude-sonnet-4-5" in your confi>
+Apr 09 11:22:28 raspberrypi node[65360]: 2026-04-09T11:22:28.941+01:00 [whatsapp] Listening for personal WhatsApp inbound messages (watch mode — read-only, no outbound).
+Apr 09 11:22:29 raspberrypi node[65360]: 2026-04-09T11:22:29.500+01:00 [model-selection] Model "claude-sonnet-4-5" specified without provider. Falling back to "anthropic/claude-sonnet-4-5". Please use "anthropic/claude-sonnet-4-5" in your confi>
+Apr 09 11:22:29 raspberrypi node[65360]: 2026-04-09T11:22:29.517+01:00 [model-selection] Model "claude-sonnet-4-5" specified without provider. Falling back to "anthropic/claude-sonnet-4-5". Please use "anthropic/claude-sonnet-4-5" in your confi>
+Apr 09 11:22:29 raspberrypi node[65360]: 2026-04-09T11:22:29.577+01:00 [tools] tools.profile (coding) allowlist contains unknown entries (apply_patch). These entries won't match any tool unless the plugin is enabled.
+Apr 09 11:22:29 raspberrypi node[65360]: 2026-04-09T11:22:29.595+01:00 [model-selection] Model "claude-sonnet-4-5" specified without provider. Falling back to "anthropic/claude-sonnet-4-5". Please use "anthropic/claude-sonnet-4-5" in your confi>
+Apr 09 11:23:03 raspberrypi node[65360]: 2026-04-09T11:23:03.049+01:00 [telegram] sendMessage ok chat=1744801946 message=4845
