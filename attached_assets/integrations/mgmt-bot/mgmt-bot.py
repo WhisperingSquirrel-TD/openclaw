@@ -32,7 +32,7 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
                             (create a SECOND bot via BotFather — separate from the
                             main OpenClaw bot so the two don't conflict)
   MGMT_BOT_CHAT_ID          Your Telegram chat/user ID — only this ID is obeyed
-  OPENCLAW_OPENAI_MODEL     Model ID for OpenAI API, e.g. openai/gpt-5.4
+  OPENCLAW_OPENAI_MODEL     Model ID for OpenAI API, e.g. openai/gpt-5-mini-2025-08-07
   OPENCLAW_ANTHROPIC_MODEL  Model ID for Anthropic API, e.g. anthropic/claude-sonnet-4-5
   OPENCLAW_CODEX_MODEL      Model ID for OpenAI Codex OAuth, e.g. openai-codex/gpt-5.4
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
@@ -62,7 +62,7 @@ SETUP
 3. Add to ~/.openclaw/.env:
      MGMT_BOT_TOKEN=<token>
      MGMT_BOT_CHAT_ID=<your_numeric_id>
-     OPENCLAW_OPENAI_MODEL=openai/gpt-5.4
+     OPENCLAW_OPENAI_MODEL=openai/gpt-5-mini-2025-08-07
      OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5
      OPENCLAW_CODEX_MODEL=openai-codex/gpt-5.4
 4. Run the install script — deploys this file and installs the systemd service
