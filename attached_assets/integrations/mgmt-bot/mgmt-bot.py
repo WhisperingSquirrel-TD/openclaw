@@ -421,9 +421,14 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
     # Ensure the model has a provider prefix — the gateway requires it and
     # will incorrectly prepend "anthropic/" to any bare model ID.
     # If the .env value already contains "/" (e.g. openai-codex/gpt-4o),
-    # use it verbatim. Only add the default provider prefix for bare names.
+    # use it verbatim. Only add the correct gateway prefix for bare names.
+    gateway_prefix = {
+        "openai":    "openai",
+        "anthropic": "anthropic",
+        "codex":     "openai-codex",
+    }.get(provider, provider)
     if "/" not in model:
-        model = f"{provider}/{model}"
+        model = f"{gateway_prefix}/{model}"
     try:
         config  = _read_config()
         current = _get_current_model(config)
