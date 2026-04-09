@@ -408,8 +408,8 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
     # Codex uses OAuth (no key needed); openai/anthropic need their keys.
     api_key_var = {
         "openai":    "OPENAI_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "codex":     None,
+        "anthropic": None,  # gateway handles Anthropic auth internally
+        "codex":     None,  # uses OAuth
     }.get(provider)
     if api_key_var:
         if not _cfg(api_key_var):
