@@ -683,7 +683,7 @@ if [ -f "$GARMIN_POLLER_SRC" ]; then
         info "garminconnect already installed: $(pip3 show garminconnect | grep ^Version | awk '{print $2}')"
     else
         warn "Installing garminconnect Python library..."
-        pip3 install --quiet --break-system-packages garminconnect || warn "garminconnect install failed — run manually: pip3 install --break-system-packages garminconnect"
+        pip3 install --quiet --break-system-packages --timeout 120 garminconnect || warn "garminconnect install failed — run manually: pip3 install --break-system-packages garminconnect"
     fi
 
     # Cron job at 09:00 daily (idempotent).
@@ -931,7 +931,7 @@ EOF
         info "cryptography package already installed"
     else
         warn "Installing cryptography Python package (needed for /soul command)…"
-        pip3 install --quiet --break-system-packages cryptography \
+        pip3 install --quiet --break-system-packages --timeout 120 cryptography \
             || warn "cryptography install failed — run manually: pip3 install --break-system-packages cryptography"
     fi
 
