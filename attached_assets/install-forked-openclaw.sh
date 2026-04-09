@@ -314,12 +314,22 @@ else
     info "QMD already installed: $(qmd --version 2>/dev/null || echo 'installed')"
 fi
 
-# Index the workspace collection (idempotent — re-adding an existing collection is safe)
+# Index the workspace collection.
+# qmd collection add fails if the collection already exists, so we check first.
 QMD_WORKSPACE="$HOME/.openclaw/workspace"
 if command -v qmd &> /dev/null && [ -d "$QMD_WORKSPACE" ]; then
-    qmd collection add "$QMD_WORKSPACE" --name workspace 2>/dev/null && \
-        info "QMD workspace collection indexed: $QMD_WORKSPACE" || \
-        warn "QMD collection indexing failed — L1 will use builtin memory until resolved"
+    QMD_EXISTING=$(qmd collection list 2>/dev/null | grep -c "workspace" || true)
+    if [ "$QMD_EXISTING" -gt 0 ]; then
+        info "QMD workspace collection already indexed — skipping"
+    else
+        QMD_OUT=$(qmd collection add "$QMD_WORKSPACE" --name workspace 2>&1)
+        if [ $? -eq 0 ]; then
+            info "QMD workspace collection indexed: $QMD_WORKSPACE"
+        else
+            warn "QMD collection indexing failed: $QMD_OUT"
+            warn "L1 will use builtin memory until resolved"
+        fi
+    fi
 else
     warn "QMD not available or workspace missing — skipping collection indexing"
 fi
