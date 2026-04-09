@@ -404,6 +404,20 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
              f"❌ `{model_key}` is not set in `~/.openclaw/.env`.\n"
              f"Add it and re-run the install script.")
         return
+    # Validate the required API key is present in .env before switching.
+    # Codex uses OAuth (no key needed); openai/anthropic need their keys.
+    api_key_var = {
+        "openai":    "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "codex":     None,
+    }.get(provider)
+    if api_key_var:
+        if not _cfg(api_key_var):
+            send(token, chat_id,
+                 f"❌ `{api_key_var}` is not set in `~/.openclaw/.env`.\n"
+                 f"Add it before switching to `{provider}`.")
+            return
+
     # Ensure the model has a provider prefix — the gateway requires it and
     # will incorrectly prepend "anthropic/" to any bare model ID.
     # If the .env value already contains "/" (e.g. openai-codex/gpt-4o),
