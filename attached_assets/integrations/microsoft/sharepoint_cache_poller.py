@@ -53,6 +53,8 @@ def _load_dotenv() -> None:
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
+        if line.startswith("export "):
+            line = line[7:]
         key, _, val = line.partition("=")
         key = key.strip()
         val = val.strip().strip('"').strip("'")
