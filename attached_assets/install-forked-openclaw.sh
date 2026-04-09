@@ -815,6 +815,15 @@ WantedBy=default.target
 EOF
     systemctl --user daemon-reload
 
+    # Install cryptography package (needed for /soul SOUL.md re-encryption)
+    if pip3 show cryptography &>/dev/null; then
+        info "cryptography package already installed"
+    else
+        warn "Installing cryptography Python package (needed for /soul command)…"
+        pip3 install --quiet --break-system-packages cryptography \
+            || warn "cryptography install failed — run manually: pip3 install --break-system-packages cryptography"
+    fi
+
     # Env-var check before enabling
     if [ -z "${MGMT_BOT_TOKEN:-}" ] || [ -z "${MGMT_BOT_CHAT_ID:-}" ]; then
         warn "MGMT_BOT_TOKEN or MGMT_BOT_CHAT_ID not set — management bot not started."
@@ -1262,17 +1271,24 @@ echo "  Management Bot (pre-LLM Telegram commands — works even when OpenAI is 
 echo "    Service: systemctl --user status openclaw-mgmt-bot.service"
 echo "    Logs:    ~/.openclaw/integrations/mgmt-bot/mgmt-bot.log"
 echo "    Commands (send to your SECOND Telegram bot, not the main L1 bot):"
-echo "      /status    — current model, gateway state, reboot safety check"
+echo "      /status    — model, gateway state, uptime, reboot safety"
+echo "      /health    — run system health check now"
+echo "      /logs      — recent errors across all poller logs"
+echo "      /disk      — disk space on the Pi"
 echo "      /openai    — switch to OpenAI model + restart gateway"
 echo "      /anthropic — switch to Anthropic model + restart gateway"
 echo "      /restart   — restart L1 gateway"
+echo "      /garmin    — manually trigger Garmin poller"
 echo "      /pull      — git pull latest from GitHub"
 echo "      /reboot    — reboot Pi (refused if auto-start not configured)"
+echo "      /soul      — upload new SOUL.md as .docx → converts, encrypts, restarts"
+echo "    Soul update flow: send /soul → bot prompts → upload .docx → done"
 echo "    Requires in ~/.openclaw/.env:"
 echo "      MGMT_BOT_TOKEN=<second bot token from BotFather>"
 echo "      MGMT_BOT_CHAT_ID=<your numeric Telegram ID from @userinfobot>"
 echo "      OPENCLAW_OPENAI_MODEL=gpt-4o"
 echo "      OPENCLAW_ANTHROPIC_MODEL=claude-3-5-sonnet-20241022"
+echo "      OPENCLAW_VAULT_PASSPHRASE=<already set if vault is in use>"
 echo ""
 echo "  SharePoint document management (assistant@ identity — write-only via L1):"
 echo "    Script: ~/.openclaw/integrations/microsoft-l1/sharepoint.py"
