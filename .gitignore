@@ -120,3 +120,9 @@ dist/protocol.schema.json
 
 # Synthing
 **/.stfolder/
+
+# Conversation screenshots and pasted logs (never needed on Pi)
+attached_assets/*.png
+attached_assets/*.jpg
+attached_assets/*.jpeg
+attached_assets/Pasted-*.txt
