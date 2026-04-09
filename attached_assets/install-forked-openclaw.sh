@@ -633,6 +633,22 @@ deploy_integration() {
 
 deploy_integration "$INTEGRATIONS_SRC/config-check/check.py"      "$INTEGRATIONS_DST/config-check/check.py"
 deploy_integration "$INTEGRATIONS_SRC/docx-converter/convert.py"   "$INTEGRATIONS_DST/docx-converter/convert.py"
+
+# set-env.sh — deploy and symlink so it's available as 'set-env KEY value'
+SET_ENV_SRC="$INTEGRATIONS_SRC/set-env.sh"
+SET_ENV_DST="$INTEGRATIONS_DST/set-env.sh"
+SET_ENV_BIN="$HOME/.local/bin/set-env"
+if [ -f "$SET_ENV_SRC" ]; then
+    cp "$SET_ENV_SRC" "$SET_ENV_DST"
+    chmod +x "$SET_ENV_DST"
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$SET_ENV_DST" "$SET_ENV_BIN"
+    # Add ~/.local/bin to PATH in .bashrc if not already there
+    if ! grep -q '\.local/bin' "$HOME/.bashrc" 2>/dev/null; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+    fi
+    info "set-env deployed — usage: set-env KEY value"
+fi
 deploy_integration "$INTEGRATIONS_SRC/microsoft/poll.py"           "$INTEGRATIONS_DST/microsoft/poll.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/poll-calendar.py"  "$INTEGRATIONS_DST/microsoft/poll-calendar.py"
 deploy_integration "$INTEGRATIONS_SRC/microsoft/send.py"           "$INTEGRATIONS_DST/microsoft/send.py"
