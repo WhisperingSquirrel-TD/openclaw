@@ -26,78 +26,25 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SOUL.md preservation — back up before ANYTHING runs, restore at exit.
-# Handles three cases:
-#   1. Normal file: back up and restore as usual.
-#   2. Broken symlink (target mount gone): remove symlink, heal from SOUL_PENDING.md
-#      or create a starter so L1 always has a live SOUL.md.
-#   3. Missing entirely: create a starter at exit.
+# SOUL vault check — SOUL is encrypted at rest; plaintext NEVER touches the
+# workspace.  We only verify the encrypted vault file exists and warn if not.
 # ─────────────────────────────────────────────────────────────────────────────
-SOUL_MD_PATH="$HOME/.openclaw/workspace/SOUL.md"
-SOUL_PENDING_PATH="$HOME/.openclaw/workspace/SOUL_PENDING.md"
-SOUL_MD_BACKUP="/tmp/openclaw-soul-backup.md"
+_SOUL_VAULT_DIR="${OPENCLAW_VAULT_DIR:-$HOME/.openclaw/vault}"
+_SOUL_ENC_PATH="$_SOUL_VAULT_DIR/SOUL.md.enc"
 
-# --- Detect and remove broken symlink BEFORE backup ---
-# -L is true if the path is a symlink (even broken); -e is false if target missing.
-# NOTE: SOUL_PENDING.md is a staging/backlog file — NOT a backup of SOUL.md.
-# It contains unreviewed proposals and must NEVER be auto-promoted to SOUL.md.
-if [ -L "$SOUL_MD_PATH" ] && [ ! -e "$SOUL_MD_PATH" ]; then
-    echo "[soul] WARNING: SOUL.md is a broken symlink (mount gone). Removing symlink."
-    rm -f "$SOUL_MD_PATH"
-    echo "[soul] SOUL.md removed — a starter will be created at end of install."
-    echo "[soul] IMPORTANT: SOUL_PENDING.md is your backlog of proposed changes."
-    echo "[soul]   Do NOT use it as a replacement for SOUL.md — it contains unreviewed items."
-    echo "[soul]   After install, manually restore your SOUL.md content."
+# Remove any stale plaintext SOUL.md that may have been left by older installs.
+_SOUL_PLAINTEXT_PATH="$HOME/.openclaw/workspace/SOUL.md"
+if [ -f "$_SOUL_PLAINTEXT_PATH" ] || [ -L "$_SOUL_PLAINTEXT_PATH" ]; then
+    rm -f "$_SOUL_PLAINTEXT_PATH"
+    warn "[soul] Removed plaintext SOUL.md from workspace — SOUL is encrypted-only."
 fi
 
-# Back up only if the file is a real, non-empty file
-# (use -f which follows symlinks — at this point any broken symlink was already removed)
-if [ -f "$SOUL_MD_PATH" ] && [ -s "$SOUL_MD_PATH" ]; then
-    cp "$SOUL_MD_PATH" "$SOUL_MD_BACKUP"
-    echo "[soul] SOUL.md backed up to $SOUL_MD_BACKUP ($(wc -c < "$SOUL_MD_PATH") bytes)"
+if [ ! -f "$_SOUL_ENC_PATH" ]; then
+    warn "[soul] No encrypted SOUL found at $_SOUL_ENC_PATH"
+    warn "[soul] Send /soul via the management bot to upload and encrypt your SOUL.md"
+else
+    info "[soul] Encrypted SOUL vault found ($(wc -c < "$_SOUL_ENC_PATH") bytes)"
 fi
-
-restore_soul_md() {
-    mkdir -p "$(dirname "$SOUL_MD_PATH")"
-    if [ -f "$SOUL_MD_BACKUP" ] && [ -s "$SOUL_MD_BACKUP" ]; then
-        # Remove any broken symlink that might have re-appeared
-        [ -L "$SOUL_MD_PATH" ] && rm -f "$SOUL_MD_PATH"
-        cp "$SOUL_MD_BACKUP" "$SOUL_MD_PATH"
-        rm -f "$SOUL_MD_BACKUP"
-        echo "[soul] SOUL.md restored from backup"
-    elif [ ! -f "$SOUL_MD_PATH" ] || [ ! -s "$SOUL_MD_PATH" ]; then
-        # No backup and no live file — create a minimal starter
-        [ -L "$SOUL_MD_PATH" ] && rm -f "$SOUL_MD_PATH"
-        cat > "$SOUL_MD_PATH" << 'SOUL_STARTER'
-# SOUL.md — L1 Identity & Operating Principles
-
-## Who you are
-You are L1, Tom Dean's personal AI chief of staff. You operate via OpenClaw
-on a Raspberry Pi 4. You work across Telegram (2-way), WhatsApp (read-only
-watch mode), Microsoft 365, Gmail, Google Calendar, and Stackstone Consulting
-business systems.
-
-## Core priorities (in order)
-1. Revenue-critical: new website enquiries, client responses, inbound leads
-2. Time-sensitive: meetings, deadlines, calendar conflicts
-3. Operational: daily briefing, health checks, cron monitoring
-4. Background: CRM updates, report delivery, prospecting
-
-## Operating principles
-- Direct website enquiries are revenue-critical — surface immediately
-- Default to action over clarification for anything time-sensitive
-- Never include ⚙️ SYSTEM HEALTH in the morning briefing unless SYSTEM_HEALTH.md is non-empty
-- Always use file-based args (--body-file, --title-file) for exec commands — never embed content in shell args
-- TOTP approval required for any outbound action (email, calendar, exec)
-
-## What this file is NOT
-Avoid putting command paths, file locations, script names, or temp-file
-flows here. Those belong in skills, memory, or implementation files.
-SOUL_STARTER
-        echo "[soul] WARNING: SOUL.md was missing — starter created. Please update with your full persona."
-    fi
-}
-trap restore_soul_md EXIT
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 0: Pull latest code FIRST, then self-update and re-exec.
@@ -1470,7 +1417,7 @@ echo "    Test manually: python3 ~/.openclaw/integrations/crm/poll-crm.py"
 echo ""
 echo "  Memory backend: QMD (local-first search, no API keys, no cloud)"
 echo "    Mode: search (BM25 keyword — fast, reliable, Pi-safe)"
-echo "    L1 can now search SOUL.md, notes, and workspace files across sessions"
+echo "    L1 can now search notes and workspace files across sessions"
 echo "    Verify: openclaw doctor"
 echo "    (One-time note: if memory_search is absent, index the collection manually:"
 echo "      qmd collection add ~/.openclaw/workspace --name workspace"
