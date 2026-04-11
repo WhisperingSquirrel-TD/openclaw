@@ -87,11 +87,15 @@ if command -v vercel &>/dev/null; then
     ok "Vercel CLI already installed ($VERCEL_VER)"
 else
     echo "Installing Vercel CLI..."
-    if npm install -g vercel 2>&1 | tail -1; then
-        ok "Vercel CLI installed"
+    npm install -g vercel > /tmp/vercel-install.log 2>&1
+    VERCEL_EXIT=$?
+    if [[ $VERCEL_EXIT -eq 0 ]] && command -v vercel &>/dev/null; then
+        VERCEL_VER=$(vercel --version 2>/dev/null | head -1)
+        ok "Vercel CLI installed ($VERCEL_VER)"
     else
-        warn "Vercel CLI installation failed — you can install it manually:"
+        warn "Vercel CLI installation failed (exit $VERCEL_EXIT) — install manually:"
         info "  npm install -g vercel"
+        info "  Install log: /tmp/vercel-install.log"
     fi
 fi
 echo ""
@@ -102,27 +106,66 @@ echo "Checking environment tokens..."
 ENV_FILE="$OPENCLAW_DIR/.env"
 MISSING_TOKENS=()
 
-if [[ -f "$ENV_FILE" ]]; then
-    if grep -q "^GITHUB_TOKEN=" "$ENV_FILE" && [[ -n "$(grep "^GITHUB_TOKEN=" "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]"'"'"')" ]]; then
-        ok "GITHUB_TOKEN — present"
+check_token() {
+    local key="$1"
+    local label="$2"
+    # Strip quotes and whitespace from the value to check it is non-empty
+    local val
+    val=$(grep "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- | sed 's/[[:space:]]//g; s/"//g')
+    if [[ -n "$val" ]]; then
+        ok "${label} — present"
+        return 0
     else
-        warn "GITHUB_TOKEN — NOT SET in $ENV_FILE"
-        MISSING_TOKENS+=("GITHUB_TOKEN")
+        warn "${label} — NOT SET in $ENV_FILE"
+        MISSING_TOKENS+=("$label")
+        return 1
     fi
+}
 
-    if grep -q "^VERCEL_TOKEN=" "$ENV_FILE" && [[ -n "$(grep "^VERCEL_TOKEN=" "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]"'"'"')" ]]; then
-        ok "VERCEL_TOKEN — present"
-    else
-        warn "VERCEL_TOKEN — NOT SET in $ENV_FILE"
-        MISSING_TOKENS+=("VERCEL_TOKEN")
-    fi
+if [[ -f "$ENV_FILE" ]]; then
+    check_token "GITHUB_TOKEN" "GITHUB_TOKEN"
+    check_token "VERCEL_TOKEN" "VERCEL_TOKEN"
 else
     warn ".env file not found at $ENV_FILE"
     MISSING_TOKENS+=("GITHUB_TOKEN" "VERCEL_TOKEN")
 fi
 echo ""
 
-# ── 6. Reference file stubs ───────────────────────────────────────────────────
+# ── 6. Patch SOUL with dev workflow principles ───────────────────────────────
+
+echo "Patching SOUL with dev workflow principles..."
+SOUL_PATCH_SCRIPT="$REPO_DIR/scripts/patch-soul-dev-workflow.mjs"
+
+if [[ ! -f "$SOUL_PATCH_SCRIPT" ]]; then
+    warn "SOUL patch script not found: $SOUL_PATCH_SCRIPT"
+    info "  Re-pull the repo and retry."
+else
+    VAULT_FILE="$OPENCLAW_DIR/vault/SOUL.md.enc"
+    PASSPHRASE_SET=false
+    if grep -q "^OPENCLAW_VAULT_PASSPHRASE=" "$ENV_FILE" 2>/dev/null; then
+        PP=$(grep "^OPENCLAW_VAULT_PASSPHRASE=" "$ENV_FILE" | cut -d= -f2- | sed 's/[[:space:]]//g; s/"//g')
+        [[ -n "$PP" ]] && PASSPHRASE_SET=true
+    fi
+    [[ -n "${OPENCLAW_VAULT_PASSPHRASE:-}" ]] && PASSPHRASE_SET=true
+
+    if [[ "$PASSPHRASE_SET" == "false" ]]; then
+        warn "OPENCLAW_VAULT_PASSPHRASE not set — skipping SOUL patch"
+        info "  Set it in $ENV_FILE and re-run this script to apply principles."
+    elif [[ ! -f "$VAULT_FILE" ]]; then
+        warn "Encrypted SOUL not found at $VAULT_FILE — skipping SOUL patch"
+        info "  Ensure OpenClaw has been run at least once to create the vault."
+    else
+        if node "$SOUL_PATCH_SCRIPT"; then
+            ok "SOUL patched with dev workflow principles"
+        else
+            warn "SOUL patch failed — check output above"
+            info "  You can run manually: node $SOUL_PATCH_SCRIPT"
+        fi
+    fi
+fi
+echo ""
+
+# ── 7. Reference file stubs ───────────────────────────────────────────────────
 
 TEMPLATE_REF="$REFERENCE_DIR/template-repo.txt"
 if [[ ! -f "$TEMPLATE_REF" ]]; then
