@@ -1298,6 +1298,105 @@ fi
 md5sum /mnt/l1-secure/*.md > ~/l1-hashes.txt 2>/dev/null || true
 info "Hashes updated"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 14: Provision workspace — install core files, skills, and reference
+# material from templates. Never overwrites existing files.
+# This is what enables the Telegram-controlled coding environment.
+# ─────────────────────────────────────────────────────────────────────────────
+WORKSPACE_DIR="$HOME/.openclaw/workspace"
+TEMPLATES_DIR="$HOME/openclaw/attached_assets/workspace-templates"
+
+mkdir -p "$WORKSPACE_DIR/skills"
+mkdir -p "$WORKSPACE_DIR/reference"
+mkdir -p "$WORKSPACE_DIR/memory"
+
+_install_if_missing() {
+    local src="$1"
+    local dst="$2"
+    if [ -f "$dst" ] && [ -s "$dst" ]; then
+        return 0
+    fi
+    if [ -f "$src" ]; then
+        cp "$src" "$dst"
+        info "[workspace] Installed: $(basename "$dst")"
+    fi
+}
+
+_install_skill_if_missing() {
+    local name="$1"
+    mkdir -p "$WORKSPACE_DIR/skills/$name"
+    _install_if_missing \
+        "$TEMPLATES_DIR/skills/$name/SKILL.md" \
+        "$WORKSPACE_DIR/skills/$name/SKILL.md"
+}
+
+if [ -d "$TEMPLATES_DIR" ]; then
+    # Core control files
+    _install_if_missing "$TEMPLATES_DIR/core/USER.md"         "$WORKSPACE_DIR/USER.md"
+    _install_if_missing "$TEMPLATES_DIR/core/SYSTEM_MAP.md"   "$WORKSPACE_DIR/SYSTEM_MAP.md"
+    _install_if_missing "$TEMPLATES_DIR/core/ORGANIZATION.md" "$WORKSPACE_DIR/ORGANIZATION.md"
+    _install_if_missing "$TEMPLATES_DIR/core/TASKS.md"        "$WORKSPACE_DIR/TASKS.md"
+    _install_if_missing "$TEMPLATES_DIR/core/BACKLOG.md"      "$WORKSPACE_DIR/BACKLOG.md"
+    _install_if_missing "$TEMPLATES_DIR/core/PLAN.md"         "$WORKSPACE_DIR/PLAN.md"
+    _install_if_missing "$TEMPLATES_DIR/core/MEMORY.md"       "$WORKSPACE_DIR/MEMORY.md"
+
+    # Skills (process layer — what enables Telegram coding workflow)
+    _install_skill_if_missing "learning"
+    _install_skill_if_missing "daily-plan"
+    _install_skill_if_missing "briefing"
+    _install_skill_if_missing "weekly-review"
+    _install_skill_if_missing "expenses"
+    _install_skill_if_missing "coding"
+
+    # Reference files
+    _install_if_missing "$TEMPLATES_DIR/reference/CRONS.md"            "$WORKSPACE_DIR/reference/CRONS.md"
+    _install_if_missing "$TEMPLATES_DIR/reference/POLLERS.md"          "$WORKSPACE_DIR/reference/POLLERS.md"
+    _install_if_missing "$TEMPLATES_DIR/reference/AI-INTEL-OPTIONS.md" "$WORKSPACE_DIR/reference/AI-INTEL-OPTIONS.md"
+
+    SKILL_COUNT=$(find "$WORKSPACE_DIR/skills" -name "SKILL.md" 2>/dev/null | wc -l)
+    info "[workspace] Skills present: $SKILL_COUNT"
+else
+    warn "[workspace] Templates directory not found at $TEMPLATES_DIR — workspace files not installed"
+fi
+
+# Create HEARTBEAT.md if missing
+if [ ! -f "$WORKSPACE_DIR/HEARTBEAT.md" ] || [ ! -s "$WORKSPACE_DIR/HEARTBEAT.md" ]; then
+    cat > "$WORKSPACE_DIR/HEARTBEAT.md" << 'HEARTBEAT_EOF'
+# HEARTBEAT.md — Session Continuity
+
+_Reset each session. Used for open loops and continuity between sessions._
+
+## Open loops
+(none)
+
+## Last session summary
+(none yet)
+HEARTBEAT_EOF
+    info "[workspace] HEARTBEAT.md created"
+fi
+
+# Create SYSTEM_HEALTH.md if missing (empty by design — health check writes to it)
+if [ ! -f "$WORKSPACE_DIR/SYSTEM_HEALTH.md" ]; then
+    echo "# SYSTEM_HEALTH.md" > "$WORKSPACE_DIR/SYSTEM_HEALTH.md"
+    info "[workspace] SYSTEM_HEALTH.md created"
+fi
+
+# SOUL_PENDING.md — staging area for proposed SOUL changes (never auto-promote)
+if [ ! -f "$WORKSPACE_DIR/SOUL_PENDING.md" ]; then
+    _install_if_missing \
+        "$TEMPLATES_DIR/core/SOUL_PENDING.md" \
+        "$WORKSPACE_DIR/SOUL_PENDING.md"
+fi
+
+# Re-index qmd workspace collection if qmd is available
+if command -v qmd &>/dev/null; then
+    QMD_EXISTING=$(qmd collection list 2>/dev/null | grep -c "workspace" || true)
+    if [ "$QMD_EXISTING" -eq 0 ]; then
+        qmd collection add "$WORKSPACE_DIR" --name workspace 2>/dev/null && \
+            info "[workspace] qmd collection indexed" || true
+    fi
+fi
+
 echo ""
 echo "========================================="
 echo "  DONE"
