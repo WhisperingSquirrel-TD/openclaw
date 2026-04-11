@@ -1,3 +1,8 @@
+---
+name: app-plan
+description: Plan a new app or product. Extracts goal, users, MVP scope, pages, flows, data model, auth, integrations, and build phases. Outputs a spec file to specs/<project-name>.md. Use when Tom says "plan a project", "create a spec for X", or "I want to build X". Stops after writing the spec — does not create repos or write code.
+---
+
 # app-plan
 
 **Purpose:** Write a complete project spec before any code is touched. This skill covers planning only — it does not create repos, write code, or trigger any build action.

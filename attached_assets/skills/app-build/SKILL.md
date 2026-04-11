@@ -1,3 +1,8 @@
+---
+name: app-build
+description: Implement one approved build phase of an app project. Reads the spec, builds only the agreed scope for that phase, pushes to GitHub, generates a Vercel preview, and returns a standard preview handoff report. Use when Tom says "build phase N", "build phase N of X", or "implement phase N". Enforces Superpowers coding discipline — no speculation, no scope creep.
+---
+
 # app-build
 
 **Purpose:** Implement one approved build phase. Read the spec, build only the agreed scope, push to GitHub, generate a Vercel preview, and return the standard preview handoff report. One phase at a time.

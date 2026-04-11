@@ -1,3 +1,8 @@
+---
+name: app-deploy
+description: Deploy an app to production on Vercel — but only after explicit Tom approval, passing checks, and a reviewed preview. Hard-gated: requires approval, passing tests, existing preview, and Tom's QA sign-off. Use when Tom says "deploy X", "deploy to production", "ship it", or "push to production". Never triggered automatically by other skills.
+---
+
 # app-deploy
 
 **Purpose:** Deploy to production on Vercel — but only after explicit Tom approval, passing checks, and a reviewed preview. This skill never deploys speculatively.

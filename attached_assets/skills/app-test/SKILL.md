@@ -1,3 +1,8 @@
+---
+name: app-test
+description: Run the full self-test suite (lint, typecheck, build, test) before handing off to Tom. Blocks handoff if any check fails — never grants a partial pass or bluffs a result. Use when Tom says "run tests on X", "test phase N", "check X before review", or "self-test X". Can also be called internally by app-build before a push.
+---
+
 # app-test
 
 **Purpose:** Run the full self-test suite before any handoff to Tom. Checks must all pass before a preview is considered ready. This skill blocks handoff — it does not grant a partial pass.

@@ -1,3 +1,8 @@
+---
+name: app-init
+description: Initialise a new app project after its spec is approved. Creates the GitHub repo, scaffolds from the standard template, prepares Vercel preview deployment. Use when Tom says "initialise project X", "init X", "set up the repo for X", or "ready to start building X". Requires an approved spec file. Fails loudly if tokens or prerequisites are missing.
+---
+
 # app-init
 
 **Purpose:** Initialise a project for build — create the GitHub repo, scaffold from template, prepare Vercel preview deployment. This skill runs once per project, after the spec is approved, before any build work begins.

@@ -87,8 +87,8 @@ if command -v vercel &>/dev/null; then
     ok "Vercel CLI already installed ($VERCEL_VER)"
 else
     echo "Installing Vercel CLI..."
-    npm install -g vercel > /tmp/vercel-install.log 2>&1
-    VERCEL_EXIT=$?
+    VERCEL_EXIT=0
+    npm install -g vercel > /tmp/vercel-install.log 2>&1 || VERCEL_EXIT=$?
     if [[ $VERCEL_EXIT -eq 0 ]] && command -v vercel &>/dev/null; then
         VERCEL_VER=$(vercel --version 2>/dev/null | head -1)
         ok "Vercel CLI installed ($VERCEL_VER)"
