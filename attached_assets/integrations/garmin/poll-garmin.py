@@ -159,37 +159,47 @@ def get_client():
 
     GARTH_HOME.mkdir(parents=True, exist_ok=True)
 
-    # Attempt to resume a saved session — no credentials needed on repeat runs.
-    client = Garmin()
-    try:
-        client.garth.load(str(GARTH_HOME))
-        # Quick validation: call a lightweight endpoint to confirm tokens are live
-        client.get_full_name()
-        log(f"Garmin: resumed session from {GARTH_HOME}")
-        return client
-    except Exception:
-        pass  # No tokens or expired — fall through to interactive login
+    interactive = sys.stdin.isatty()
 
-    log("Garmin: no valid saved session — performing login")
+    # Attempt to resume a saved session — no credentials needed on repeat runs.
+    tokens_exist = any(GARTH_HOME.iterdir()) if GARTH_HOME.exists() else False
+    client = Garmin()
+    if tokens_exist:
+        try:
+            client.garth.load(str(GARTH_HOME))
+            client.get_full_name()
+            log(f"Garmin: resumed session from {GARTH_HOME}")
+            return client
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "Too Many Requests" in err:
+                log("ERROR: Garmin rate-limited (429) even on token refresh — stop all retries and wait 24h.")
+                log("FLAG TO TOM: Garmin has rate-limited this IP. Do NOT retry. Wait until tomorrow.")
+                sys.exit(1)
+            # Session expired — only attempt re-login interactively to avoid hammering SSO.
+            if not interactive:
+                log("ERROR: Saved Garmin session has expired and cron cannot re-authenticate interactively.")
+                log("FLAG TO TOM: Run this command in a Pi terminal to refresh your Garmin session:")
+                log("  python3 ~/.openclaw/integrations/garmin/poll-garmin.py")
+                log("After that, the cron job will resume automatically.")
+                sys.exit(1)
+            log(f"Garmin: saved session expired ({e}) — attempting interactive re-login")
+    else:
+        if not interactive:
+            log("ERROR: No saved Garmin session found and cron cannot log in interactively.")
+            log("FLAG TO TOM: Run this command in a Pi terminal to create your first Garmin session:")
+            log("  python3 ~/.openclaw/integrations/garmin/poll-garmin.py")
+            sys.exit(1)
+        log("Garmin: no saved session found — performing first-time interactive login")
+
+    # Interactive login only reaches here when running in a real terminal.
     email    = os.environ.get("GARMIN_EMAIL", "").strip()
     password = os.environ.get("GARMIN_PASSWORD", "").strip()
 
-    interactive = sys.stdin.isatty()
-
     if not email:
-        if interactive:
-            email = input("Garmin email: ").strip()
-        else:
-            log("ERROR: GARMIN_EMAIL not set in ~/.openclaw/.env — cannot login non-interactively.")
-            log("FLAG TO TOM: Add GARMIN_EMAIL=your@email.com to ~/.openclaw/.env then re-run /garmin.")
-            sys.exit(1)
+        email = input("Garmin email: ").strip()
     if not password:
-        if interactive:
-            password = getpass.getpass("Garmin password: ")
-        else:
-            log("ERROR: GARMIN_PASSWORD not set in ~/.openclaw/.env — cannot login non-interactively.")
-            log("FLAG TO TOM: Add GARMIN_PASSWORD=yourpassword to ~/.openclaw/.env then re-run /garmin.")
-            sys.exit(1)
+        password = getpass.getpass("Garmin password: ")
 
     client = Garmin(email, password)
     try:
@@ -197,20 +207,15 @@ def get_client():
     except Exception as e:
         err = str(e)
         if "429" in err or "Too Many Requests" in err:
-            log("ERROR: Garmin rate-limited (429). Stop retrying and wait several hours.")
+            log("ERROR: Garmin rate-limited (429). Wait several hours before trying again.")
+            log("FLAG TO TOM: Do NOT keep retrying — each attempt extends the ban.")
+            sys.exit(1)
         elif "MFA" in err or "NEEDS_MFA" in err:
-            if interactive:
-                log("Garmin: MFA required")
-                mfa = input("Enter Garmin MFA code: ").strip()
-                client.login(mfa_code=mfa)
-            else:
-                log("ERROR: Garmin MFA required but running non-interactively — cannot prompt.")
-                log("FLAG TO TOM: Run poll-garmin.py manually in a terminal to complete MFA, then the saved session will be used for future runs.")
-                sys.exit(1)
+            log("Garmin: MFA required")
+            mfa = input("Enter Garmin MFA code: ").strip()
+            client.login(mfa_code=mfa)
         else:
             log(f"ERROR: Garmin login failed: {e}")
-            raise
-        if "429" in err:
             raise
 
     try:
