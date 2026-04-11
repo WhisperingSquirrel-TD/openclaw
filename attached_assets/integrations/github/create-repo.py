@@ -15,6 +15,7 @@ import os
 import sys
 import urllib.request
 import urllib.error
+from typing import Dict, Optional
 
 
 def load_env_file(path: str) -> None:
@@ -42,7 +43,7 @@ def github_request(
     method: str,
     path: str,
     token: str,
-    data: dict | None = None,
+    data: Optional[Dict] = None,
 ) -> dict:
     url = f"https://api.github.com{path}"
     headers = {
