@@ -78,22 +78,25 @@ Telegram alert fires within 2 minutes.
 import fcntl
 import json
 import os
+import re
 import sys
 import requests
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Paths and constants
 # ---------------------------------------------------------------------------
 
-STATE_DIR   = Path.home() / ".openclaw"
-LOCK_FILE   = Path("/tmp/openclaw-stackstone-enquiry-poller.lock")
-STATE_FILE  = STATE_DIR / "integrations/stackstone/enquiry-poller-state.json"
-LOG_PREFIX  = "[stackstone-enquiry-poller]"
+STATE_DIR     = Path.home() / ".openclaw"
+LOCK_FILE     = Path("/tmp/openclaw-stackstone-enquiry-poller.lock")
+STATE_FILE    = STATE_DIR / "integrations/stackstone/enquiry-poller-state.json"
+ENQUIRIES_MD  = STATE_DIR / "workspace/STACKSTONE_ENQUIRIES.md"
+LOG_PREFIX    = "[stackstone-enquiry-poller]"
 
-STALE_HOURS          = 24   # alert if no enquiries seen in this many hours
-STALE_INTERVAL_HOURS = 6    # only re-alert staleness every this many hours
+STALE_HOURS            = 24   # alert if no enquiries seen in this many hours
+STALE_INTERVAL_HOURS   = 6    # only re-alert staleness every this many hours
+ENQUIRIES_RETAIN_DAYS  = 90   # rolling window kept in workspace file
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +432,74 @@ def check_staleness(state: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Workspace file — rolling log for L1 to read
+# ---------------------------------------------------------------------------
+
+def update_enquiries_log(enquiry: dict) -> None:
+    """Append enquiry to STACKSTONE_ENQUIRIES.md, prune entries older than
+    ENQUIRIES_RETAIN_DAYS. L1 reads this file to answer questions about leads."""
+    name    = (enquiry.get("name")    or "").strip() or "Unknown"
+    company = (enquiry.get("company") or "").strip() or "—"
+    role    = (enquiry.get("role")    or enquiry.get("title") or "").strip() or "—"
+    email   = (enquiry.get("email")   or "").strip() or "—"
+    phone   = (enquiry.get("phone")   or "").strip() or "—"
+    message = (enquiry.get("message") or "").strip()
+    source  = (enquiry.get("source")  or "website contact form").strip()
+    msg_preview = (message[:300] + "…") if len(message) > 300 else message
+
+    created = enquiry.get("createdAt") or enquiry.get("created_at") or ""
+    received_fmt = created[:16].replace("T", " ") if created else datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str  = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    new_entry = (
+        f"## {now_str} — {name} ({company})\n"
+        f"- **Received**: {received_fmt}\n"
+        f"- **Source**: {source}\n"
+        f"- **Role**: {role}\n"
+        f"- **Email**: {email}\n"
+        f"- **Phone**: {phone}\n"
+        f"- **Message**: {msg_preview}\n"
+    )
+
+    cutoff = (date.today() - timedelta(days=ENQUIRIES_RETAIN_DAYS)).strftime("%Y-%m-%d")
+
+    try:
+        raw = ENQUIRIES_MD.read_text(encoding="utf-8") if ENQUIRIES_MD.exists() else ""
+    except Exception:
+        raw = ""
+
+    body_lines = [l for l in raw.splitlines()
+                  if not l.startswith("# Stackstone Enquiries") and not l.startswith("_Last updated")]
+
+    pruned: list[str] = []
+    skip = False
+    for line in body_lines:
+        m = re.match(r"^## (\d{4}-\d{2}-\d{2})", line)
+        if m:
+            skip = m.group(1) < cutoff
+        if not skip:
+            pruned.append(line)
+
+    body    = "\n".join(pruned).strip()
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    content = (
+        f"# Stackstone Enquiries — Inbound Leads Log\n"
+        f"_Last updated: {updated} | Retains {ENQUIRIES_RETAIN_DAYS} days_\n\n"
+        f"{new_entry}\n"
+        f"{body}\n"
+    )
+
+    try:
+        ENQUIRIES_MD.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ENQUIRIES_MD.with_suffix(".tmp")
+        tmp.write_text(content.strip() + "\n", encoding="utf-8")
+        tmp.replace(ENQUIRIES_MD)
+        log(f"Workspace log updated: {ENQUIRIES_MD}")
+    except Exception as e:
+        log(f"WARNING: Could not write {ENQUIRIES_MD}: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -476,6 +547,9 @@ def main() -> None:
 
         # Fire the Telegram alert first
         alert_new_enquiry(enquiry)
+
+        # Write to workspace file so L1 can answer questions about leads
+        update_enquiries_log(enquiry)
 
         # Mark alerted on the website (best-effort)
         mark_ok = mark_alerted(eid)

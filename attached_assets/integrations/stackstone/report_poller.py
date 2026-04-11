@@ -28,13 +28,15 @@ import os
 import sys
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from pathlib import Path
 
-STATE_DIR  = Path.home() / ".openclaw"
-GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-LOCK_FILE  = Path("/tmp/openclaw-stackstone-report-poller.lock")
-LOG_PREFIX = "[stackstone-report-poller]"
+STATE_DIR    = Path.home() / ".openclaw"
+WORKSPACE_MD = STATE_DIR / "workspace/STACKSTONE_REPORTS.md"
+GRAPH_BASE   = "https://graph.microsoft.com/v1.0"
+LOCK_FILE    = Path("/tmp/openclaw-stackstone-report-poller.lock")
+LOG_PREFIX   = "[stackstone-report-poller]"
+REPORTS_RETAIN_DAYS = 90
 
 
 # ── Load .env early — cron runs with a minimal shell environment ──────────────
@@ -442,6 +444,70 @@ def mark_report_sent(uuid: str) -> None:
         )
 
 
+# ── Workspace file — rolling log for L1 to read ───────────────────────────────
+
+def update_reports_log(report: dict, status: str = "sent") -> None:
+    """Append a report entry to STACKSTONE_REPORTS.md and prune entries older
+    than REPORTS_RETAIN_DAYS so the file never grows unbounded."""
+    import re
+
+    first_name  = report.get("firstName", "")
+    to_info     = report.get("to") or {}
+    to_name     = to_info.get("name", "").strip() or first_name
+    to_email    = to_info.get("email", "").strip()
+    company     = report.get("companyName", "").strip()
+    report_url  = report.get("reportUrl", "").strip()
+    uuid        = report.get("uuid") or report.get("id", "unknown")
+    now_str     = datetime.now().strftime("%Y-%m-%d %H:%M")
+    today_str   = date.today().strftime("%Y-%m-%d")
+
+    new_entry = (
+        f"## {now_str} — {to_name} ({company})\n"
+        f"- **Status**: {status}\n"
+        f"- **Email**: {to_email}\n"
+        f"- **Report**: {report_url}\n"
+        f"- **ID**: {uuid}\n"
+    )
+
+    cutoff = (date.today() - timedelta(days=REPORTS_RETAIN_DAYS)).strftime("%Y-%m-%d")
+
+    try:
+        raw = WORKSPACE_MD.read_text(encoding="utf-8") if WORKSPACE_MD.exists() else ""
+    except Exception:
+        raw = ""
+
+    # Strip old header lines so we can rebuild them
+    body_lines = [l for l in raw.splitlines() if not l.startswith("# Stackstone Reports") and not l.startswith("_Last updated")]
+
+    # Prune entries older than cutoff by date in the heading
+    pruned: list[str] = []
+    skip = False
+    for line in body_lines:
+        m = re.match(r"^## (\d{4}-\d{2}-\d{2})", line)
+        if m:
+            skip = m.group(1) < cutoff
+        if not skip:
+            pruned.append(line)
+
+    body = "\n".join(pruned).strip()
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    content = (
+        f"# Stackstone Reports — Sent Log\n"
+        f"_Last updated: {updated} | Retains {REPORTS_RETAIN_DAYS} days_\n\n"
+        f"{new_entry}\n"
+        f"{body}\n"
+    )
+
+    try:
+        WORKSPACE_MD.parent.mkdir(parents=True, exist_ok=True)
+        tmp = WORKSPACE_MD.with_suffix(".tmp")
+        tmp.write_text(content.strip() + "\n", encoding="utf-8")
+        tmp.replace(WORKSPACE_MD)
+        log(f"Workspace log updated: {WORKSPACE_MD}")
+    except Exception as e:
+        log(f"WARNING: Could not write {WORKSPACE_MD}: {e}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -482,6 +548,7 @@ def main() -> None:
         try:
             send_report_email(access_token, report)
             mark_report_sent(uuid)
+            update_reports_log(report, status="sent")
             log(f"Sent: {to_name} ({company}) — {uuid}")
             notify(f"Report sent to {to_name} ({company}) \u2014 {report_url}")
             sent += 1
