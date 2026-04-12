@@ -180,6 +180,7 @@ Stop immediately and report if:
 | Lint fails | Fix it. Do not push. |
 | Typecheck fails | Fix it. Do not push. |
 | Build fails | Fix it. Do not push. |
+| Next.js typedRoutes error on `Link href` | Cast dynamic string hrefs: `href={value as any}` — do not disable typedRoutes |
 | Tests fail | Fix them. Do not push. |
 | Git push rejected | Stop — report exact error. Do not force-push. |
 | Vercel preview not generated | Report — "Preview may take a moment. Check Vercel dashboard at https://vercel.com/dashboard" |
