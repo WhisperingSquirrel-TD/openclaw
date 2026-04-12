@@ -572,9 +572,8 @@ deploy_integration() {
     local dst="$2"
     if [ -f "$src" ]; then
         mkdir -p "$(dirname "$dst")"
-        cp "$src" "$dst"
-        chmod +x "$dst"
-        info "Deployed: $dst"
+        ln -sf "$src" "$dst"
+        info "Linked: $dst → $src"
     fi
 }
 
@@ -621,9 +620,8 @@ GARMIN_LOG="$HOME/.openclaw/workspace/memory/poll-garmin-log.txt"
 if [ -f "$GARMIN_POLLER_SRC" ]; then
     mkdir -p "$HOME/.openclaw/integrations/garmin"
     mkdir -p "$GARMIN_TOKEN_STORE"
-    cp "$GARMIN_POLLER_SRC" "$GARMIN_POLLER_DST"
-    chmod +x "$GARMIN_POLLER_DST"
-    info "Garmin poller deployed: $GARMIN_POLLER_DST"
+    ln -sf "$GARMIN_POLLER_SRC" "$GARMIN_POLLER_DST"
+    info "Garmin poller linked: $GARMIN_POLLER_DST"
 
     # Install garminconnect library (idempotent)
     if pip3 show garminconnect &>/dev/null; then
@@ -657,8 +655,7 @@ RESET_LOG="$HOME/.openclaw/workspace/memory/daily-reset.log"
 
 if [ -f "$RESET_SRC" ]; then
     mkdir -p "$(dirname "$RESET_DST")"
-    cp "$RESET_SRC" "$RESET_DST"
-    chmod +x "$RESET_DST"
+    ln -sf "$RESET_SRC" "$RESET_DST"
     RESET_CRON="0 4 * * * $PYTHON3_BIN $RESET_DST >> $RESET_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "daily-reset.py"; echo "$RESET_CRON" ) | crontab -
     info "Daily provider reset cron installed: 04:00 daily → ${OPENCLAW_CODEX_MODEL:-openai-codex/gpt-5.4}"
@@ -675,9 +672,8 @@ CRM_LOG="$HOME/.openclaw/workspace/memory/poll-crm-log.txt"
 
 if [ -f "$CRM_POLLER_SRC" ]; then
     mkdir -p "$(dirname "$CRM_POLLER_DST")"
-    cp "$CRM_POLLER_SRC" "$CRM_POLLER_DST"
-    chmod +x "$CRM_POLLER_DST"
-    info "CRM importer deployed: $CRM_POLLER_DST"
+    ln -sf "$CRM_POLLER_SRC" "$CRM_POLLER_DST"
+    info "CRM importer linked: $CRM_POLLER_DST"
 
     # Idempotent cron registration at 08:00 daily
     CRM_CRON="0 8 * * * python3 $CRM_POLLER_DST >> $CRM_LOG 2>&1"
@@ -700,9 +696,8 @@ HEALTH_LOG="$HOME/.openclaw/integrations/health/health-check.log"
 
 if [ -f "$HEALTH_SRC" ]; then
     mkdir -p "$HOME/.openclaw/integrations/health"
-    cp "$HEALTH_SRC" "$HEALTH_DST"
-    chmod +x "$HEALTH_DST"
-    info "System health check deployed: $HEALTH_DST"
+    ln -sf "$HEALTH_SRC" "$HEALTH_DST"
+    info "System health check linked: $HEALTH_DST"
 
     HEALTH_CRON="55 6 * * * python3 $HEALTH_DST >> $HEALTH_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "health_check.py"; echo "$HEALTH_CRON" ) | crontab -
@@ -744,9 +739,8 @@ PROSPECTOR_SCRIPT_DST="$PROSPECTOR_DIR/process_queue.sh"
 
 if [ -f "$PROSPECTOR_SCRIPT_SRC" ]; then
     mkdir -p "$PROSPECTOR_DIR/logs"
-    cp "$PROSPECTOR_SCRIPT_SRC" "$PROSPECTOR_SCRIPT_DST"
-    chmod +x "$PROSPECTOR_SCRIPT_DST"
-    info "Prospector queue processor deployed: $PROSPECTOR_SCRIPT_DST"
+    ln -sf "$PROSPECTOR_SCRIPT_SRC" "$PROSPECTOR_SCRIPT_DST"
+    info "Prospector queue processor linked: $PROSPECTOR_SCRIPT_DST"
 
     # Touch queue files so L1 can append to them immediately
     touch "$PROSPECTOR_DIR/pending_bounces.txt"
@@ -770,9 +764,8 @@ SP_CACHE_LOG="$HOME/.openclaw/integrations/microsoft/sp-cache-poller.log"
 
 if [ -f "$SP_CACHE_SRC" ]; then
     mkdir -p "$HOME/.openclaw/integrations/microsoft"
-    cp "$SP_CACHE_SRC" "$SP_CACHE_DST"
-    chmod +x "$SP_CACHE_DST"
-    info "SharePoint cache poller deployed: $SP_CACHE_DST"
+    ln -sf "$SP_CACHE_SRC" "$SP_CACHE_DST"
+    info "SharePoint cache poller linked: $SP_CACHE_DST"
 
     SP_CACHE_CRON="*/15 * * * * python3 $SP_CACHE_DST >> $SP_CACHE_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "sharepoint_cache_poller.py"; echo "$SP_CACHE_CRON" ) | crontab -
@@ -791,9 +784,8 @@ SP_QUEUE_LOG="$HOME/.openclaw/integrations/microsoft/sp-queue-processor.log"
 
 if [ -f "$SP_QUEUE_SRC" ]; then
     mkdir -p "$HOME/.openclaw/integrations/microsoft"
-    cp "$SP_QUEUE_SRC" "$SP_QUEUE_DST"
-    chmod +x "$SP_QUEUE_DST"
-    info "SharePoint queue processor deployed: $SP_QUEUE_DST"
+    ln -sf "$SP_QUEUE_SRC" "$SP_QUEUE_DST"
+    info "SharePoint queue processor linked: $SP_QUEUE_DST"
 
     # Initialise empty queue if it doesn't exist yet
     QUEUE_FILE="$HOME/.openclaw/sharepoint-queue.json"
@@ -817,9 +809,8 @@ SS_POLLER_LOG="$HOME/.openclaw/integrations/stackstone/poller.log"
 
 if [ -f "$SS_POLLER_SRC" ]; then
     mkdir -p "$HOME/.openclaw/integrations/stackstone"
-    cp "$SS_POLLER_SRC" "$SS_POLLER_DST"
-    chmod +x "$SS_POLLER_DST"
-    info "Stackstone report poller deployed: $SS_POLLER_DST"
+    ln -sf "$SS_POLLER_SRC" "$SS_POLLER_DST"
+    info "Stackstone report poller linked: $SS_POLLER_DST"
 
     SS_CRON="*/5 * * * * python3 $SS_POLLER_DST >> $SS_POLLER_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "stackstone/report_poller.py"; echo "$SS_CRON" ) | crontab -
@@ -840,9 +831,8 @@ SS_ENQ_LOG="$HOME/.openclaw/integrations/stackstone/enquiry-poller.log"
 
 if [ -f "$SS_ENQ_SRC" ]; then
     mkdir -p "$HOME/.openclaw/integrations/stackstone"
-    cp "$SS_ENQ_SRC" "$SS_ENQ_DST"
-    chmod +x "$SS_ENQ_DST"
-    info "Stackstone enquiry poller deployed: $SS_ENQ_DST"
+    ln -sf "$SS_ENQ_SRC" "$SS_ENQ_DST"
+    info "Stackstone enquiry poller linked: $SS_ENQ_DST"
 
     SS_ENQ_CRON="*/2 * * * * python3 $SS_ENQ_DST >> $SS_ENQ_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "stackstone/enquiry_poller.py"; echo "$SS_ENQ_CRON" ) | crontab -
@@ -865,9 +855,8 @@ MGMT_SERVICE_FILE="$HOME/.config/systemd/user/$MGMT_SERVICE"
 
 if [ -f "$MGMT_BOT_SRC" ]; then
     mkdir -p "$HOME/.openclaw/integrations/mgmt-bot"
-    cp "$MGMT_BOT_SRC" "$MGMT_BOT_DST"
-    chmod +x "$MGMT_BOT_DST"
-    info "Management bot deployed: $MGMT_BOT_DST"
+    ln -sf "$MGMT_BOT_SRC" "$MGMT_BOT_DST"
+    info "Management bot linked: $MGMT_BOT_DST"
 
     # Write systemd user service
     mkdir -p "$HOME/.config/systemd/user"
@@ -932,9 +921,8 @@ WA_RECENT_DST="$HOME/.openclaw/scripts/whatsapp_recent.sh"
 
 if [ -f "$WA_RECENT_SRC" ]; then
     mkdir -p "$HOME/.openclaw/scripts"
-    cp "$WA_RECENT_SRC" "$WA_RECENT_DST"
-    chmod +x "$WA_RECENT_DST"
-    info "WhatsApp recent-file script deployed: $WA_RECENT_DST"
+    ln -sf "$WA_RECENT_SRC" "$WA_RECENT_DST"
+    info "WhatsApp recent-file script linked: $WA_RECENT_DST"
 
     # Run it immediately so WHATSAPP_RECENT.md exists right after install
     bash "$WA_RECENT_DST" || true

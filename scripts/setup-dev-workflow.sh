@@ -58,8 +58,8 @@ for skill in app-plan app-init app-build app-test app-deploy; do
     fi
 
     mkdir -p "$dst_dir"
-    cp "$src" "$dst"
-    ok "Deployed $skill"
+    ln -sf "$src" "$dst"
+    ok "Linked $skill → $src"
 done
 echo ""
 
@@ -74,9 +74,8 @@ if [[ ! -f "$GITHUB_HELPER_SRC" ]]; then
     exit 1
 fi
 
-cp "$GITHUB_HELPER_SRC" "$GITHUB_HELPER_DST"
-chmod +x "$GITHUB_HELPER_DST"
-ok "GitHub helper deployed to $GITHUB_HELPER_DST"
+ln -sf "$GITHUB_HELPER_SRC" "$GITHUB_HELPER_DST"
+ok "GitHub helper linked → $GITHUB_HELPER_SRC"
 echo ""
 
 # ── 4. Install Vercel CLI ─────────────────────────────────────────────────────
