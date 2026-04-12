@@ -72,6 +72,7 @@ SETUP
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -734,33 +735,22 @@ def cmd_soul_process(token: str, chat_id: str, document: dict) -> None:
          f"{'✅ Gateway restarted.' if ok else f'⚠️ {msg}'}")
 
 
-def cmd_dev_run(token: str, chat_id: str, project: str) -> None:
-    """npm install + vercel preview for a workspace project."""
-    if not project:
-        send(token, chat_id,
-             "❌ Usage: `/dev-run <project-name>`\n"
-             "Example: `/dev-run george-dean-portfolio`")
-        return
-
-    projects_dir = STATE_DIR / "workspace" / "projects"
-    project_dir  = projects_dir / project
-
-    if not project_dir.exists():
-        send(token, chat_id,
-             f"❌ Project not found: `{project_dir}`\n"
-             f"Check the name and try again.")
-        return
-
+def _load_vercel_creds() -> tuple[str, str]:
+    """Return (vercel_token, vercel_scope) from ~/.openclaw/.env."""
     env_file = STATE_DIR / ".env"
-    vercel_token = ""
-    vercel_scope = ""
+    token, scope = "", ""
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             if line.startswith("VERCEL_TOKEN="):
-                vercel_token = line.split("=", 1)[1].strip().strip('"')
+                token = line.split("=", 1)[1].strip().strip('"')
             if line.startswith("VERCEL_SCOPE="):
-                vercel_scope = line.split("=", 1)[1].strip().strip('"')
+                scope = line.split("=", 1)[1].strip().strip('"')
+    return token, scope
 
+
+def _run_dev_pipeline(token: str, chat_id: str, project_dir: Path, project: str) -> None:
+    """Core pipeline: npm install → npm run build → vercel preview."""
+    vercel_token, vercel_scope = _load_vercel_creds()
     if not vercel_token:
         send(token, chat_id, "❌ `VERCEL_TOKEN` not set in `~/.openclaw/.env`")
         return
@@ -775,20 +765,19 @@ def cmd_dev_run(token: str, chat_id: str, project: str) -> None:
         tail = (install.stdout + install.stderr).strip()[-1500:]
         send(token, chat_id, f"❌ `npm install` failed:\n```{tail}```")
         return
-    send(token, chat_id, "✅ `npm install` complete. Running `npm run build`…")
 
+    send(token, chat_id, "✅ `npm install` done. Running `npm run build`…")
     build = subprocess.run(
         ["npm", "run", "build"],
         cwd=str(project_dir),
         capture_output=True, text=True, timeout=300,
     )
-    build_out = (build.stdout + build.stderr).strip()
     if build.returncode != 0:
-        tail = build_out[-1500:]
+        tail = (build.stdout + build.stderr).strip()[-1500:]
         send(token, chat_id, f"❌ `npm run build` failed:\n```{tail}```")
         return
-    send(token, chat_id, "✅ Build passed. Deploying Vercel preview…")
 
+    send(token, chat_id, "✅ Build passed. Deploying Vercel preview…")
     vercel_cmd = ["vercel", "--token", vercel_token, "--yes"]
     if vercel_scope:
         vercel_cmd += ["--scope", vercel_scope]
@@ -799,8 +788,6 @@ def cmd_dev_run(token: str, chat_id: str, project: str) -> None:
         capture_output=True, text=True, timeout=300,
     )
     vercel_out = (vercel.stdout + vercel.stderr).strip()
-
-    import re
     urls = re.findall(r'https://[^\s]+\.vercel\.app', vercel_out)
     preview_url = urls[-1] if urls else None
 
@@ -816,6 +803,21 @@ def cmd_dev_run(token: str, chat_id: str, project: str) -> None:
         send(token, chat_id,
              f"⚠️ Vercel ran but no preview URL found.\n\n```{tail}```\n\n"
              f"Check https://vercel.com/dashboard manually.")
+
+
+def cmd_dev_run(token: str, chat_id: str, project: str) -> None:
+    """Manual: npm install + build + vercel preview for a workspace project."""
+    if not project:
+        send(token, chat_id,
+             "❌ Usage: `/dev-run <project-name>`\n"
+             "Example: `/dev-run george-dean-portfolio`")
+        return
+    project_dir = STATE_DIR / "workspace" / "projects" / project
+    if not project_dir.exists():
+        send(token, chat_id,
+             f"❌ Project not found: `{project_dir}`")
+        return
+    _run_dev_pipeline(token, chat_id, project_dir, project)
 
 
 def cmd_dev_test(token: str, chat_id: str, project: str) -> None:
@@ -938,6 +940,28 @@ COMMANDS = {
 }
 
 
+def _check_dev_triggers(token: str, chat_id: str) -> None:
+    """Auto-run the dev pipeline for any project that has a .pending-dev-run trigger file."""
+    projects_dir = STATE_DIR / "workspace" / "projects"
+    if not projects_dir.exists():
+        return
+    for trigger in sorted(projects_dir.glob("*/.pending-dev-run")):
+        project     = trigger.parent.name
+        project_dir = trigger.parent
+        try:
+            meta = json.loads(trigger.read_text()) if trigger.stat().st_size > 0 else {}
+        except Exception:
+            meta = {}
+        change = meta.get("change", "")
+        trigger.unlink(missing_ok=True)
+        print(f"[mgmt-bot] Auto-trigger: {project} ({change})")
+        header = f"🤖 *Auto-build triggered — {project}*"
+        if change:
+            header += f"\n_{change}_"
+        send(token, chat_id, header)
+        _run_dev_pipeline(token, chat_id, project_dir, project)
+
+
 def main() -> None:
     _load_dotenv()
 
@@ -946,9 +970,19 @@ def main() -> None:
 
     print(f"[mgmt-bot] Starting. Listening on chat_id={allowed_id}…")
 
-    offset = load_offset()
+    offset            = load_offset()
+    last_trigger_check = 0.0
 
     while True:
+        # Poll for AI-written trigger files every 30 s
+        now = time.time()
+        if now - last_trigger_check >= 30:
+            try:
+                _check_dev_triggers(token, allowed_id)
+            except Exception as e:
+                print(f"[mgmt-bot] Trigger check error: {e}", file=sys.stderr)
+            last_trigger_check = now
+
         try:
             updates = get_updates(token, offset)
         except Exception as e:

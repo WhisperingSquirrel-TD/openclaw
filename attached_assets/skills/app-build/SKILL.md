@@ -97,17 +97,32 @@ git push origin main
 
 If push fails: **stop and report the exact error.**
 
-### Step 5 — Hand off to mgmt-bot for testing and preview
+### Step 5 — Write trigger file to kick off auto-build
 
-You cannot run shell commands directly. After pushing, tell Tom:
+After pushing, write a trigger file so the mgmt-bot picks it up automatically
+within 30 seconds and runs install → build → Vercel preview without Tom needing
+to type anything:
 
-> "Code is pushed. To test and get a preview URL, send this to your management bot on Telegram:
-> `/dev-test <project-name>`
-> If all checks pass, it will prompt you to run:
-> `/dev-run <project-name>`
-> That will install dependencies, build, and generate a Vercel preview link for you to review."
+```bash
+python3 -c "
+import json, pathlib, datetime
+p = pathlib.Path('$HOME/.openclaw/workspace/projects/<project-name>/.pending-dev-run')
+p.write_text(json.dumps({
+    'project': '<project-name>',
+    'change': 'Phase N complete — <short description>',
+    'triggered_at': datetime.datetime.utcnow().isoformat()
+}))
+print('Trigger written:', p)
+"
+```
 
-Do not claim tests have passed. Do not claim a preview URL exists. Let the mgmt-bot run the real commands and report back.
+Then tell Tom:
+
+> "Phase N is pushed and the build has been triggered automatically.
+> You'll get a Vercel preview URL in Telegram within ~60 seconds.
+> Review it and reply `deploy <project-name>` to go live."
+
+Do not claim tests have passed. Do not claim a preview URL exists. The mgmt-bot runs the real commands.
 
 ---
 
