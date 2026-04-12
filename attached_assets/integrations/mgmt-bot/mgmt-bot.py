@@ -735,6 +735,72 @@ def cmd_soul_process(token: str, chat_id: str, document: dict) -> None:
          f"{'✅ Gateway restarted.' if ok else f'⚠️ {msg}'}")
 
 
+def _collect_route_urls(project_dir: Path, base_url: str) -> str:
+    """Scan a Next.js project and return a formatted list of all testable URLs."""
+    base = base_url.rstrip("/")
+    routes: list[tuple[str, str]] = []  # (label, path)
+
+    # Detect Next.js app router (app/) or pages router (pages/)
+    app_dir   = project_dir / "app"
+    pages_dir = project_dir / "pages"
+
+    def _label(path: str) -> str:
+        low = path.lower()
+        if "/api/" in low or low.startswith("api/"):
+            return "🔌 API"
+        if "admin" in low:
+            return "🔐 Admin"
+        if path in ("/", ""):
+            return "🏠 Home"
+        return "📄 Page"
+
+    seen: set[str] = set()
+
+    def _add(path: str) -> None:
+        if path not in seen:
+            seen.add(path)
+            routes.append((_label(path), path))
+
+    if app_dir.exists():
+        for item in sorted(app_dir.rglob("page.tsx")) + sorted(app_dir.rglob("page.ts")) + \
+                    sorted(app_dir.rglob("page.jsx")) + sorted(app_dir.rglob("page.js")):
+            rel = item.parent.relative_to(app_dir)
+            path = "/" + str(rel).replace("\\", "/") if str(rel) != "." else "/"
+            # Skip dynamic catch-all segments for cleanliness
+            if "[[" in path:
+                continue
+            # Turn [slug] into :slug for display
+            display = re.sub(r'\[([^\]]+)\]', r':\1', path)
+            _add(display)
+        for item in sorted(app_dir.rglob("route.tsx")) + sorted(app_dir.rglob("route.ts")) + \
+                    sorted(app_dir.rglob("route.js")):
+            rel = item.parent.relative_to(app_dir)
+            path = "/api/" + str(rel).replace("\\", "/") if "api" not in str(rel) else \
+                   "/" + str(rel).replace("\\", "/")
+            display = re.sub(r'\[([^\]]+)\]', r':\1', path)
+            _add(display)
+
+    elif pages_dir.exists():
+        for item in sorted(pages_dir.rglob("*.tsx")) + sorted(pages_dir.rglob("*.ts")) + \
+                    sorted(pages_dir.rglob("*.jsx")) + sorted(pages_dir.rglob("*.js")):
+            rel = str(item.relative_to(pages_dir).with_suffix("")).replace("\\", "/")
+            if rel.startswith("_") or rel.startswith("api/_"):
+                continue
+            path = "/" if rel in ("index", "Index") else "/" + rel
+            display = re.sub(r'\[([^\]]+)\]', r':\1', path)
+            _add(display)
+
+    # Fallback: at least show the root
+    if not routes:
+        _add("/")
+
+    lines = []
+    for label, path in routes:
+        lines.append(f"{label} `{base}{path}`")
+
+    return "\n".join(lines)
+
+
 def _load_vercel_creds() -> tuple[str, str]:
     """Return (vercel_token, vercel_scope) from ~/.openclaw/.env."""
     env_file = STATE_DIR / ".env"
@@ -792,9 +858,10 @@ def _run_dev_pipeline(token: str, chat_id: str, project_dir: Path, project: str)
     preview_url = urls[-1] if urls else None
 
     if preview_url:
+        url_lines = _collect_route_urls(project_dir, preview_url)
         send(token, chat_id,
              f"🚀 *Preview ready — {project}*\n\n"
-             f"🔗 {preview_url}\n\n"
+             f"{url_lines}\n\n"
              f"Review it, then reply:\n"
              f"• `deploy {project}` — go live\n"
              f"• `reject {project}` — discard")
