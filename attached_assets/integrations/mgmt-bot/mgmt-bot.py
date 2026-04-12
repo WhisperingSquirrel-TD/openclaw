@@ -734,6 +734,154 @@ def cmd_soul_process(token: str, chat_id: str, document: dict) -> None:
          f"{'✅ Gateway restarted.' if ok else f'⚠️ {msg}'}")
 
 
+def cmd_dev_run(token: str, chat_id: str, project: str) -> None:
+    """npm install + vercel preview for a workspace project."""
+    if not project:
+        send(token, chat_id,
+             "❌ Usage: `/dev-run <project-name>`\n"
+             "Example: `/dev-run george-dean-portfolio`")
+        return
+
+    projects_dir = STATE_DIR / "workspace" / "projects"
+    project_dir  = projects_dir / project
+
+    if not project_dir.exists():
+        send(token, chat_id,
+             f"❌ Project not found: `{project_dir}`\n"
+             f"Check the name and try again.")
+        return
+
+    env_file = STATE_DIR / ".env"
+    vercel_token = ""
+    vercel_scope = ""
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if line.startswith("VERCEL_TOKEN="):
+                vercel_token = line.split("=", 1)[1].strip().strip('"')
+            if line.startswith("VERCEL_SCOPE="):
+                vercel_scope = line.split("=", 1)[1].strip().strip('"')
+
+    if not vercel_token:
+        send(token, chat_id, "❌ `VERCEL_TOKEN` not set in `~/.openclaw/.env`")
+        return
+
+    send(token, chat_id, f"📦 Running `npm install` in `{project}`…")
+    install = subprocess.run(
+        ["npm", "install"],
+        cwd=str(project_dir),
+        capture_output=True, text=True, timeout=300,
+    )
+    if install.returncode != 0:
+        tail = (install.stdout + install.stderr).strip()[-1500:]
+        send(token, chat_id, f"❌ `npm install` failed:\n```{tail}```")
+        return
+    send(token, chat_id, "✅ `npm install` complete. Running `npm run build`…")
+
+    build = subprocess.run(
+        ["npm", "run", "build"],
+        cwd=str(project_dir),
+        capture_output=True, text=True, timeout=300,
+    )
+    build_out = (build.stdout + build.stderr).strip()
+    if build.returncode != 0:
+        tail = build_out[-1500:]
+        send(token, chat_id, f"❌ `npm run build` failed:\n```{tail}```")
+        return
+    send(token, chat_id, "✅ Build passed. Deploying Vercel preview…")
+
+    vercel_cmd = ["vercel", "--token", vercel_token, "--yes"]
+    if vercel_scope:
+        vercel_cmd += ["--scope", vercel_scope]
+
+    vercel = subprocess.run(
+        vercel_cmd,
+        cwd=str(project_dir),
+        capture_output=True, text=True, timeout=300,
+    )
+    vercel_out = (vercel.stdout + vercel.stderr).strip()
+
+    import re
+    urls = re.findall(r'https://[^\s]+\.vercel\.app', vercel_out)
+    preview_url = urls[-1] if urls else None
+
+    if preview_url:
+        send(token, chat_id,
+             f"🚀 *Preview ready — {project}*\n\n"
+             f"🔗 {preview_url}\n\n"
+             f"Review it, then reply:\n"
+             f"• `deploy {project}` — go live\n"
+             f"• `reject {project}` — discard")
+    else:
+        tail = vercel_out[-1500:]
+        send(token, chat_id,
+             f"⚠️ Vercel ran but no preview URL found.\n\n```{tail}```\n\n"
+             f"Check https://vercel.com/dashboard manually.")
+
+
+def cmd_dev_test(token: str, chat_id: str, project: str) -> None:
+    """Run lint + typecheck + build for a workspace project."""
+    if not project:
+        send(token, chat_id,
+             "❌ Usage: `/dev-test <project-name>`\n"
+             "Example: `/dev-test george-dean-portfolio`")
+        return
+
+    projects_dir = STATE_DIR / "workspace" / "projects"
+    project_dir  = projects_dir / project
+
+    if not project_dir.exists():
+        send(token, chat_id,
+             f"❌ Project not found: `{project_dir}`\n"
+             f"Check the name and try again.")
+        return
+
+    send(token, chat_id, f"🧪 Testing `{project}`…\n\n📦 Running `npm install` first…")
+    install = subprocess.run(
+        ["npm", "install"],
+        cwd=str(project_dir),
+        capture_output=True, text=True, timeout=300,
+    )
+    if install.returncode != 0:
+        tail = (install.stdout + install.stderr).strip()[-1000:]
+        send(token, chat_id, f"❌ `npm install` failed:\n```{tail}```")
+        return
+
+    results = []
+    pkg = (project_dir / "package.json").read_text() if (project_dir / "package.json").exists() else ""
+
+    steps = [
+        ("lint",       "npm run lint"),
+        ("typecheck",  "npm run typecheck"),
+        ("build",      "npm run build"),
+        ("test",       "npm test"),
+    ]
+
+    failed = False
+    for key, cmd_str in steps:
+        if f'"scripts"' in pkg and f'"{key}"' not in pkg:
+            results.append(f"⏭ `{cmd_str}` — skipped (not in package.json)")
+            continue
+        r = subprocess.run(
+            cmd_str.split(),
+            cwd=str(project_dir),
+            capture_output=True, text=True, timeout=180,
+        )
+        if r.returncode == 0:
+            results.append(f"✅ `{cmd_str}` — passed")
+        else:
+            tail = (r.stdout + r.stderr).strip()[-800:]
+            results.append(f"❌ `{cmd_str}` — FAILED\n```{tail}```")
+            failed = True
+            break
+
+    summary = "\n".join(results)
+    icon = "❌" if failed else "✅"
+    send(token, chat_id,
+         f"{icon} *Test results — {project}*\n\n{summary}\n\n"
+         + ("Fix the errors above and run `/dev-test` again." if failed
+            else f"All checks passed. Run `/dev-run {project}` to generate a preview."))
+
+
 def cmd_cancel(token: str, chat_id: str) -> None:
     SOUL_PENDING_FLAG.unlink(missing_ok=True)
     send(token, chat_id, "↩️ Cancelled.")
@@ -757,6 +905,9 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/pull — git pull latest from GitHub\n"
          "/install — git pull + run install script (sources .env automatically)\n"
          "/reboot — reboot Pi (refused if not safe)\n\n"
+         "*Dev Workflow*\n"
+         "/dev-test <project> — npm install + lint + typecheck + build\n"
+         "/dev-run <project> — npm install + build + Vercel preview URL\n\n"
          "*Identity*\n"
          "/soul — upload new SOUL.md (send as a .md file)\n\n"
          "/help — this message\n"
@@ -835,8 +986,23 @@ def main() -> None:
                      "Send `/soul` first, then upload your `.docx`.")
                 continue
 
-            # Extract command (strip bot username suffix e.g. /cmd@mybot)
-            cmd = text.split()[0].split("@")[0].lower() if text else ""
+            # Extract command and optional argument
+            parts = text.split(maxsplit=1) if text else []
+            cmd   = parts[0].split("@")[0].lower() if parts else ""
+            arg   = parts[1].strip() if len(parts) > 1 else ""
+
+            # Commands that take an argument
+            if cmd in ("/dev-run", "/dev-test"):
+                print(f"[mgmt-bot] Command: {cmd} {arg!r} from {chat_id}")
+                try:
+                    if cmd == "/dev-run":
+                        cmd_dev_run(token, chat_id, arg)
+                    else:
+                        cmd_dev_test(token, chat_id, arg)
+                except Exception as e:
+                    print(f"[mgmt-bot] Handler error ({cmd}): {e}", file=sys.stderr)
+                    send(token, chat_id, f"❌ Error running `{cmd}`:\n```{e}```")
+                continue
 
             handler = COMMANDS.get(cmd)
             if handler:

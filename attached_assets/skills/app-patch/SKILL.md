@@ -113,29 +113,7 @@ Common change types and what to watch for:
 
 ---
 
-## Phase 5 — Self-test
-
-Run whatever test/lint commands the repo exposes:
-
-```bash
-cd "$WORKSPACE"
-
-# Try these in order — skip any that don't exist
-npm run lint        2>/dev/null || true
-npm run typecheck   2>/dev/null || true
-npm run build       2>/dev/null || true
-npm test            2>/dev/null || true
-```
-
-If **any command that exists** exits with a non-zero code:
-- Stop immediately
-- Report the exact error to the user
-- Do NOT commit, push, or deploy
-- Ask the user: "Self-test failed. Do you want me to fix the error or stop here?"
-
----
-
-## Phase 6 — Commit and push
+## Phase 5 — Commit and push
 
 ```bash
 cd "$WORKSPACE"
@@ -147,24 +125,24 @@ Change: {full change description}"
 git push origin "$BRANCH"
 ```
 
+If push fails: stop and report the exact error. Do not force-push.
+
 ---
 
-## Phase 7 — Vercel preview
+## Phase 6 — Hand off to mgmt-bot for testing and preview
 
-```bash
-cd "$WORKSPACE"
-vercel --token "$VERCEL_TOKEN" --scope "$VERCEL_SCOPE" 2>&1 | tee /tmp/vercel-patch-preview.log
-PREVIEW_URL=$(grep -oP 'https://[^\s]+\.vercel\.app' /tmp/vercel-patch-preview.log | tail -1)
-```
+You cannot run shell commands directly. After pushing, tell Tom:
 
-Send the preview URL to the user on Telegram:
-
-> "Patch is ready for your review.
-> Preview: {PREVIEW_URL}
-> Branch: {BRANCH}
-> Changes: {short summary}
+> "Changes are pushed to branch `{BRANCH}`.
+> To test and get a preview, send these to your management bot on Telegram:
 >
-> Reply 'deploy {repo}' to merge and go live, or 'reject {repo}' to discard."
+> First: `/dev-test {repo}`
+> If all checks pass: `/dev-run {repo}`
+>
+> The bot will run install, lint, build and generate a Vercel preview URL.
+> Reply `deploy {repo}` to go live or `reject {repo}` to discard."
+
+Do not claim tests have passed. Do not claim a preview URL exists. The mgmt-bot runs the real commands.
 
 ---
 

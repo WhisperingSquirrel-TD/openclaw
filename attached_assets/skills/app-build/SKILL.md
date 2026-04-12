@@ -87,19 +87,7 @@ Work through the phase requirements in order. Apply Superpowers discipline throu
 - No scope creep
 - No speculation
 
-### Step 4 — Self-test before push
-
-Run checks in order (stop on first failure):
-```bash
-npm run lint
-npm run typecheck
-npm run build
-npm test
-```
-
-If any step fails: **stop. Fix the failure. Do not push until all pass.**
-
-### Step 5 — Commit and push
+### Step 4 — Commit and push
 
 ```bash
 git add .
@@ -109,11 +97,17 @@ git push origin main
 
 If push fails: **stop and report the exact error.**
 
-### Step 6 — Wait for Vercel preview
+### Step 5 — Hand off to mgmt-bot for testing and preview
 
-Vercel will generate a preview URL automatically on push. Either:
-- Wait ~60 seconds and check `npx vercel ls --token $VERCEL_TOKEN`
-- Or report that the preview will be ready within ~1 minute
+You cannot run shell commands directly. After pushing, tell Tom:
+
+> "Code is pushed. To test and get a preview URL, send this to your management bot on Telegram:
+> `/dev-test <project-name>`
+> If all checks pass, it will prompt you to run:
+> `/dev-run <project-name>`
+> That will install dependencies, build, and generate a Vercel preview link for you to review."
+
+Do not claim tests have passed. Do not claim a preview URL exists. Let the mgmt-bot run the real commands and report back.
 
 ---
 
