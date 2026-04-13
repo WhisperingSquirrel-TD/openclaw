@@ -76,6 +76,17 @@ fi
 
 ln -sf "$GITHUB_HELPER_SRC" "$GITHUB_HELPER_DST"
 ok "GitHub helper linked → $GITHUB_HELPER_SRC"
+
+RETRO_PUSH_SRC="$REPO_DIR/attached_assets/integrations/github/retro-push.py"
+RETRO_PUSH_DST="$INTEGRATIONS_DIR/github/retro-push.py"
+
+if [[ ! -f "$RETRO_PUSH_SRC" ]]; then
+    fail "retro-push helper not found: $RETRO_PUSH_SRC"
+    exit 1
+fi
+
+ln -sf "$RETRO_PUSH_SRC" "$RETRO_PUSH_DST"
+ok "Retro-push helper linked → $RETRO_PUSH_SRC"
 echo ""
 
 # ── 4. Install Vercel CLI ─────────────────────────────────────────────────────
