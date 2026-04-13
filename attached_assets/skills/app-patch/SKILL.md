@@ -57,21 +57,40 @@ If the user gives a bare repo name (e.g. `stackstone-website`) assume the owner 
 
 ## Phase 2 — Clone or update the repo
 
-```bash
-# Load env
-set -a && source ~/.openclaw/.env && set +a
+Do NOT run git commands directly — write a dev-cmd request for the mgmt-bot.
 
-OWNER="WhisperingSquirrel-TD"   # override if user specified a different owner
-REPO="{repo}"
-WORKSPACE="$HOME/.openclaw/workspace/projects/$REPO"
+If the project directory does not exist yet:
 
-# Pull if already cloned, clone if not
-if [ -d "$WORKSPACE/.git" ]; then
-  git -C "$WORKSPACE" pull
-else
-  git clone "https://$GITHUB_TOKEN@github.com/$OWNER/$REPO.git" "$WORKSPACE"
-fi
+```python
+import json, pathlib, datetime
+p = pathlib.Path.home() / ".openclaw/workspace/projects/{repo}/.dev-cmd.json"
+p.parent.mkdir(parents=True, exist_ok=True)
+p.write_text(json.dumps({
+    "project":      "{repo}",
+    "operation":    "git_clone",
+    "args":         {"url": "https://github.com/WhisperingSquirrel-TD/{repo}.git", "branch": "main"},
+    "message":      "Clone {repo} for patch work",
+    "triggered_at": datetime.datetime.utcnow().isoformat()
+}))
+print("Dev-cmd written — waiting for mgmt-bot to clone repo (~30 s)…")
 ```
+
+If the project directory already exists, write `git_pull` instead:
+
+```python
+import json, pathlib, datetime
+p = pathlib.Path.home() / ".openclaw/workspace/projects/{repo}/.dev-cmd.json"
+p.write_text(json.dumps({
+    "project":      "{repo}",
+    "operation":    "git_pull",
+    "args":         {},
+    "message":      "Pull latest before patching {repo}",
+    "triggered_at": datetime.datetime.utcnow().isoformat()
+}))
+print("Dev-cmd written — waiting for mgmt-bot to pull (~30 s)…")
+```
+
+**Wait for Telegram confirmation from the mgmt-bot before continuing.**
 
 ---
 
@@ -79,15 +98,20 @@ fi
 
 Branch name format: `patch/{short-slug-of-change}`
 
-Examples:
-- `patch/update-pricing-page`
-- `patch/fix-mobile-nav`
-- `patch/add-contact-form`
-
-```bash
-BRANCH="patch/{short-slug}"
-git -C "$WORKSPACE" checkout -b "$BRANCH"
+```python
+import json, pathlib, datetime
+p = pathlib.Path.home() / ".openclaw/workspace/projects/{repo}/.dev-cmd.json"
+p.write_text(json.dumps({
+    "project":      "{repo}",
+    "operation":    "git_branch",
+    "args":         {"branch": "patch/{short-slug}"},
+    "message":      "Create branch for: {change_description}",
+    "triggered_at": datetime.datetime.utcnow().isoformat()
+}))
+print("Dev-cmd written — waiting for mgmt-bot to create branch (~30 s)…")
 ```
+
+**Wait for Telegram confirmation before editing any files.**
 
 ---
 
@@ -115,17 +139,25 @@ Common change types and what to watch for:
 
 ## Phase 5 — Commit and push
 
-```bash
-cd "$WORKSPACE"
-git add -A
-git commit -m "patch: {short description of change}
+Do NOT run git commands directly. Write a `git_commit_push` dev-cmd:
 
-Requested via Telegram.
-Change: {full change description}"
-git push origin "$BRANCH"
+```python
+import json, pathlib, datetime
+p = pathlib.Path.home() / ".openclaw/workspace/projects/{repo}/.dev-cmd.json"
+p.write_text(json.dumps({
+    "project":      "{repo}",
+    "operation":    "git_commit_push",
+    "args":         {
+        "message": "patch: {short description}\n\nRequested via Telegram.\nChange: {full change description}",
+        "branch":  "patch/{short-slug}"
+    },
+    "message":      "Commit and push patch changes",
+    "triggered_at": datetime.datetime.utcnow().isoformat()
+}))
+print("Dev-cmd written — mgmt-bot will commit and push (~30 s)…")
 ```
 
-If push fails: stop and report the exact error. Do not force-push.
+**Wait for Telegram confirmation before writing the `.pending-dev-run` trigger.**
 
 ---
 
@@ -171,37 +203,79 @@ Any other reply: ask for clarification. Do not auto-deploy.
 
 ## Phase 9 — Deploy (on approval)
 
-```bash
-cd "$WORKSPACE"
+Do NOT run git or vercel commands directly. Use the dev-cmd queue.
 
-# Merge branch into main
-git checkout main
-git merge "$BRANCH" --no-ff -m "Merge $BRANCH into main (approved via Telegram)"
-git push origin main
+**Step 1 — merge the branch into main:**
 
-# Deploy to production
-vercel --prod --token "$VERCEL_TOKEN" --scope "$VERCEL_SCOPE"
+```python
+import json, pathlib, datetime
+p = pathlib.Path.home() / ".openclaw/workspace/projects/{repo}/.dev-cmd.json"
+p.write_text(json.dumps({
+    "project":      "{repo}",
+    "operation":    "git_merge_main",
+    "args":         {"branch": "patch/{short-slug}"},
+    "message":      "Merge approved patch into main",
+    "triggered_at": datetime.datetime.utcnow().isoformat()
+}))
+print("Dev-cmd written — mgmt-bot will merge branch (~30 s)…")
 ```
 
-Notify the user:
+**Wait for Telegram confirmation of the merge.**
 
-> "Deployed. {repo} is now live on main.
-> Branch {BRANCH} has been merged."
+**Step 2 — trigger production build:**
+
+```python
+import json, pathlib, datetime
+p = pathlib.Path.home() / ".openclaw/workspace/projects/{repo}/.pending-dev-run"
+p.write_text(json.dumps({
+    "project":      "{repo}",
+    "change":       "Production deploy — patch/{short-slug} merged",
+    "triggered_at": datetime.datetime.utcnow().isoformat()
+}))
+print("Build trigger written — Vercel preview incoming (~60 s)…")
+```
+
+**Step 3 — clean up the branch:**
+
+```python
+import json, pathlib, datetime
+p = pathlib.Path.home() / ".openclaw/workspace/projects/{repo}/.dev-cmd.json"
+p.write_text(json.dumps({
+    "project":      "{repo}",
+    "operation":    "git_delete_branch",
+    "args":         {"branch": "patch/{short-slug}"},
+    "message":      "Delete merged patch branch",
+    "triggered_at": datetime.datetime.utcnow().isoformat()
+}))
+```
+
+Then notify Tom:
+
+> "Branch merged into main and build triggered.
+> Vercel preview will arrive in ~60 seconds.
+> Reply `deploy {repo}` to push to production."
 
 ---
 
 ## Phase 9R — Reject (on rejection)
 
-```bash
-cd "$WORKSPACE"
-git checkout main
-git branch -D "$BRANCH"
-git push origin --delete "$BRANCH" 2>/dev/null || true
+Write `git_delete_branch` to discard the branch:
+
+```python
+import json, pathlib, datetime
+p = pathlib.Path.home() / ".openclaw/workspace/projects/{repo}/.dev-cmd.json"
+p.write_text(json.dumps({
+    "project":      "{repo}",
+    "operation":    "git_delete_branch",
+    "args":         {"branch": "patch/{short-slug}"},
+    "message":      "Delete rejected patch branch",
+    "triggered_at": datetime.datetime.utcnow().isoformat()
+}))
 ```
 
-Notify the user:
+Notify Tom:
 
-> "Change discarded. Branch {BRANCH} deleted. {repo} is unchanged."
+> "Change discarded. Branch patch/{short-slug} deleted. {repo} is unchanged."
 
 ---
 

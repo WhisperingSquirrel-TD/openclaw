@@ -47,7 +47,7 @@ echo ""
 echo "Deploying skills..."
 SKILLS_SOURCE="$REPO_DIR/attached_assets/skills"
 
-for skill in app-plan app-init app-build app-test app-deploy app-patch app-resume; do
+for skill in app-plan app-init app-build app-test app-deploy app-patch app-resume mgmt-bot; do
     src="$SKILLS_SOURCE/$skill/SKILL.md"
     dst_dir="$SKILLS_DIR/$skill"
     dst="$dst_dir/SKILL.md"
@@ -211,6 +211,7 @@ echo "  app-test   → $SKILLS_DIR/app-test/SKILL.md"
 echo "  app-deploy → $SKILLS_DIR/app-deploy/SKILL.md"
 echo "  app-patch  → $SKILLS_DIR/app-patch/SKILL.md"
 echo "  app-resume → $SKILLS_DIR/app-resume/SKILL.md"
+echo "  mgmt-bot   → $SKILLS_DIR/mgmt-bot/SKILL.md"
 echo ""
 
 if [[ ${#MISSING_TOKENS[@]} -gt 0 ]]; then

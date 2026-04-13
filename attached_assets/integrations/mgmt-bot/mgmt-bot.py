@@ -1179,8 +1179,11 @@ MENU_COMMANDS = [
     ("garmin",    "Manually trigger the Garmin poller"),
     ("sp_sync",   "Force SharePoint content mirror refresh"),
     # Dev workflow
-    ("dev_run",   "Build + Vercel preview — specify project name"),
-    ("dev_test",  "Lint + typecheck + build — specify project name"),
+    ("dev_run",    "Build + Vercel preview — specify project name"),
+    ("dev_test",   "Lint + typecheck + build — specify project name"),
+    ("dev_queue",  "Show pending dev commands from L1"),
+    ("dev_pause",  "Pause L1 dev command auto-execution"),
+    ("dev_resume", "Resume L1 dev command auto-execution"),
     # Identity / misc
     ("soul",      "Upload a new SOUL.md (.md file)"),
     ("cancel",    "Cancel a pending operation"),
@@ -1228,12 +1231,321 @@ COMMANDS = {
     "/garmin":    cmd_garmin,
     "/disk":      cmd_disk,
     "/soul":      cmd_soul_start,
-    "/sp-sync":   cmd_sp_sync,
-    "/sp_sync":   cmd_sp_sync,       # underscore alias (Telegram menu)
-    "/cancel":    cmd_cancel,
-    "/help":      cmd_help,
-    "/start":     cmd_help,
+    "/sp-sync":    cmd_sp_sync,
+    "/sp_sync":    cmd_sp_sync,        # underscore alias (Telegram menu)
+    "/dev-pause":  cmd_dev_pause,
+    "/dev_pause":  cmd_dev_pause,
+    "/dev-resume": cmd_dev_resume,
+    "/dev_resume": cmd_dev_resume,
+    "/dev-queue":  cmd_dev_queue,
+    "/dev_queue":  cmd_dev_queue,
+    "/cancel":     cmd_cancel,
+    "/help":       cmd_help,
+    "/start":      cmd_help,
 }
+
+
+# ---------------------------------------------------------------------------
+# Dev-command queue — L1 writes .dev-cmd.json; mgmt-bot executes it
+# ---------------------------------------------------------------------------
+#
+# Supported operations (whitelist — nothing else is executed):
+#
+#   git_clone        Clone a GitHub repo into workspace/projects/<project>
+#                    args: {url: "https://github.com/owner/repo.git", branch?: "main"}
+#
+#   git_pull         git pull in the project directory
+#                    args: {}
+#
+#   git_branch       Create and checkout a new branch
+#                    args: {branch: "patch/short-slug"}
+#
+#   git_commit_push  git add -A, commit, push to current (or named) branch
+#                    args: {message: "feat: ...", branch?: "main"}
+#
+#   git_merge_main   Merge a feature branch into main and push
+#                    args: {branch: "patch/short-slug"}
+#
+#   git_delete_branch  Delete branch locally and on remote
+#                    args: {branch: "patch/short-slug"}
+#
+#   npm_install      npm install (from existing package.json)
+#                    args: {}
+#
+#   npm_upgrade      Install / upgrade a specific package
+#                    args: {package: "next@latest"}
+#                    Package arg must match: <name>@<version> — no shell chars
+#
+#   npm_run          Run a named npm script (build/lint/typecheck/test only)
+#                    args: {script: "build"}
+#
+# Pause control:
+#   Create  ~/.openclaw/workspace/.dev-cmd-paused  →  queue pauses
+#   Delete  ~/.openclaw/workspace/.dev-cmd-paused  →  queue resumes
+#
+# File format — L1 writes to ~/.openclaw/workspace/projects/<project>/.dev-cmd.json:
+#   {
+#     "project":      "george-dean-portfolio",
+#     "operation":    "npm_upgrade",
+#     "args":         {"package": "next@latest"},
+#     "message":      "Human-readable description shown in Telegram",
+#     "triggered_at": "2026-04-13T10:00:00"
+#   }
+# ---------------------------------------------------------------------------
+
+DEV_CMD_PAUSE_FLAG = STATE_DIR / "workspace" / ".dev-cmd-paused"
+
+# Only these npm scripts may be run via npm_run
+_NPM_SCRIPT_ALLOWLIST = {"build", "lint", "typecheck", "test", "type-check"}
+
+# GitHub clone URLs must start with this prefix
+_GITHUB_URL_PREFIX = "https://github.com/"
+
+_NPM_PACKAGE_RE = re.compile(r'^[\w@][\w@./-]*$')
+
+
+def _dev_cmd_paused() -> bool:
+    return DEV_CMD_PAUSE_FLAG.exists()
+
+
+def _validate_project_path(project_dir: Path) -> bool:
+    """Ensure the project directory is inside workspace/projects/ — no path traversal."""
+    projects_root = STATE_DIR / "workspace" / "projects"
+    try:
+        project_dir.resolve().relative_to(projects_root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
+    """Parse a .dev-cmd.json file, validate, execute the whitelisted operation."""
+    try:
+        data = json.loads(cmd_file.read_text())
+    except Exception as e:
+        send(token, chat_id, f"⚠️ Dev-cmd parse error in `{cmd_file}`: {e}")
+        cmd_file.unlink(missing_ok=True)
+        return
+
+    project   = data.get("project", cmd_file.parent.name)
+    operation = data.get("operation", "").strip()
+    args      = data.get("args", {}) if isinstance(data.get("args"), dict) else {}
+    message   = data.get("message", "")
+
+    project_dir = STATE_DIR / "workspace" / "projects" / project
+    cmd_file.unlink(missing_ok=True)   # consume immediately
+
+    send(token, chat_id,
+         f"🔧 *Dev-cmd — {project}*\n"
+         f"`{operation}`"
+         + (f"\n_{message}_" if message else ""))
+
+    env = _dev_env()
+
+    def run(cmd: list, cwd: Path | None = None, timeout: int = 120) -> tuple[int, str]:
+        r = subprocess.run(cmd, cwd=str(cwd or project_dir),
+                           capture_output=True, text=True, timeout=timeout, env=env)
+        return r.returncode, (r.stdout + r.stderr).strip()
+
+    def ok(detail: str = "") -> None:
+        send(token, chat_id, f"✅ `{operation}` done" + (f"\n```{detail[-800:]}```" if detail else ""))
+
+    def fail(reason: str) -> None:
+        send(token, chat_id, f"❌ `{operation}` failed\n```{reason[-1200:]}```")
+
+    # ── Validate project path ────────────────────────────────────────────────
+    if not _validate_project_path(project_dir):
+        fail(f"Invalid project path: {project_dir}")
+        return
+
+    # ── Operations ───────────────────────────────────────────────────────────
+
+    if operation == "git_clone":
+        url    = args.get("url", "")
+        branch = args.get("branch", "main")
+        if not url.startswith(_GITHUB_URL_PREFIX):
+            fail(f"git_clone: url must start with {_GITHUB_URL_PREFIX}")
+            return
+        token_val = os.environ.get("GITHUB_TOKEN", "")
+        if token_val:
+            auth_url = url.replace("https://", f"https://{token_val}@")
+        else:
+            auth_url = url
+        projects_root = STATE_DIR / "workspace" / "projects"
+        projects_root.mkdir(parents=True, exist_ok=True)
+        rc, out = run(["git", "clone", "--branch", branch, auth_url, str(project_dir)],
+                      cwd=projects_root, timeout=120)
+        if rc == 0:
+            ok(out)
+        else:
+            fail(out)
+
+    elif operation == "git_pull":
+        if not project_dir.exists():
+            fail(f"Project dir not found: {project_dir}")
+            return
+        rc, out = run(["git", "pull"])
+        if rc == 0:
+            ok(out)
+        else:
+            fail(out)
+
+    elif operation == "git_branch":
+        branch = args.get("branch", "").strip()
+        if not branch or "/" not in branch:
+            fail("git_branch: branch must be in format patch/slug or feature/slug")
+            return
+        rc, out = run(["git", "checkout", "-b", branch])
+        if rc == 0:
+            ok(out)
+        else:
+            fail(out)
+
+    elif operation == "git_commit_push":
+        msg    = args.get("message", "chore: update").strip()
+        branch = args.get("branch", "")
+        rc, out = run(["git", "add", "-A"])
+        if rc != 0:
+            fail(out); return
+        rc, out = run(["git", "commit", "-m", msg])
+        if rc != 0 and "nothing to commit" not in out:
+            fail(out); return
+        push_args = ["git", "push", "-u", "origin"]
+        if branch:
+            push_args.append(branch)
+        else:
+            push_args.append("HEAD")
+        token_val = os.environ.get("GITHUB_TOKEN", "")
+        if token_val:
+            remotes = subprocess.run(["git", "remote", "get-url", "origin"],
+                                     cwd=str(project_dir), capture_output=True, text=True).stdout.strip()
+            if "github.com" in remotes and f"{token_val}@" not in remotes:
+                auth_url = remotes.replace("https://", f"https://{token_val}@")
+                subprocess.run(["git", "remote", "set-url", "origin", auth_url],
+                               cwd=str(project_dir), capture_output=True)
+        rc, out = run(push_args)
+        if token_val:
+            clean_url = subprocess.run(["git", "remote", "get-url", "origin"],
+                                       cwd=str(project_dir), capture_output=True, text=True
+                                       ).stdout.strip().replace(f"{token_val}@", "")
+            subprocess.run(["git", "remote", "set-url", "origin", clean_url],
+                           cwd=str(project_dir), capture_output=True)
+        if rc == 0:
+            ok(out)
+        else:
+            fail(out)
+
+    elif operation == "git_merge_main":
+        branch = args.get("branch", "").strip()
+        if not branch:
+            fail("git_merge_main: branch arg required"); return
+        rc, out = run(["git", "checkout", "main"])
+        if rc != 0:
+            fail(out); return
+        rc, out = run(["git", "merge", branch, "--no-ff",
+                       "-m", f"Merge {branch} into main (approved via Telegram)"])
+        if rc != 0:
+            fail(out); return
+        rc, out = run(["git", "push", "origin", "main"])
+        if rc == 0:
+            ok(out)
+        else:
+            fail(out)
+
+    elif operation == "git_delete_branch":
+        branch = args.get("branch", "").strip()
+        if not branch:
+            fail("git_delete_branch: branch arg required"); return
+        run(["git", "checkout", "main"])
+        run(["git", "branch", "-D", branch])
+        rc, out = run(["git", "push", "origin", "--delete", branch])
+        ok(f"Branch {branch} deleted" + (f"\n{out}" if out else ""))
+
+    elif operation == "npm_install":
+        rc, out = run(["npm", "install"], timeout=300)
+        if rc == 0:
+            ok(out[-600:] if out else "")
+        else:
+            fail(out)
+
+    elif operation == "npm_upgrade":
+        package = args.get("package", "").strip()
+        if not package or not _NPM_PACKAGE_RE.match(package):
+            fail(f"npm_upgrade: invalid package name '{package}' — must match name@version")
+            return
+        rc, out = run(["npm", "install", package], timeout=300)
+        if rc == 0:
+            ok(out[-600:] if out else "")
+        else:
+            fail(out)
+
+    elif operation == "npm_run":
+        script = args.get("script", "").strip()
+        if script not in _NPM_SCRIPT_ALLOWLIST:
+            fail(f"npm_run: '{script}' not in allowed scripts {sorted(_NPM_SCRIPT_ALLOWLIST)}")
+            return
+        rc, out = run(["npm", "run", script], timeout=300)
+        if rc == 0:
+            ok(out[-800:] if out else "")
+        else:
+            fail(out)
+
+    else:
+        send(token, chat_id,
+             f"⛔ Dev-cmd `{operation}` is not a recognised operation.\n"
+             f"Allowed: git_clone, git_pull, git_branch, git_commit_push, "
+             f"git_merge_main, git_delete_branch, npm_install, npm_upgrade, npm_run")
+
+
+def _check_dev_cmds(token: str, chat_id: str) -> None:
+    """Process any .dev-cmd.json files written by L1 in project directories."""
+    if _dev_cmd_paused():
+        return
+    projects_dir = STATE_DIR / "workspace" / "projects"
+    if not projects_dir.exists():
+        return
+    for cmd_file in sorted(projects_dir.glob("*/.dev-cmd.json")):
+        try:
+            _execute_dev_cmd(token, chat_id, cmd_file)
+        except Exception as e:
+            print(f"[mgmt-bot] Dev-cmd error ({cmd_file}): {e}", file=sys.stderr)
+            send(token, chat_id, f"⚠️ Dev-cmd crashed on `{cmd_file.parent.name}`: {e}")
+            cmd_file.unlink(missing_ok=True)
+
+
+def cmd_dev_pause(token: str, chat_id: str) -> None:
+    DEV_CMD_PAUSE_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    DEV_CMD_PAUSE_FLAG.touch()
+    send(token, chat_id,
+         "⏸ Dev-command queue *paused*.\n"
+         "L1 can still write requests but they won't run until you send `/dev_resume`.")
+
+
+def cmd_dev_resume(token: str, chat_id: str) -> None:
+    DEV_CMD_PAUSE_FLAG.unlink(missing_ok=True)
+    send(token, chat_id, "▶️ Dev-command queue *resumed*. Processing any pending commands now…")
+    _check_dev_cmds(token, chat_id)
+
+
+def cmd_dev_queue(token: str, chat_id: str) -> None:
+    """Show all pending .dev-cmd.json files and the current pause state."""
+    projects_dir = STATE_DIR / "workspace" / "projects"
+    pending = sorted(projects_dir.glob("*/.dev-cmd.json")) if projects_dir.exists() else []
+    paused  = _dev_cmd_paused()
+    status  = "⏸ *Paused*" if paused else "▶️ *Running*"
+
+    if not pending:
+        send(token, chat_id, f"{status} — no pending dev commands.")
+        return
+
+    lines = [f"{status} — {len(pending)} pending command(s):\n"]
+    for f in pending:
+        try:
+            d = json.loads(f.read_text())
+            lines.append(f"• `{d.get('project','?')}` → `{d.get('operation','?')}` — {d.get('message','')}")
+        except Exception:
+            lines.append(f"• `{f}` (unreadable)")
+    send(token, chat_id, "\n".join(lines))
 
 
 def _check_dev_triggers(token: str, chat_id: str) -> None:
@@ -1278,6 +1590,10 @@ def main() -> None:
                 _check_dev_triggers(token, allowed_id)
             except Exception as e:
                 print(f"[mgmt-bot] Trigger check error: {e}", file=sys.stderr)
+            try:
+                _check_dev_cmds(token, allowed_id)
+            except Exception as e:
+                print(f"[mgmt-bot] Dev-cmd check error: {e}", file=sys.stderr)
             last_trigger_check = now
 
         try:
