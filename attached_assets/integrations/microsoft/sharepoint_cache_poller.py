@@ -247,6 +247,12 @@ def _resolve_site_and_drive(token: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 def _list_children(token: str, site_id: str, drive_id: str, path: str) -> list[dict]:
+    """List immediate children of a SharePoint folder path.
+
+    Returns [] only for genuine 404 (folder does not exist).
+    Raises RuntimeError for all other API failures so callers can detect
+    partial enumeration and gate orphan cleanup accordingly.
+    """
     clean = path.strip("/")
     if clean:
         url = f"{GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{clean}:/children"
@@ -259,8 +265,10 @@ def _list_children(token: str, site_id: str, drive_id: str, path: str) -> list[d
         if resp.status_code == 404:
             return []
         if not resp.ok:
-            log(f"WARN: list failed for '{path}' ({resp.status_code})")
-            return []
+            raise RuntimeError(
+                f"Graph listing failed for '{path}' "
+                f"({resp.status_code}): {resp.text[:200]}"
+            )
         data = resp.json()
         items.extend(data.get("value", []))
         url = data.get("@odata.nextLink")
@@ -336,11 +344,21 @@ def _build_display_tree(
 # ---------------------------------------------------------------------------
 
 def _in_sync_paths(sp_path: str, sync_paths: list[str]) -> bool:
-    """Return True if the file should be cached (matches a configured sync path)."""
+    """Return True if the file should be cached (matches a configured sync path).
+
+    Matching is done at path-segment boundaries to prevent false matches.
+    e.g. sync_path "Foo" matches "Foo/bar.md" but NOT "FooBar/baz.md".
+    """
     if not sync_paths:
         return True
-    sp_lower = sp_path.lower()
-    return any(sp_lower.startswith(p.lower().strip("/")) for p in sync_paths)
+    sp_lower = sp_path.lower().lstrip("/")
+    for raw in sync_paths:
+        prefix = raw.lower().strip("/")
+        # Exact match (file is in the root of the sync path folder itself)
+        # or starts with the prefix followed by a path separator
+        if sp_lower == prefix or sp_lower.startswith(prefix + "/"):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -579,13 +597,21 @@ def main() -> None:
     # Step 1: Collect every file recursively with no depth limit.
     # This is kept separate from display-tree building so the depth cap on the
     # visual index never silently prevents files from being cached or reported.
-    all_files: list[dict] = []
+    # full_scan_ok is set to False if any listing call fails — orphan cleanup
+    # is skipped in that case to avoid deleting valid cache files whose folders
+    # could not be listed due to a transient Graph error.
+    all_files:    list[dict] = []
+    full_scan_ok: bool       = True
     try:
         _collect_all_files(token, site_id, drive_id, "", all_files)
         log(f"File collection complete: {len(all_files)} files found (unlimited depth)")
     except Exception as e:
-        log(f"ERROR: File collection failed: {e}")
-        sys.exit(1)
+        log(f"ERROR: File collection failed — orphan cleanup will be skipped: {e}")
+        full_scan_ok = False
+        if not all_files:
+            # Total failure — nothing to sync
+            sys.exit(1)
+        log(f"  Partial scan: {len(all_files)} files collected before error — continuing with sync only")
 
     # Step 2: Build the display tree independently (depth-limited for readability).
     tree_lines: list[str] = []
@@ -671,13 +697,21 @@ def main() -> None:
 
     log(f"Content sync done: {len(cached)} cached this run, {len(skipped)} skipped")
 
-    # Orphan cleanup — remove local files that are no longer eligible:
+    # Orphan cleanup — only performed when the Graph enumeration was complete.
+    # If _collect_all_files raised at any point (full_scan_ok=False), we skip
+    # deletion entirely to prevent valid cached files from being purged because
+    # their parent folder could not be listed in this run.
+    # What gets removed when full_scan_ok:
     # • Files deleted from SharePoint (not in any SP file listing)
     # • Files that became ineligible (wrong type, grew too large, out of sync-path)
-    # • Fetch-failed files are NOT removed — their previous cached copy is kept
-    orphans_deleted = _cleanup_orphans(eligible_sp_paths)
-    if orphans_deleted:
-        log(f"Orphans deleted: {len(orphans_deleted)}")
+    # • Fetch-failed files are NOT removed — eligible_sp_paths preserves them
+    orphans_deleted: list[str] = []
+    if full_scan_ok:
+        orphans_deleted = _cleanup_orphans(eligible_sp_paths)
+        if orphans_deleted:
+            log(f"Orphans/ineligible deleted: {len(orphans_deleted)}")
+    else:
+        log("WARN: Orphan cleanup skipped — scan was incomplete (Graph error above)")
 
     # Build true on-disk manifest: includes freshly fetched files AND files kept
     # from previous sync runs where this run had a transient fetch error.
