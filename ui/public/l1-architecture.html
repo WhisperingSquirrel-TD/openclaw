@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenClaw · L1 Architecture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0e1a;
+    color: #e2e8f0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px;
+    padding: 24px;
+    min-height: 100vh;
+  }
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.1em; color: #22d3ee; text-align: center; text-transform: uppercase; }
+  .subtitle { text-align: center; color: #475569; font-size: 11px; margin-top: 4px; margin-bottom: 20px; }
+  .wrap { max-width: 1380px; margin: 0 auto; }
+
+  /* Section */
+  .section { border-radius: 12px; padding: 16px; margin-bottom: 16px; background: rgba(13,18,32,0.6); }
+  .section-label { font-size: 10px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 12px; }
+
+  /* Grid helpers */
+  .row { display: flex; gap: 12px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .grid4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
+  .grid-col-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+  .col-3-1 { display: grid; grid-template-columns: 3fr 1fr; gap: 12px; margin-bottom: 16px; }
+
+  /* External badge */
+  .ext-wrap { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .ext-badge { border-radius: 10px; padding: 10px 14px; text-align: center; min-width: 100px; border-width: 1px; border-style: solid; }
+  .ext-badge .icon { font-size: 20px; margin-bottom: 4px; }
+  .ext-badge .name { font-size: 12px; font-weight: 600; color: #f1f5f9; }
+  .ext-badge .sub { font-size: 10px; color: #64748b; margin-top: 2px; }
+
+  /* Channel card */
+  .ch-card { border-radius: 10px; padding: 12px; background: #0a0e1a; border-width: 1px; border-style: solid; }
+  .ch-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .ch-title { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+  .ch-badge { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 700; color: white; margin-left: auto; }
+  .ch-items { list-style: none; }
+  .ch-items li { font-size: 11px; color: #94a3b8; padding: 2px 0; display: flex; gap: 6px; }
+  .ch-items li::before { content: "·"; color: #475569; }
+
+  /* Poller row */
+  .poller-row { display: flex; align-items: flex-start; gap: 8px; background: #0a0e1a; border: 1px solid #1e293b; border-radius: 8px; padding: 8px; }
+  .poller-body { flex: 1; min-width: 0; }
+  .poller-head { display: flex; align-items: center; gap: 6px; }
+  .poller-name { font-size: 11px; font-weight: 600; }
+  .poller-schedule { font-size: 10px; color: #fbbf24; font-family: monospace; margin-left: auto; white-space: nowrap; }
+  .poller-detail { font-size: 10px; color: #475569; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Mem card */
+  .mem-item { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+  .mem-label { font-size: 11px; font-weight: 600; font-family: monospace; }
+  .mem-sub { font-size: 10px; color: #475569; margin-top: 1px; }
+
+  /* Feed file */
+  .feed-file { font-size: 11px; font-family: monospace; color: rgba(103,232,249,0.8); background: rgba(8,145,178,0.1); border: 1px solid rgba(8,145,178,0.25); border-radius: 4px; padding: 3px 8px; margin-bottom: 4px; }
+
+  /* Skill card */
+  .skill-card { background: rgba(6,78,59,0.3); border: 1px solid rgba(52,211,153,0.3); border-radius: 8px; padding: 8px; }
+  .skill-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .skill-name { font-size: 11px; font-weight: 700; font-family: monospace; color: #6ee7b7; }
+  .skill-step { margin-left: auto; font-size: 10px; background: rgba(6,78,59,0.8); color: #6ee7b7; padding: 2px 6px; border-radius: 4px; font-weight: 700; }
+  .skill-desc { font-size: 10px; color: #64748b; }
+
+  /* Cmd row */
+  .cmd-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .cmd-tag { font-size: 11px; font-family: monospace; color: #fca5a5; background: rgba(127,29,29,0.4); border: 1px solid rgba(185,28,28,0.3); border-radius: 4px; padding: 2px 8px; min-width: 80px; }
+  .cmd-desc { font-size: 11px; color: #94a3b8; }
+
+  /* Format badge */
+  .fmt-badge { display: flex; align-items: center; gap: 8px; border-width: 1px; border-style: solid; border-radius: 6px; padding: 6px 10px; margin-bottom: 6px; }
+  .fmt-ext { font-size: 12px; font-family: monospace; font-weight: 700; color: white; }
+  .fmt-lib { font-size: 10px; color: #64748b; margin-left: auto; }
+
+  /* Store path */
+  .store-item { background: rgba(30,41,59,0.4); border: 1px solid rgba(51,65,85,0.5); border-radius: 8px; padding: 8px; }
+  .store-head { display: flex; align-items: flex-start; gap: 6px; }
+  .store-path { font-size: 11px; font-family: monospace; color: #cbd5e1; }
+  .store-desc { font-size: 10px; color: #475569; margin-top: 2px; }
+
+  /* Inner section box */
+  .inner-box { border-width: 1px; border-style: solid; border-radius: 10px; padding: 12px; }
+  .inner-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px; }
+
+  /* Colors */
+  .border-slate { border-color: #475569; }
+  .border-sky { border-color: #0369a1; }
+  .border-amber { border-color: #92400e; }
+  .border-violet { border-color: #7c3aed; }
+  .border-green { border-color: #166534; }
+  .border-cyan { border-color: #0e7490; }
+  .border-rose { border-color: #9f1239; }
+  .border-emerald { border-color: #065f46; }
+  .border-blue { border-color: #1d4ed8; }
+  .color-slate { color: #94a3b8; }
+  .color-sky { color: #38bdf8; }
+  .color-amber { color: #fbbf24; }
+  .color-violet { color: #c4b5fd; }
+  .color-green { color: #4ade80; }
+  .color-cyan { color: #67e8f9; }
+  .color-rose { color: #fb7185; }
+  .color-emerald { color: #34d399; }
+  .color-blue { color: #60a5fa; }
+
+  .bg-violet { background: rgba(26,16,64,0.8); }
+  .bg-green { background: rgba(15,26,16,0.8); }
+  .bg-cyan { background: rgba(15,21,32,0.8); }
+  .bg-rose { background: rgba(22,15,16,0.8); }
+
+  footer { text-align: center; font-size: 10px; color: #334155; padding-top: 12px; border-top: 1px solid #1e293b; }
+  footer span { color: #475569; font-family: monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>OpenClaw · L1 Architecture</h1>
+  <p class="subtitle">Raspberry Pi 4 · 8GB · Personal AI Gateway</p>
+
+  <!-- EXTERNAL WORLD -->
+  <div class="section" style="border: 1px solid #475569;">
+    <div class="section-label color-slate">External World</div>
+    <div class="ext-wrap">
+      <div class="ext-badge" style="background:rgb(8,23,45);border-color:#075985;">
+        <div class="icon">✈️</div><div class="name">Telegram</div><div class="sub">Bot API</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(5,25,12);border-color:#166534;">
+        <div class="icon">📱</div><div class="name">WhatsApp</div><div class="sub">Baileys / Read-only</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(10,19,44);border-color:#1e40af;">
+        <div class="icon">🏢</div><div class="name">Microsoft 365</div><div class="sub">Graph API · MAPI</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(10,19,44);border-color:#1d4ed8;">
+        <div class="icon">📂</div><div class="name">SharePoint</div><div class="sub">Sites · Libraries</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(28,10,10);border-color:#991b1b;">
+        <div class="icon">📧</div><div class="name">Gmail</div><div class="sub">IMAP / API</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(5,25,22);border-color:#0f766e;">
+        <div class="icon">⌚</div><div class="name">Garmin Connect</div><div class="sub">Health API</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(5,25,12);border-color:#15803d;">
+        <div class="icon">✅</div><div class="name">Google Tasks</div><div class="sub">REST API</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(28,18,5);border-color:#c2410c;">
+        <div class="icon">🏗️</div><div class="name">Stackstone CRM</div><div class="sub">Reports · Enquiries</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(20,22,28);border-color:#475569;">
+        <div class="icon">🐙</div><div class="name">GitHub</div><div class="sub">Repos · PRs</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(16,18,22);border-color:#64748b;">
+        <div class="icon">▲</div><div class="name">Vercel</div><div class="sub">Preview URLs</div>
+      </div>
+      <div class="ext-badge" style="background:rgb(22,10,44);border-color:#7e22ce;">
+        <div class="icon">🧠</div><div class="name">Anthropic / OpenAI</div><div class="sub">claude-sonnet-4-5 · gpt-5.4</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHANNELS + POLLERS -->
+  <div class="grid2" style="margin-bottom:16px;">
+
+    <!-- CHANNELS -->
+    <div class="section border-sky">
+      <div class="section-label color-sky">Channels</div>
+      <div class="grid3">
+        <div class="ch-card" style="border-color:#0369a1;">
+          <div class="ch-head">
+            <span>✈️</span>
+            <span class="ch-title">Telegram</span>
+            <span class="ch-badge" style="background:#075985;">2-WAY</span>
+          </div>
+          <ul class="ch-items">
+            <li>Messages in/out</li>
+            <li>Commands &amp; approvals</li>
+            <li>TOTP gate on writes</li>
+            <li>Mgmt-bot control</li>
+          </ul>
+        </div>
+        <div class="ch-card" style="border-color:#166534;">
+          <div class="ch-head">
+            <span>📱</span>
+            <span class="ch-title">WhatsApp</span>
+            <span class="ch-badge" style="background:#166534;">READ-ONLY</span>
+          </div>
+          <ul class="ch-items">
+            <li>Baileys watch mode</li>
+            <li>→ WHATSAPP_FEED.md</li>
+            <li>No sends / no replies</li>
+            <li>Contact mapping</li>
+          </ul>
+        </div>
+        <div class="ch-card" style="border-color:#1e40af;">
+          <div class="ch-head">
+            <span>📧</span>
+            <span class="ch-title">Email</span>
+            <span class="ch-badge" style="background:#1e40af;">POLL</span>
+          </div>
+          <ul class="ch-items">
+            <li>tom@ + assistant@</li>
+            <li>Gmail IMAP</li>
+            <li>→ MICROSOFT_INBOX.md</li>
+            <li>→ GMAIL_INBOX.md</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- POLLERS -->
+    <div class="section border-amber">
+      <div class="section-label color-amber">Pollers · Cron Jobs</div>
+      <div class="grid2">
+        <div class="poller-row">
+          <span style="font-size:18px;margin-top:2px;">📂</span>
+          <div class="poller-body">
+            <div class="poller-head"><span class="poller-name" style="color:#93c5fd;">SharePoint Cache</span><span class="poller-schedule">*/15 min</span></div>
+            <div class="poller-detail">Syncs files → local cache · auto-extracts binaries</div>
+          </div>
+        </div>
+        <div class="poller-row">
+          <span style="font-size:18px;margin-top:2px;">📋</span>
+          <div class="poller-body">
+            <div class="poller-head"><span class="poller-name" style="color:#93c5fd;">SharePoint Queue</span><span class="poller-schedule">every 1 min</span></div>
+            <div class="poller-detail">Processes write queue · read_binary on-demand</div>
+          </div>
+        </div>
+        <div class="poller-row">
+          <span style="font-size:18px;margin-top:2px;">📧</span>
+          <div class="poller-body">
+            <div class="poller-head"><span class="poller-name" style="color:#7dd3fc;">Microsoft Mail</span><span class="poller-schedule">*/5 min</span></div>
+            <div class="poller-detail">MAPI poll · deduplicates · appends to feed</div>
+          </div>
+        </div>
+        <div class="poller-row">
+          <span style="font-size:18px;margin-top:2px;">✉️</span>
+          <div class="poller-body">
+            <div class="poller-head"><span class="poller-name" style="color:#fca5a5;">Gmail</span><span class="poller-schedule">*/5 min</span></div>
+            <div class="poller-detail">IMAP poll · threads · appends to feed</div>
+          </div>
+        </div>
+        <div class="poller-row">
+          <span style="font-size:18px;margin-top:2px;">⌚</span>
+          <div class="poller-body">
+            <div class="poller-head"><span class="poller-name" style="color:#5eead4;">Garmin Health</span><span class="poller-schedule">09:00 daily</span></div>
+            <div class="poller-detail">Steps · sleep · HRV · stress → GARMIN_HEALTH.md</div>
+          </div>
+        </div>
+        <div class="poller-row">
+          <span style="font-size:18px;margin-top:2px;">🏗️</span>
+          <div class="poller-body">
+            <div class="poller-head"><span class="poller-name" style="color:#fdba74;">Stackstone</span><span class="poller-schedule">*/10 min</span></div>
+            <div class="poller-detail">Reports + enquiries → STACKSTONE_FEED.md</div>
+          </div>
+        </div>
+        <div class="poller-row">
+          <span style="font-size:18px;margin-top:2px;">❤️</span>
+          <div class="poller-body">
+            <div class="poller-head"><span class="poller-name" style="color:#f9a8d4;">Health Check</span><span class="poller-schedule">daily</span></div>
+            <div class="poller-detail">System self-test · Telegram notification</div>
+          </div>
+        </div>
+        <div class="poller-row">
+          <span style="font-size:18px;margin-top:2px;">🔍</span>
+          <div class="poller-body">
+            <div class="poller-head"><span class="poller-name" style="color:#fde68a;">Prospector</span><span class="poller-schedule">08:xx</span></div>
+            <div class="poller-detail">Pipeline sweep · opportunity scoring</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CORE L1 GATEWAY -->
+  <div class="section" style="border: 1px solid #7c3aed; margin-bottom: 16px;">
+    <div class="section-label color-violet">L1 · Core AI Gateway &nbsp;·&nbsp; Raspberry Pi 4 · 8GB</div>
+    <div class="grid4">
+
+      <!-- MEMORY -->
+      <div class="inner-box bg-violet" style="border-color:#6d28d9;">
+        <div class="inner-label" style="color:#c4b5fd;">Memory System</div>
+        <div class="mem-item"><span>🔮</span><div><div class="mem-label" style="color:#c4b5fd;">SOUL.md</div><div class="mem-sub">Core personality · baked identity</div></div></div>
+        <div class="mem-item"><span>📔</span><div><div class="mem-label" style="color:#a5b4fc;">MEMORY.md</div><div class="mem-sub">Long-term working memory</div></div></div>
+        <div class="mem-item"><span>⏳</span><div><div class="mem-label" style="color:#fcd34d;">SOUL_PENDING.md</div><div class="mem-sub">Staging — never auto-promoted</div></div></div>
+        <div class="mem-item"><span>🔒</span><div><div class="mem-label" style="color:#94a3b8;">SOUL.md.enc</div><div class="mem-sub">Vault copy · encrypted</div></div></div>
+      </div>
+
+      <!-- SECURITY -->
+      <div class="inner-box bg-green" style="border-color:#15803d;">
+        <div class="inner-label" style="color:#4ade80;">Security</div>
+        <div class="mem-item"><span>🔑</span><div><div class="mem-label" style="color:#86efac;">TOTP Approval</div><div class="mem-sub">Write-gate on outbound actions</div></div></div>
+        <div class="mem-item"><span>🚫</span><div><div class="mem-label" style="color:#fca5a5;">Exec Denylist</div><div class="mem-sub">SECURITY_DENY_PATTERNS scan</div></div></div>
+        <div class="mem-item"><span>📋</span><div><div class="mem-label" style="color:#fde68a;">Outbound Audit Log</div><div class="mem-sub">Every external call logged</div></div></div>
+        <div class="mem-item"><span>🛡️</span><div><div class="mem-label" style="color:#67e8f9;">QMD Memory</div><div class="mem-sub">Quantised markdown document store</div></div></div>
+      </div>
+
+      <!-- FEEDS -->
+      <div class="inner-box bg-cyan" style="border-color:#0e7490;">
+        <div class="inner-label color-cyan">Feed Files</div>
+        <div class="feed-file">MICROSOFT_INBOX.md</div>
+        <div class="feed-file">GMAIL_INBOX.md</div>
+        <div class="feed-file">WHATSAPP_FEED.md</div>
+        <div class="feed-file">GARMIN_HEALTH.md</div>
+        <div class="feed-file">STACKSTONE_FEED.md</div>
+        <div class="feed-file">SHAREPOINT_INDEX.md</div>
+        <div class="feed-file">GOOGLE_TASKS.md</div>
+      </div>
+
+      <!-- DEV WORKFLOW -->
+      <div class="inner-box bg-rose" style="border-color:#be123c;">
+        <div class="inner-label color-rose">Dev Workflow</div>
+        <div class="mem-item"><span>📝</span><div><div class="mem-label" style="color:#fda4af;">.dev-cmd.json</div><div class="mem-sub">One-at-a-time command queue</div></div></div>
+        <div class="mem-item"><span>⏸️</span><div><div class="mem-label" style="color:#fcd34d;">.dev-cmd-paused</div><div class="mem-sub">Pause flag for dev queue</div></div></div>
+        <div class="mem-item"><span>🔄</span><div><div class="mem-label" style="color:#86efac;">6-Skill Pipeline</div><div class="mem-sub">plan→init→build→test→deploy→patch</div></div></div>
+        <div class="mem-item"><span>📸</span><div><div class="mem-label" style="color:#93c5fd;">.preview-state.json</div><div class="mem-sub">Vercel preview URL per project</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SKILLS + MGMT BOT -->
+  <div class="col-3-1">
+    <div class="section border-emerald">
+      <div class="section-label color-emerald">Skills · L1 Reads · (~/.openclaw/skills/)</div>
+      <div class="grid3">
+        <div class="skill-card">
+          <div class="skill-head"><span>📋</span><span class="skill-name">app-plan</span><span class="skill-step">1</span></div>
+          <div class="skill-desc">Spec + architecture blueprint</div>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span>🔧</span><span class="skill-name">app-init</span><span class="skill-step">2</span></div>
+          <div class="skill-desc">Scaffold repo · CI · secrets</div>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span>⚙️</span><span class="skill-name">app-build</span><span class="skill-step">3</span></div>
+          <div class="skill-desc">Feature development loop</div>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span>🧪</span><span class="skill-name">app-test</span><span class="skill-step">4</span></div>
+          <div class="skill-desc">Test suite + QA pass</div>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span>🚀</span><span class="skill-name">app-deploy</span><span class="skill-step">5</span></div>
+          <div class="skill-desc">Vercel deploy + preview URL</div>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span>🩹</span><span class="skill-name">app-patch</span><span class="skill-step">6</span></div>
+          <div class="skill-desc">Bug fixes post-deploy</div>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span>▶️</span><span class="skill-name">app-resume</span><span class="skill-step">↩</span></div>
+          <div class="skill-desc">Resume from checkpoint</div>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span>🤖</span><span class="skill-name">mgmt-bot</span><span class="skill-step">🔑</span></div>
+          <div class="skill-desc">Shell / git / npm execution</div>
+        </div>
+        <div class="skill-card">
+          <div class="skill-head"><span>📂</span><span class="skill-name">sharepoint</span><span class="skill-step">SP</span></div>
+          <div class="skill-desc">Read · write · binary extract</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section border-rose">
+      <div class="section-label color-rose">Management Bot · Telegram</div>
+      <div style="font-size:10px;color:#64748b;margin-bottom:10px;">Executes all shell/git/npm — L1 never runs directly</div>
+      <div class="cmd-row"><span class="cmd-tag">/install</span><span class="cmd-desc">pip / npm package installs</span></div>
+      <div class="cmd-row"><span class="cmd-tag">/dev-run</span><span class="cmd-desc">Queues .dev-cmd.json entry</span></div>
+      <div class="cmd-row"><span class="cmd-tag">/dev-test</span><span class="cmd-desc">Runs test suite via queue</span></div>
+      <div class="cmd-row"><span class="cmd-tag">/soul</span><span class="cmd-desc">SOUL_PENDING.md review</span></div>
+      <div class="cmd-row"><span class="cmd-tag">/status</span><span class="cmd-desc">System health snapshot</span></div>
+      <div class="cmd-row"><span class="cmd-tag">/logs</span><span class="cmd-desc">Tail service logs</span></div>
+      <div style="border-top:1px solid #1e293b;margin-top:10px;padding-top:10px;">
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">Vercel Preview State</div>
+        <div style="font-family:monospace;font-size:11px;color:#60a5fa;">_save_preview_state()</div>
+        <div style="font-size:10px;color:#475569;margin-top:4px;">Deletes old preview · tracks per project</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHAREPOINT BINARY + STORAGE -->
+  <div class="grid2" style="margin-bottom:16px;">
+
+    <div class="section border-blue">
+      <div class="section-label color-blue">SharePoint · Binary Extraction</div>
+      <div class="grid2">
+        <div>
+          <div style="font-size:10px;color:#64748b;margin-bottom:8px;">Supported formats</div>
+          <div class="fmt-badge" style="background:rgba(30,58,138,0.4);border-color:#1d4ed8;"><span class="fmt-ext">.docx</span><span class="fmt-lib">python-docx</span></div>
+          <div class="fmt-badge" style="background:rgba(127,29,29,0.4);border-color:#b91c1c;"><span class="fmt-ext">.pdf</span><span class="fmt-lib">pdfminer.six</span></div>
+          <div class="fmt-badge" style="background:rgba(124,45,18,0.4);border-color:#c2410c;"><span class="fmt-ext">.pptx</span><span class="fmt-lib">python-pptx</span></div>
+          <div class="fmt-badge" style="background:rgba(30,41,59,0.6);border-color:#475569;"><span class="fmt-ext">.msg</span><span class="fmt-lib">extract-msg</span></div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:#64748b;margin-bottom:8px;">Output</div>
+          <div style="font-size:12px;color:#4ade80;font-family:monospace;margin-bottom:6px;">*.extracted.md</div>
+          <div style="font-size:10px;color:#64748b;">Auto-extracted every 15 min</div>
+          <div style="font-size:10px;color:#64748b;">On-demand via read_binary queue</div>
+          <div style="font-size:10px;color:#64748b;">Max 5 MB · images optional</div>
+          <div style="border-top:1px solid #1e293b;margin-top:10px;padding-top:10px;">
+            <div style="font-size:10px;color:#94a3b8;">sharepoint_binary_extractor.py</div>
+            <div style="font-size:10px;color:#475569;">+ cache poller auto-hook</div>
+            <div style="font-size:10px;color:#475569;">+ queue processor read_binary op</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section border-slate">
+      <div class="section-label color-slate">Storage · ~/.openclaw/</div>
+      <div class="grid2">
+        <div class="store-item"><div class="store-head"><span>📁</span><div><div class="store-path">workspace/projects/</div><div class="store-desc">App workspaces (symlinked)</div></div></div></div>
+        <div class="store-item"><div class="store-head"><span>💾</span><div><div class="store-path">workspace/sharepoint-cache/</div><div class="store-desc">SP file mirror + .extracted.md</div></div></div></div>
+        <div class="store-item"><div class="store-head"><span>📚</span><div><div class="store-path">skills/</div><div class="store-desc">9 skill markdown files</div></div></div></div>
+        <div class="store-item"><div class="store-head"><span>🧠</span><div><div class="store-path">SOUL.md · MEMORY.md</div><div class="store-desc">Core identity + memory</div></div></div></div>
+        <div class="store-item"><div class="store-head"><span>⏳</span><div><div class="store-path">SOUL_PENDING.md</div><div class="store-desc">Staging — needs human review</div></div></div></div>
+        <div class="store-item"><div class="store-head"><span>📋</span><div><div class="store-path">workspace/.dev-cmd.json</div><div class="store-desc">Active dev command queue</div></div></div></div>
+        <div class="store-item"><div class="store-head"><span>📸</span><div><div class="store-path">.preview-state.json</div><div class="store-desc">Per-project Vercel preview</div></div></div></div>
+        <div class="store-item"><div class="store-head"><span>📊</span><div><div class="store-path">SHAREPOINT_INDEX.md</div><div class="store-desc">Full SP manifest + extracted</div></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    All deployments via <span>ln -sf</span> symlinks &nbsp;·&nbsp;
+    Models: <span>anthropic/claude-sonnet-4-5</span> &nbsp;·&nbsp; <span>openai/gpt-5.4</span> &nbsp;·&nbsp;
+    Never exec from L1 — always queue via mgmt-bot
+  </footer>
+
+</div>
+</body>
+</html>
