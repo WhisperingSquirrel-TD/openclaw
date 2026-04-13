@@ -15,8 +15,9 @@ Usage:
   reply_to_message_id (optional) Microsoft message ID to thread the reply to
 
 Options:
-  --account <slug>    Account to send from (default: looks for token-microsoft.json,
-                      then token.json in the same directory as this script)
+  --account <slug>    Account to send from (default: "assistant" — sends from
+                      assistant@stackstoneconsulting.co.uk; use "microsoft" or
+                      "tom" to send as tom@stackstoneconsulting.co.uk)
   --token-file <path> Explicit path to token JSON file
 
 Exit codes:
@@ -45,8 +46,8 @@ def parse_args() -> argparse.Namespace:
                    help="Email body plain text, \\n for newlines (overridden by --body-file if given)")
     p.add_argument("reply_to_message_id", nargs="?", default=None,
                    help="Microsoft message ID to thread as a reply")
-    p.add_argument("--account",      default=None,
-                   help="Account slug (used to locate token file)")
+    p.add_argument("--account",      default="assistant",
+                   help="Account slug (used to locate token file); defaults to 'assistant'")
     p.add_argument("--token-file",   default=None,
                    help="Explicit path to OAuth token JSON file")
     p.add_argument("--subject-file", default=None,
@@ -60,22 +61,33 @@ def parse_args() -> argparse.Namespace:
 def resolve_token_file(args: argparse.Namespace) -> Path:
     if args.token_file:
         return Path(args.token_file)
-    script_dir = Path(__file__).parent
-    # Try account-specific file first, then generic token.json in same dir
+
+    integrations_dir = STATE_DIR / "integrations"
+
+    # All microsoft* subdirectories under ~/.openclaw/integrations/
+    ms_dirs = sorted(integrations_dir.glob("microsoft*/")) if integrations_dir.exists() else []
+
     candidates = []
+
     if args.account:
-        candidates.append(STATE_DIR / f"integrations/microsoft/token-{args.account}.json")
-    candidates += [
-        script_dir / "token.json",
-        STATE_DIR / "integrations/microsoft/token-microsoft.json",
-        STATE_DIR / "integrations/microsoft/token.json",
-    ]
+        # Search every microsoft* dir for token-{account}.json
+        for d in ms_dirs:
+            candidates.append(d / f"token-{args.account}.json")
+
+    # Generic fallbacks: token-microsoft.json then token.json across all microsoft* dirs
+    for d in ms_dirs:
+        candidates.append(d / "token-microsoft.json")
+    for d in ms_dirs:
+        candidates.append(d / "token.json")
+
     for c in candidates:
         if c.exists():
             return c
+
     raise FileNotFoundError(
-        f"No token file found. Tried: {[str(c) for c in candidates]}\n"
-        "Run the Microsoft auth flow first."
+        f"No token file found for account '{args.account}'. Tried:\n"
+        + "\n".join(f"  {c}" for c in candidates)
+        + "\nRun the Microsoft auth flow first."
     )
 
 
