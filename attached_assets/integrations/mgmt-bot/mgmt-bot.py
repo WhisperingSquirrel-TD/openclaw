@@ -79,6 +79,7 @@ import tempfile
 import time
 import urllib.request
 import urllib.parse
+from datetime import datetime, timezone
 from pathlib import Path
 
 STATE_DIR   = Path.home() / ".openclaw"
@@ -990,7 +991,6 @@ def cmd_sp_sync(token: str, chat_id: str) -> None:
 
         # Reject manifest older than 10 minutes — it predates this sync run
         if synced_at:
-            from datetime import timezone
             try:
                 manifest_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
                 age_s = (datetime.now(timezone.utc) - manifest_dt).total_seconds()

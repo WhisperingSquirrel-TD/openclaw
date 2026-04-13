@@ -491,13 +491,15 @@ def _write_index(
             "",
             f"## Skipped files ({len(skipped)} — NOT in local cache)",
             "",
-            "_These files exist in SharePoint but were not cached. Reason shown for each._",
+            "_These files exist in SharePoint but were not cached. Size and reason shown for each._",
             "",
         ]
         for rel_path in sorted(skipped.keys()):
-            meta   = skipped[rel_path]
-            reason = meta.get("reason_detail", meta.get("reason", "unknown"))
-            lines.append(f"- `/{rel_path}` — ⚠️ {reason}")
+            meta     = skipped[rel_path]
+            reason   = meta.get("reason_detail", meta.get("reason", "unknown"))
+            size     = meta.get("size", 0)
+            size_str = f"{size // 1024:,} KB" if size else "empty"
+            lines.append(f"- `/{rel_path}` ({size_str}) — ⚠️ {reason}")
 
     lines += [
         "",
@@ -557,10 +559,16 @@ def main() -> None:
 
     # Sync file contents
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    synced_at    = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    synced_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     cached:  dict = {}
     skipped: dict = {}
-    known_sp_paths: set[str] = set()
+
+    # eligible_sp_paths tracks files that SHOULD exist in the local cache:
+    # they are in SharePoint, match the sync-path filter, and pass eligibility
+    # (correct extension + within size limit). Fetch failures do NOT remove a
+    # path from this set — the previous cached version is kept until the file
+    # is genuinely removed from SharePoint or becomes ineligible.
+    eligible_sp_paths: set[str] = set()
 
     for file_info in all_files:
         sp_path  = file_info["sp_path"]
@@ -570,13 +578,11 @@ def main() -> None:
         ext      = Path(name).suffix.lower()
         rel_path = sp_path.strip("/")
 
-        known_sp_paths.add(rel_path)
-
-        # Filter by sync paths
+        # Filter by sync paths (out-of-scope files are not eligible for caching)
         if sync_paths and not _in_sync_paths(sp_path, sync_paths):
             continue
 
-        # Check eligibility
+        # Check eligibility — wrong type or too large → skipped (and ineligible)
         if ext not in CACHEABLE_EXTENSIONS:
             reason        = "non_text_file"
             reason_detail = f"File type `{ext or 'no extension'}` is not cached (only .md and .txt)"
@@ -599,6 +605,9 @@ def main() -> None:
             log(f"  SKIP [{reason}] {sp_path} ({size_kb} KB > {limit_kb} KB limit)")
             continue
 
+        # File is eligible — mark it as a file that should exist in local cache
+        eligible_sp_paths.add(rel_path)
+
         # Fetch and cache
         local_path = _local_path_for(sp_path)
         try:
@@ -619,11 +628,15 @@ def main() -> None:
                 "reason": "fetch_error", "reason_detail": reason_detail,
             }
             log(f"  SKIP [fetch_error] {sp_path}: {e}")
+            # Keep in eligible_sp_paths — the previous local copy is still valid
 
     log(f"Content sync done: {len(cached)} cached, {len(skipped)} skipped")
 
-    # Orphan cleanup
-    orphans_deleted = _cleanup_orphans(set(cached.keys()))
+    # Orphan cleanup — remove local files that are no longer eligible:
+    # • Files deleted from SharePoint (not in any SP file listing)
+    # • Files that became ineligible (wrong type, grew too large, out of sync-path)
+    # • Fetch-failed files are NOT removed — their previous cached copy is kept
+    orphans_deleted = _cleanup_orphans(eligible_sp_paths)
     if orphans_deleted:
         log(f"Orphans deleted: {len(orphans_deleted)}")
 
