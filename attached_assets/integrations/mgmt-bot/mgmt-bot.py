@@ -1435,21 +1435,41 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
             push_args.append(branch)
         else:
             push_args.append("HEAD")
+
+        # Inject token into remote URL for authenticated push, restore after
         token_val = os.environ.get("GITHUB_TOKEN", "")
-        if token_val:
-            remotes = subprocess.run(["git", "remote", "get-url", "origin"],
-                                     cwd=str(project_dir), capture_output=True, text=True).stdout.strip()
-            if "github.com" in remotes and f"{token_val}@" not in remotes:
-                auth_url = remotes.replace("https://", f"https://{token_val}@")
-                subprocess.run(["git", "remote", "set-url", "origin", auth_url],
+        def _set_auth_url() -> str:
+            """Set token-embedded remote URL; returns original URL."""
+            orig = subprocess.run(["git", "remote", "get-url", "origin"],
+                                  cwd=str(project_dir), capture_output=True, text=True).stdout.strip()
+            if token_val and "github.com" in orig and f"{token_val}@" not in orig:
+                subprocess.run(["git", "remote", "set-url", "origin",
+                                orig.replace("https://", f"https://{token_val}@")],
                                cwd=str(project_dir), capture_output=True)
-        rc, out = run(push_args)
-        if token_val:
-            clean_url = subprocess.run(["git", "remote", "get-url", "origin"],
-                                       cwd=str(project_dir), capture_output=True, text=True
-                                       ).stdout.strip().replace(f"{token_val}@", "")
-            subprocess.run(["git", "remote", "set-url", "origin", clean_url],
-                           cwd=str(project_dir), capture_output=True)
+            return orig
+
+        def _restore_url(orig: str) -> None:
+            if token_val:
+                clean = subprocess.run(["git", "remote", "get-url", "origin"],
+                                       cwd=str(project_dir), capture_output=True,
+                                       text=True).stdout.strip().replace(f"{token_val}@", "")
+                subprocess.run(["git", "remote", "set-url", "origin", clean],
+                               cwd=str(project_dir), capture_output=True)
+
+        orig_url = _set_auth_url()
+        rc, out  = run(push_args)
+
+        # Auto-recover: if remote is ahead, pull --rebase then retry once
+        if rc != 0 and ("fetch first" in out or "rejected" in out):
+            send(token, chat_id,
+                 f"⚠️ Push rejected (remote ahead) — running `git pull --rebase` then retrying…")
+            pr_rc, pr_out = run(["git", "pull", "--rebase"], timeout=60)
+            if pr_rc != 0:
+                _restore_url(orig_url)
+                fail(f"pull --rebase failed — resolve conflicts manually:\n{pr_out}"); return
+            rc, out = run(push_args)
+
+        _restore_url(orig_url)
         if rc == 0:
             ok(out)
         else:
@@ -1462,6 +1482,10 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
         rc, out = run(["git", "checkout", "main"])
         if rc != 0:
             fail(out); return
+        # Pull latest main before merging to avoid push rejection
+        rc, out = run(["git", "pull", "--rebase"], timeout=60)
+        if rc != 0:
+            fail(f"git pull --rebase on main failed:\n{out}"); return
         rc, out = run(["git", "merge", branch, "--no-ff",
                        "-m", f"Merge {branch} into main (approved via Telegram)"])
         if rc != 0:
