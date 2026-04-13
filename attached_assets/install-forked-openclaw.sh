@@ -634,7 +634,7 @@ if [ -f "$GARMIN_POLLER_SRC" ]; then
     # Cron job at 09:00 daily (idempotent).
     # NOT 06:xx (CRM runs at 06:00) and NOT 07:xx (another job runs there).
     if [ -n "${GARMIN_EMAIL:-}" ] && [ -n "${GARMIN_PASSWORD:-}" ]; then
-        GARMIN_CRON="0 9 * * * GARMIN_EMAIL=$GARMIN_EMAIL GARMIN_PASSWORD=$GARMIN_PASSWORD python3 $GARMIN_POLLER_DST >> $GARMIN_LOG 2>&1"
+        GARMIN_CRON="0 9 * * * python3 $GARMIN_POLLER_DST >> $GARMIN_LOG 2>&1"
         ( crontab -l 2>/dev/null | grep -v "poll-garmin.py"; echo "$GARMIN_CRON" ) | crontab -
         info "Garmin cron installed: daily at 09:00"
     else
