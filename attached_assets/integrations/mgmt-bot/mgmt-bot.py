@@ -975,16 +975,41 @@ def cmd_sp_sync(token: str, chat_id: str) -> None:
 
     output = (result.stdout + result.stderr).strip()
 
+    # Treat non-zero exit as a hard failure — never read stale manifest
+    if result.returncode != 0:
+        tail = "\n".join(output.splitlines()[-20:])
+        send(token, chat_id,
+             f"❌ *SharePoint sync failed* (exit {result.returncode}):\n```{tail}```")
+        return
+
+    # Poller succeeded — read manifest to confirm it was written this run
     manifest_path = STATE_DIR / "workspace" / "sharepoint-cache" / ".manifest.json"
     try:
-        manifest      = json.loads(manifest_path.read_text())
+        manifest   = json.loads(manifest_path.read_text())
+        synced_at  = manifest.get("synced_at", "")
+
+        # Reject manifest older than 10 minutes — it predates this sync run
+        if synced_at:
+            from datetime import timezone
+            try:
+                manifest_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
+                age_s = (datetime.now(timezone.utc) - manifest_dt).total_seconds()
+                if age_s > 600:
+                    raise ValueError(f"Manifest is {age_s:.0f}s old — too stale to trust")
+            except (ValueError, TypeError) as age_err:
+                tail = "\n".join(output.splitlines()[-10:])
+                send(token, chat_id,
+                     f"⚠️ *SharePoint sync ran but manifest looks stale*:\n"
+                     f"_{age_err}_\n\n```{tail}```")
+                return
+
         files_cached  = manifest.get("files_cached",  0)
         files_skipped = manifest.get("files_skipped", 0)
         orphans       = len(manifest.get("orphans_deleted", []))
-        synced_at     = manifest.get("synced_at", "")[:16].replace("T", " ")
+        synced_label  = synced_at[:16].replace("T", " ")
 
-        cache_dir     = STATE_DIR / "workspace" / "sharepoint-cache"
-        total_kb      = sum(
+        cache_dir = STATE_DIR / "workspace" / "sharepoint-cache"
+        total_kb  = sum(
             f.stat().st_size for f in cache_dir.rglob("*")
             if f.is_file() and not f.name.startswith(".")
         ) // 1024
@@ -1000,22 +1025,21 @@ def cmd_sp_sync(token: str, chat_id: str) -> None:
             if len(skipped_lines) > 10:
                 skipped_summary += f"\n  … and {len(skipped_lines) - 10} more (see SHAREPOINT_INDEX.md)"
 
-        orphan_line = f"\n🗑 Orphans deleted: {orphans}" if orphans else ""
+        orphan_line = f"\n🗑 Orphans/ineligible deleted: {orphans}" if orphans else ""
 
         send(token, chat_id,
-             f"✅ *SharePoint sync complete* — {synced_at}\n\n"
+             f"✅ *SharePoint sync complete* — {synced_label}\n\n"
              f"📄 Files cached: {files_cached}\n"
              f"⚠️ Files skipped: {files_skipped}\n"
              f"💾 Total cache: {total_kb:,} KB"
              f"{orphan_line}"
              f"{skipped_summary}")
 
-    except Exception:
-        lines = output.splitlines()
-        tail  = "\n".join(lines[-20:])
-        icon  = "✅" if result.returncode == 0 else "❌"
+    except Exception as e:
+        tail = "\n".join(output.splitlines()[-10:])
         send(token, chat_id,
-             f"{icon} SharePoint sync finished (exit {result.returncode}):\n```{tail}```")
+             f"⚠️ *SharePoint sync ran but manifest could not be parsed*:\n"
+             f"_{e}_\n\n```{tail}```")
 
 
 def cmd_cancel(token: str, chat_id: str) -> None:

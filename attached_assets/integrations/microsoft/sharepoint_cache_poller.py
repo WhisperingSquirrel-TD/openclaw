@@ -361,8 +361,16 @@ def _write_cached_file(local_path: Path, sp_path: str, content: str, synced_at: 
 # Orphan cleanup
 # ---------------------------------------------------------------------------
 
-def _cleanup_orphans(known_sp_paths: set[str]) -> list[str]:
-    """Delete local cache files that no longer exist in SharePoint."""
+def _cleanup_orphans(should_be_cached: set[str]) -> list[str]:
+    """Delete local cache files that should no longer be cached.
+
+    `should_be_cached` is the set of SP relative paths that were successfully
+    cached this run. Files on disk that are NOT in this set are removed — this
+    handles both:
+      • Files deleted from SharePoint (SP orphans)
+      • Files that have become ineligible (e.g. grew past 500 KB, changed
+        extension to .pdf, or are now filtered out by SHAREPOINT_SYNC_PATHS)
+    """
     deleted = []
     if not CACHE_DIR.exists():
         return deleted
@@ -373,12 +381,12 @@ def _cleanup_orphans(known_sp_paths: set[str]) -> list[str]:
         if local_file.name.startswith("."):
             continue
         rel = str(local_file.relative_to(CACHE_DIR)).replace("\\", "/")
-        if rel not in known_sp_paths:
+        if rel not in should_be_cached:
             try:
                 local_file.unlink()
                 deleted.append(rel)
-                log(f"  Orphan deleted: {rel}")
-                # Remove empty parent dirs
+                log(f"  Orphan/ineligible deleted: {rel}")
+                # Remove now-empty parent dirs
                 parent = local_file.parent
                 while parent != CACHE_DIR:
                     try:
@@ -387,7 +395,7 @@ def _cleanup_orphans(known_sp_paths: set[str]) -> list[str]:
                     except OSError:
                         break
             except OSError as e:
-                log(f"  WARN: Could not delete orphan {rel}: {e}")
+                log(f"  WARN: Could not delete {rel}: {e}")
     return deleted
 
 
@@ -615,7 +623,7 @@ def main() -> None:
     log(f"Content sync done: {len(cached)} cached, {len(skipped)} skipped")
 
     # Orphan cleanup
-    orphans_deleted = _cleanup_orphans(known_sp_paths)
+    orphans_deleted = _cleanup_orphans(set(cached.keys()))
     if orphans_deleted:
         log(f"Orphans deleted: {len(orphans_deleted)}")
 
