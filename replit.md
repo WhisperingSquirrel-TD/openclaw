@@ -220,6 +220,26 @@ The audit log (`<state-dir>/audit/outbound-audit.jsonl`) is:
 - Protected by the exec denylist (agent cannot reference the file in exec commands)
 - The install script additionally sets `chattr +a` on the audit log and `chattr +i` on TOTP secret files
 
+## Agent Rule — Always End With Deployment Instructions
+
+**After every session where any file in this repo is changed**, always close with:
+
+> To deploy everything changed in this session, run on the Pi:
+> ```bash
+> cd ~/openclaw && git pull
+> bash ~/install-forked-openclaw.sh
+> ```
+
+This applies regardless of how the change is deployed to the Pi. The rule is:
+- `git pull` → pulls the latest commit from GitHub
+- `bash ~/install-forked-openclaw.sh` → redeploys all code, services, and skills in one command
+
+Never assume the user knows to run this. Always say it explicitly.
+
+The install script is the single source of truth for deployment. Any new file, skill, service, or integration added to the repo **must** be wired into `install-forked-openclaw.sh` or `scripts/setup-dev-workflow.sh` (which install calls) — never as a separate manual step. If a file isn't deployed by install, it doesn't count as deployed.
+
+---
+
 ## Upstream Sync Playbook
 Lessons from applying upstream changes — follow this checklist every sync.
 
