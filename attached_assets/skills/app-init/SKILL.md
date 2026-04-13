@@ -71,6 +71,23 @@ git clone <clone-url>
 cd <project-name>
 ```
 
+### Step 3a — Upgrade Next.js to latest safe version
+
+Vercel hard-blocks deployments on Next.js versions with known CVEs. Upgrade
+immediately after cloning so the project is never deployed on a vulnerable version:
+
+```bash
+npm install next@latest
+```
+
+Confirm the installed version is at least 14.2.25 (14.x) or 15.2.3 (15.x):
+
+```bash
+node -e "console.log(require('./node_modules/next/package.json').version)"
+```
+
+If `npm install` fails at this point, stop and report. Do not continue.
+
 ### Step 4 — Prepare .env.example
 
 Copy from template if not already present. Ensure it lists:

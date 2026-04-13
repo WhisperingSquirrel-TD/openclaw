@@ -281,6 +281,7 @@ Stop immediately and report if:
 | Typecheck fails | Fix it. Do not push. |
 | Build fails | Fix it. Do not push. |
 | Next.js typedRoutes error on `Link href` | Cast dynamic string hrefs: `href={value as any}` — do not disable typedRoutes |
+| Vercel build fails: "Vulnerable version of Next.js detected" | Run `npm install next@latest` in the project, commit, push, then re-trigger `/dev-run` |
 | Tests fail | Fix them. Do not push. |
 | Git push rejected | Stop — report exact error. Do not force-push. |
 | Vercel preview not generated | Report — "Preview may take a moment. Check Vercel dashboard at https://vercel.com/dashboard" |
