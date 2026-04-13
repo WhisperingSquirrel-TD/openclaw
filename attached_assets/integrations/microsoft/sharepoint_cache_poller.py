@@ -56,7 +56,7 @@ CACHE_DIR   = WORKSPACE / "sharepoint-cache"
 MANIFEST    = CACHE_DIR / ".manifest.json"
 LOG_FILE    = STATE_DIR / "integrations/microsoft/sp-cache-poller.log"
 GRAPH_BASE  = "https://graph.microsoft.com/v1.0"
-MAX_DEPTH   = 5
+MAX_DISPLAY_DEPTH = 5   # Tree display in SHAREPOINT_INDEX.md — folders beyond this depth are summarised
 
 CACHEABLE_EXTENSIONS = {".md", ".txt"}
 MAX_FILE_KB_DEFAULT  = 500
@@ -267,13 +267,46 @@ def _list_children(token: str, site_id: str, drive_id: str, path: str) -> list[d
     return items
 
 
-def _build_tree(
+def _collect_all_files(
+    token: str, site_id: str, drive_id: str,
+    path: str, all_files: list[dict],
+) -> None:
+    """Recursively enumerate every file in the drive with no depth limit.
+
+    All files are collected regardless of type, size, or sync-path filter —
+    filtering happens in the sync loop so every file is represented in the
+    manifest or index (either cached or skipped with an explicit reason).
+    """
+    children = _list_children(token, site_id, drive_id, path)
+    for item in children:
+        name    = item.get("name", "(unknown)")
+        is_dir  = "folder" in item
+        sp_path = (path.rstrip("/") + "/" + name).lstrip("/")
+
+        if is_dir:
+            _collect_all_files(token, site_id, drive_id, sp_path, all_files)
+        else:
+            all_files.append({
+                "name":     name,
+                "sp_path":  sp_path,
+                "size":     item.get("size", 0),
+                "modified": item.get("lastModifiedDateTime", ""),
+                "item_id":  item.get("id", ""),
+            })
+
+
+def _build_display_tree(
     token: str, site_id: str, drive_id: str,
     path: str, depth: int, lines: list[str], indent: str,
-    all_files: list[dict], sync_paths: list[str],
 ) -> None:
-    if depth > MAX_DEPTH:
-        lines.append(f"{indent}  _(too deep — truncated)_")
+    """Build the visual document tree for SHAREPOINT_INDEX.md.
+
+    Display is capped at MAX_DISPLAY_DEPTH for readability. File collection
+    for caching/reporting is done separately via _collect_all_files so the
+    depth cap never prevents files from being discovered.
+    """
+    if depth > MAX_DISPLAY_DEPTH:
+        lines.append(f"{indent}  _(deeper contents cached but not shown — see manifest)_")
         return
 
     children = _list_children(token, site_id, drive_id, path)
@@ -289,21 +322,13 @@ def _build_tree(
         if is_dir:
             child_count = item.get("folder", {}).get("childCount", "?")
             lines.append(f"{indent}- 📁 **{name}/** ({child_count} items)")
-            _build_tree(
+            _build_display_tree(
                 token, site_id, drive_id,
                 sp_path, depth + 1, lines, indent + "  ",
-                all_files, sync_paths,
             )
         else:
             size_str = f"{size:,} bytes" if size else "empty"
             lines.append(f"{indent}- 📄 {name} — _{modified}, {size_str}_")
-            all_files.append({
-                "name":     name,
-                "sp_path":  sp_path,
-                "size":     size,
-                "modified": item.get("lastModifiedDateTime", ""),
-                "item_id":  item.get("id", ""),
-            })
 
 
 # ---------------------------------------------------------------------------
@@ -407,9 +432,13 @@ def _write_manifest(
     cached: dict, skipped: dict, orphans_deleted: list[str], synced_at: str
 ) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    files_stale   = sum(1 for v in cached.values() if v.get("stale"))
+    files_fresh   = len(cached) - files_stale
     manifest = {
         "synced_at":       synced_at,
         "files_cached":    len(cached),
+        "files_fresh":     files_fresh,
+        "files_stale":     files_stale,
         "files_skipped":   len(skipped),
         "orphans_deleted": orphans_deleted,
         "cached":          cached,
@@ -547,15 +576,25 @@ def main() -> None:
         log(f"ERROR: Site/drive resolution failed: {e}")
         sys.exit(1)
 
-    # Build tree and collect all file entries
-    tree_lines: list[str] = []
-    all_files:  list[dict] = []
+    # Step 1: Collect every file recursively with no depth limit.
+    # This is kept separate from display-tree building so the depth cap on the
+    # visual index never silently prevents files from being cached or reported.
+    all_files: list[dict] = []
     try:
-        _build_tree(token, site_id, drive_id, "", 1, tree_lines, "", all_files, sync_paths)
-        log(f"Tree built: {len(tree_lines)} index lines, {len(all_files)} files found")
+        _collect_all_files(token, site_id, drive_id, "", all_files)
+        log(f"File collection complete: {len(all_files)} files found (unlimited depth)")
     except Exception as e:
-        log(f"ERROR: Tree build failed: {e}")
+        log(f"ERROR: File collection failed: {e}")
         sys.exit(1)
+
+    # Step 2: Build the display tree independently (depth-limited for readability).
+    tree_lines: list[str] = []
+    try:
+        _build_display_tree(token, site_id, drive_id, "", 1, tree_lines, "")
+        log(f"Display tree built: {len(tree_lines)} lines")
+    except Exception as e:
+        log(f"WARN: Display tree build failed (non-fatal): {e}")
+        tree_lines = [f"_(Tree build failed: {e})_"]
 
     # Sync file contents
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -630,7 +669,7 @@ def main() -> None:
             log(f"  SKIP [fetch_error] {sp_path}: {e}")
             # Keep in eligible_sp_paths — the previous local copy is still valid
 
-    log(f"Content sync done: {len(cached)} cached, {len(skipped)} skipped")
+    log(f"Content sync done: {len(cached)} cached this run, {len(skipped)} skipped")
 
     # Orphan cleanup — remove local files that are no longer eligible:
     # • Files deleted from SharePoint (not in any SP file listing)
@@ -639,6 +678,44 @@ def main() -> None:
     orphans_deleted = _cleanup_orphans(eligible_sp_paths)
     if orphans_deleted:
         log(f"Orphans deleted: {len(orphans_deleted)}")
+
+    # Build true on-disk manifest: includes freshly fetched files AND files kept
+    # from previous sync runs where this run had a transient fetch error.
+    # Walk the eligible set and add any locally-present file not already in cached.
+    # Build a lookup from rel_path → SP metadata for quick access
+    sp_meta_by_rel: dict[str, dict] = {f["sp_path"].strip("/"): f for f in all_files}
+
+    for rel_path in eligible_sp_paths:
+        if rel_path in cached:
+            continue  # freshly fetched — already correct
+        local_path = CACHE_DIR / rel_path
+        if not local_path.exists():
+            continue  # not on disk (never fetched, or just deleted as orphan)
+        # File is on disk from a previous run — record it with a "stale_cached" note
+        sp_meta = sp_meta_by_rel.get(rel_path, {})
+        try:
+            file_size = local_path.stat().st_size
+        except OSError:
+            file_size = 0
+        # Try to read the original sync timestamp from the cached file header
+        stale_synced_at = ""
+        try:
+            first_line = local_path.read_text(encoding="utf-8", errors="ignore").split("\n", 1)[0]
+            if "synced:" in first_line:
+                stale_synced_at = first_line.split("synced:")[-1].strip(" -->").strip()
+        except OSError:
+            pass
+        cached[rel_path] = {
+            "sp_path":      sp_meta.get("sp_path", "/" + rel_path),
+            "size":         sp_meta.get("size", file_size),
+            "sp_modified":  sp_meta.get("modified", ""),
+            "synced_at":    stale_synced_at or "(previous run)",
+            "local_path":   str(local_path.relative_to(WORKSPACE)),
+            "stale":        True,
+        }
+        log(f"  STALE CACHE RETAINED: {rel_path} (fetch failed this run, previous copy kept)")
+
+    log(f"On-disk manifest: {len(cached)} files (freshly fetched + retained from previous runs)")
 
     # Write manifest
     try:

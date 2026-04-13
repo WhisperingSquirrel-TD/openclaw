@@ -1004,6 +1004,8 @@ def cmd_sp_sync(token: str, chat_id: str) -> None:
                 return
 
         files_cached  = manifest.get("files_cached",  0)
+        files_fresh   = manifest.get("files_fresh",   files_cached)
+        files_stale   = manifest.get("files_stale",   0)
         files_skipped = manifest.get("files_skipped", 0)
         orphans       = len(manifest.get("orphans_deleted", []))
         synced_label  = synced_at[:16].replace("T", " ")
@@ -1014,10 +1016,15 @@ def cmd_sp_sync(token: str, chat_id: str) -> None:
             if f.is_file() and not f.name.startswith(".")
         ) // 1024
 
+        stale_line  = f"\n⏳ Stale (kept from previous run): {files_stale}" if files_stale else ""
+        orphan_line = f"\n🗑 Orphans/ineligible deleted: {orphans}" if orphans else ""
+
         skipped_lines = []
         for rel_path, meta in manifest.get("skipped", {}).items():
-            reason = meta.get("reason_detail", meta.get("reason", "?"))
-            skipped_lines.append(f"  • `{rel_path}` — {reason}")
+            reason   = meta.get("reason_detail", meta.get("reason", "?"))
+            size     = meta.get("size", 0)
+            size_str = f"{size // 1024:,} KB" if size else "empty"
+            skipped_lines.append(f"  • `{rel_path}` ({size_str}) — {reason}")
 
         skipped_summary = ""
         if skipped_lines:
@@ -1025,14 +1032,14 @@ def cmd_sp_sync(token: str, chat_id: str) -> None:
             if len(skipped_lines) > 10:
                 skipped_summary += f"\n  … and {len(skipped_lines) - 10} more (see SHAREPOINT_INDEX.md)"
 
-        orphan_line = f"\n🗑 Orphans/ineligible deleted: {orphans}" if orphans else ""
-
         send(token, chat_id,
              f"✅ *SharePoint sync complete* — {synced_label}\n\n"
-             f"📄 Files cached: {files_cached}\n"
+             f"📄 Files in cache: {files_cached} ({files_fresh} fresh"
+             f"{f', {files_stale} stale' if files_stale else ''})\n"
              f"⚠️ Files skipped: {files_skipped}\n"
              f"💾 Total cache: {total_kb:,} KB"
              f"{orphan_line}"
+             f"{stale_line}"
              f"{skipped_summary}")
 
     except Exception as e:
