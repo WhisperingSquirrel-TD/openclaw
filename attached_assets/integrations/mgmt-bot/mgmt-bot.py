@@ -916,8 +916,58 @@ def _find_vercel() -> list[str]:
     return [npx, "--yes", "vercel"]
 
 
+def _preview_state_path(project_dir: Path) -> Path:
+    return project_dir / ".preview-state.json"
+
+
+def _load_preview_state(project_dir: Path) -> dict:
+    p = _preview_state_path(project_dir)
+    if p.exists():
+        try:
+            return json.loads(p.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_preview_state(project_dir: Path, project: str, new_url: str) -> str | None:
+    """Persist the new canonical preview URL; return the old URL if one existed."""
+    state    = _load_preview_state(project_dir)
+    old_url  = state.get("current_url")
+    now      = __import__("datetime").datetime.utcnow().isoformat()
+    new_state: dict = {
+        "project":    project,
+        "current_url": new_url,
+        "created_at": now,
+    }
+    if old_url and old_url != new_url:
+        new_state["superseded_url"] = old_url
+        new_state["superseded_at"]  = now
+    _preview_state_path(project_dir).write_text(json.dumps(new_state, indent=2))
+    return old_url if old_url != new_url else None
+
+
+def _delete_vercel_preview(old_url: str, vercel_token: str, vercel_scope: str,
+                            env: dict) -> bool:
+    """Remove a stale Vercel preview deployment. Returns True on success."""
+    vercel_bin = _find_vercel()
+    cmd = vercel_bin + ["remove", old_url, "--yes", "--token", vercel_token, "--safe"]
+    if vercel_scope:
+        cmd += ["--scope", vercel_scope]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
+    if r.returncode != 0 and "You cannot set your Personal Account" in (r.stdout + r.stderr):
+        cmd2 = [c for c in cmd if c != vercel_scope and c != "--scope"]
+        r = subprocess.run(cmd2, capture_output=True, text=True, timeout=60, env=env)
+    return r.returncode == 0
+
+
 def _run_dev_pipeline(token: str, chat_id: str, project_dir: Path, project: str) -> None:
-    """Core pipeline: npm install → npm run build → vercel preview."""
+    """Core pipeline: npm install → npm run build → vercel preview.
+
+    Tracks one canonical preview URL per project in .preview-state.json.
+    When a new preview is created the previous one is deleted from Vercel
+    so only the current preview is ever live.
+    """
     vercel_token, vercel_scope = _load_vercel_creds()
     if not vercel_token:
         send(token, chat_id, "❌ `VERCEL_TOKEN` not set in `~/.openclaw/.env`")
@@ -975,10 +1025,21 @@ def _run_dev_pipeline(token: str, chat_id: str, project_dir: Path, project: str)
     preview_url = urls[-1] if urls else None
 
     if preview_url:
+        # Track canonical preview — delete the previous one if it exists
+        old_url = _save_preview_state(project_dir, project, preview_url)
+        cleanup_note = ""
+        if old_url:
+            deleted = _delete_vercel_preview(old_url, vercel_token, vercel_scope, env)
+            if deleted:
+                cleanup_note = f"\n_Previous preview deleted: `{old_url}`_"
+            else:
+                cleanup_note = f"\n_⚠️ Could not delete previous preview — remove manually: `{old_url}`_"
+
         url_lines = _collect_route_urls(project_dir, preview_url)
         send(token, chat_id,
              f"🚀 *Preview ready — {project}*\n\n"
-             f"{url_lines}\n\n"
+             f"{url_lines}"
+             f"{cleanup_note}\n\n"
              f"Review it, then reply:\n"
              f"• `deploy {project}` — go live\n"
              f"• `reject {project}` — discard")
