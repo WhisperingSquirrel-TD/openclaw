@@ -19,7 +19,7 @@ info() { echo -e "      $1"; }
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OPENCLAW_DIR="$HOME/.openclaw"
 WORKSPACE_DIR="$OPENCLAW_DIR/workspace"
-SKILLS_DIR="$WORKSPACE_DIR/skills"
+SKILLS_DIR="$OPENCLAW_DIR/skills"
 SPECS_DIR="$WORKSPACE_DIR/specs"
 REFERENCE_DIR="$WORKSPACE_DIR/reference"
 PROJECTS_DIR="$WORKSPACE_DIR/projects"

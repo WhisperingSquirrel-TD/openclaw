@@ -1431,6 +1431,23 @@ echo "      systemctl --user restart openclaw-gateway.service"
 echo ""
 
 # ---------------------------------------------------------------------------
+# Deploy dev-workflow skills so L1 can find them at ~/.openclaw/skills/
+# setup-dev-workflow.sh is idempotent — safe to run on every install.
+# ---------------------------------------------------------------------------
+SETUP_DEV="$(dirname "$0")/openclaw/scripts/setup-dev-workflow.sh"
+if [ ! -f "$SETUP_DEV" ]; then
+    SETUP_DEV="$HOME/openclaw/scripts/setup-dev-workflow.sh"
+fi
+if [ -f "$SETUP_DEV" ]; then
+    info "Deploying dev-workflow skills…"
+    bash "$SETUP_DEV" 2>&1 | tail -20
+    info "Skills deployed to ~/.openclaw/skills/"
+else
+    warn "setup-dev-workflow.sh not found — skills not deployed"
+    warn "  Run manually: bash ~/openclaw/scripts/setup-dev-workflow.sh"
+fi
+
+# ---------------------------------------------------------------------------
 # Auto-restart mgmt-bot so newly symlinked code is live immediately.
 # Uses a 5-second deferred restart so this script can finish (and the bot can
 # send its "install complete" message) before systemd kills the old process.
