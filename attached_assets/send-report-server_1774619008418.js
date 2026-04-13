@@ -167,11 +167,11 @@ function buildEmailHtml(firstName, companyName, reportUrl, senderEmail, senderNa
   <div class="rule"></div>
   <div class="hero">
     <h1>Hi ${firstName},</h1>
-    <p>Great to meet you. Your bespoke AI opportunity report for ${companyName} is ready.</p>
+    <p>I've put together a bespoke AI opportunity report for ${companyName}.</p>
   </div>
   <div class="body">
-    <p>I've put together a report based on research into ${companyName} — covering where AI can make the biggest practical difference for a business in your position, with realistic timelines and no fluff.</p>
-    <p>It includes your sector context, a primary opportunity specific to you, three quick wins you could act on in the next 90 days, and honest caveats about what to watch out for.</p>
+    <p>It's based on research into ${companyName} and covers where AI can make the biggest practical difference for a business in your position — with realistic timelines and honest context on what to watch out for.</p>
+    <p>Inside: your sector context, a primary opportunity specific to you, three things you could act on in the next 90 days, and honest caveats so you go in with eyes open.</p>
     <div class="cta-wrap">
       <a href="${reportUrl}" class="cta-btn">View your report</a>
     </div>

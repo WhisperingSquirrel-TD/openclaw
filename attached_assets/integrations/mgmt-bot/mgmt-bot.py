@@ -497,10 +497,14 @@ def cmd_pull(token: str, chat_id: str) -> None:
 
 def cmd_install(token: str, chat_id: str) -> None:
     """Pull latest from GitHub then run the install script.
-    The install script now auto-sources ~/.openclaw/.env so no
-    manual source step is needed."""
-    git_dir     = Path(_cfg("OPENCLAW_GIT_DIR", str(Path.home() / "openclaw")))
-    install_sh  = Path.home() / "install-forked-openclaw.sh"
+
+    The install script restarts this bot via systemd, which kills the current
+    process before any result can be sent.  Fix: run everything in a fully
+    detached child (new session, stdin/out/err closed) so it survives the
+    systemd restart.  The wrapper reports back to Telegram via curl once done.
+    """
+    git_dir    = Path(_cfg("OPENCLAW_GIT_DIR", str(Path.home() / "openclaw")))
+    install_sh = Path.home() / "install-forked-openclaw.sh"
 
     if not git_dir.exists():
         send(token, chat_id, f"❌ Git directory not found: `{git_dir}`")
@@ -519,37 +523,57 @@ def cmd_install(token: str, chat_id: str) -> None:
         send(token, chat_id, f"❌ Pull failed — install aborted:\n```{pull_out}```")
         return
 
-    send(token, chat_id, f"✅ Pull complete:\n```{pull_out}```\n\n🔧 Running install script… _(this takes ~5 min on Pi — you'll get the result when it's done)_")
-    try:
-        install = subprocess.run(
-            ["bash", str(install_sh)],
-            capture_output=True, text=True, timeout=900,
-        )
-    except subprocess.TimeoutExpired:
-        send(token, chat_id,
-             "⏱ Install script timed out after 15 minutes.\n\n"
-             "The script may still be running in the background on the Pi.\n"
-             "Check status with: `journalctl --user -u openclaw-gateway.service -n 30`\n"
-             "or run the install manually: `bash ~/install-forked-openclaw.sh`")
-        return
-    except Exception as e:
-        send(token, chat_id, f"❌ Install failed unexpectedly:\n```{e}```")
-        return
+    send(token, chat_id,
+         f"✅ Pull complete:\n```{pull_out}```\n\n"
+         f"🔧 Running install script in background…\n"
+         f"_(this takes ~5 min — you will get a Telegram message when it finishes, "
+         f"even after I restart)_")
 
-    output = (install.stdout + install.stderr).strip()
-    # Show last 40 lines — install output can be long
-    lines  = output.splitlines()
-    tail   = "\n".join(lines[-40:])
-    prefix = f"_(showing last 40 of {len(lines)} lines)_\n\n" if len(lines) > 40 else ""
+    # Write a self-contained Python wrapper that:
+    #   1. runs the install script via subprocess (capturing output)
+    #   2. sends the result back to Telegram via urllib (no curl escaping issues)
+    # Launched with start_new_session=True so it becomes its own session leader
+    # and is NOT killed when systemd stops/restarts the mgmt-bot service.
+    wrapper_path = Path("/tmp/openclaw-install-wrapper.py")
+    wrapper_path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import subprocess, urllib.request, urllib.parse, json, sys\n"
+        f"TOKEN   = {token!r}\n"
+        f"CHAT_ID = {chat_id!r}\n"
+        f"INSTALL = {str(install_sh)!r}\n"
+        "\n"
+        "def tg(text):\n"
+        "    try:\n"
+        "        data = json.dumps({'chat_id': CHAT_ID, 'text': text,\n"
+        "                           'parse_mode': 'Markdown'}).encode()\n"
+        "        req  = urllib.request.Request(\n"
+        "            f'https://api.telegram.org/bot{TOKEN}/sendMessage',\n"
+        "            data=data, headers={'Content-Type': 'application/json'})\n"
+        "        urllib.request.urlopen(req, timeout=15)\n"
+        "    except Exception as e:\n"
+        "        print(f'tg send failed: {e}', file=sys.stderr)\n"
+        "\n"
+        "res = subprocess.run(['bash', INSTALL],\n"
+        "                     capture_output=True, text=True, timeout=900)\n"
+        "output = (res.stdout + res.stderr).strip()\n"
+        "lines  = output.splitlines()\n"
+        "tail   = '\\n'.join(lines[-40:])\n"
+        "prefix = f'_(showing last 40 of {len(lines)} lines)_\\n\\n' if len(lines) > 40 else ''\n"
+        "if res.returncode == 0:\n"
+        "    msg = f'✅ Install complete — mgmt-bot is back online.\\n\\n{prefix}```{tail}```'\n"
+        "else:\n"
+        "    msg = f'⚠️ Install finished with errors (rc={res.returncode}).\\n\\n{prefix}```{tail}```'\n"
+        "tg(msg)\n"
+    )
+    wrapper_path.chmod(0o700)
 
-    if install.returncode == 0:
-        send(token, chat_id,
-             f"✅ Install complete:\n\n{prefix}```{tail}```\n\n"
-             f"🔄 _Restarting mgmt-bot in ~5 seconds — I'll be back shortly._")
-    else:
-        send(token, chat_id,
-             f"⚠️ Install finished with errors:\n\n{prefix}```{tail}```\n\n"
-             f"🔄 _Restarting mgmt-bot in ~5 seconds regardless._")
+    subprocess.Popen(
+        [sys.executable, str(wrapper_path)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,   # detach from mgmt-bot process group
+    )
 
 
 def cmd_health(token: str, chat_id: str) -> None:
