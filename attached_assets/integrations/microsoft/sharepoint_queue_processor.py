@@ -3,9 +3,15 @@
 SharePoint write queue processor for OpenClaw.
 
 Runs every 1 minute via cron. Reads ~/.openclaw/sharepoint-queue.json,
-executes each pending operation via sharepoint.py, writes results to
+executes each pending WRITE operation via sharepoint.py, writes results to
 SHAREPOINT_RESULT.md so L1 can see what happened — all without exec.run
 or TOTP approval from L1's perspective.
+
+READS ARE NOT HANDLED HERE.
+Files are read from the local content mirror at:
+  ~/.openclaw/workspace/sharepoint-cache/<SP-path>
+The sharepoint_cache_poller.py keeps that mirror fresh (every 15 min).
+The AI reads from local files directly — no queue entry needed.
 
 QUEUE FORMAT (~/.openclaw/sharepoint-queue.json)
 -------------------------------------------------
@@ -14,17 +20,17 @@ L1 writes this file directly (file writes need no exec/TOTP):
 [
   {
     "id": "unique-id",
-    "operation": "create" | "update" | "append" | "read" | "list",
+    "operation": "create" | "update" | "append",
     "path": "/Stackstone CRM/Opportunities/Harken Health.md",
-    "content": "Optional markdown content for create/update/append",
+    "content": "Markdown content to write",
     "requested_at": "2026-04-09T10:00:00Z"
   }
 ]
 
 RESULT FILE (~/.openclaw/workspace/SHAREPOINT_RESULT.md)
 ---------------------------------------------------------
-After processing, results are written here so L1 can read the outcome.
-For read/list operations the file content is included.
+After processing, write results are recorded here so L1 can confirm
+that its writes succeeded or see error details.
 
 CRON SCHEDULE: every 1 minute (installed by install-forked-openclaw.sh)
 """
@@ -46,6 +52,8 @@ LOCK_FILE   = STATE_DIR / "integrations/microsoft/sp-queue.lock"
 LOG_FILE    = STATE_DIR / "integrations/microsoft/sp-queue-processor.log"
 SP_SCRIPT   = STATE_DIR / "integrations/microsoft-l1/sharepoint.py"
 LOG_MAX     = 500
+
+WRITE_OPERATIONS = {"create", "update", "append"}
 
 
 # ---------------------------------------------------------------------------
@@ -152,38 +160,38 @@ def _clear_queue() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Execute a single SharePoint operation
+# Execute a single SharePoint write operation
 # ---------------------------------------------------------------------------
 
-def _run_operation(op: dict) -> tuple[bool, str]:
-    """Execute one queue entry. Returns (success, output_text)."""
+def _run_write_operation(op: dict) -> tuple[bool, str]:
+    """Execute one write queue entry. Returns (success, output_text)."""
     operation = op.get("operation", "").lower()
     sp_path   = op.get("path", "").strip()
     content   = op.get("content", "")
 
-    if not operation:
-        return False, "Missing 'operation' field"
+    if operation not in WRITE_OPERATIONS:
+        return False, (
+            f"Operation '{operation}' is not a write operation. "
+            f"Reads are handled via the local SharePoint cache — "
+            f"read ~/.openclaw/workspace/sharepoint-cache/<path> directly."
+        )
     if not sp_path:
         return False, "Missing 'path' field"
     if not SP_SCRIPT.exists():
         return False, f"sharepoint.py not found at {SP_SCRIPT}"
+    if not content:
+        return False, f"Operation '{operation}' requires 'content' field"
 
-    cmd = ["python3", str(SP_SCRIPT), operation, sp_path]
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", prefix="oc-sp-content-",
+        delete=False, dir="/tmp",
+    ) as tf:
+        tf.write(content)
+        content_file = tf.name
 
-    if operation in ("create", "update", "append"):
-        if not content:
-            return False, f"Operation '{operation}' requires 'content' field"
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", prefix="oc-sp-content-",
-            delete=False, dir="/tmp",
-        ) as tf:
-            tf.write(content)
-            content_file = tf.name
-        cmd += ["--content-file", content_file]
-        if operation == "create" and op.get("allow_overwrite"):
-            cmd += ["--allow-overwrite"]
-    else:
-        content_file = None
+    cmd = ["python3", str(SP_SCRIPT), operation, sp_path, "--content-file", content_file]
+    if operation == "create" and op.get("allow_overwrite"):
+        cmd += ["--allow-overwrite"]
 
     try:
         result = subprocess.run(
@@ -192,7 +200,7 @@ def _run_operation(op: dict) -> tuple[bool, str]:
             text=True,
             timeout=60,
         )
-        output = (result.stdout + result.stderr).strip()
+        output  = (result.stdout + result.stderr).strip()
         success = result.returncode == 0
         return success, output
     except subprocess.TimeoutExpired:
@@ -200,24 +208,27 @@ def _run_operation(op: dict) -> tuple[bool, str]:
     except Exception as e:
         return False, str(e)
     finally:
-        if content_file:
-            try:
-                Path(content_file).unlink(missing_ok=True)
-            except OSError:
-                pass
+        try:
+            Path(content_file).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
-# Write SHAREPOINT_RESULT.md
+# Write SHAREPOINT_RESULT.md (write results only)
 # ---------------------------------------------------------------------------
 
 def _write_results(results: list[dict]) -> None:
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
-        "# SharePoint Queue Results",
+        "# SharePoint Write Results",
         "",
         f"_Last processed: {now}_",
+        "",
+        "> This file shows write operation results only (create/update/append).",
+        "> To read SharePoint files, use the local cache:",
+        "> `~/.openclaw/workspace/sharepoint-cache/<SP-path>`",
         "",
     ]
 
@@ -259,16 +270,32 @@ def main() -> None:
 
     try:
         with _Lock():
-            results = []
-            processed = []
+            results   = []
+            rejected  = []
 
             for op in queue:
-                op_id   = op.get("id", str(uuid.uuid4())[:8])
-                op_name = op.get("operation", "?")
-                path    = op.get("path", "?")
+                op_id      = op.get("id", str(uuid.uuid4())[:8])
+                op_name    = op.get("operation", "?")
+                path       = op.get("path", "?")
                 log(f"Processing [{op_id}] {op_name.upper()} {path}")
 
-                success, output = _run_operation(op)
+                if op_name.lower() not in WRITE_OPERATIONS:
+                    msg = (
+                        f"'{op_name}' is not a write operation — skipped. "
+                        f"For reads, use the local cache at "
+                        f"~/.openclaw/workspace/sharepoint-cache/<path>."
+                    )
+                    log(f"  REJECTED: {msg}")
+                    rejected.append(op_id)
+                    results.append({
+                        "id": op_id, "operation": op_name, "path": path,
+                        "success": False, "output": msg,
+                        "requested_at": op.get("requested_at", ""),
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    continue
+
+                success, output = _run_write_operation(op)
                 status = "OK" if success else "FAILED"
                 log(f"  → {status}: {output[:120]}")
 
@@ -281,7 +308,6 @@ def main() -> None:
                     "requested_at": op.get("requested_at", ""),
                     "processed_at": datetime.now(timezone.utc).isoformat(),
                 })
-                processed.append(op_id)
 
             _clear_queue()
             _write_results(results)

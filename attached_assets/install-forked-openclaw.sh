@@ -755,8 +755,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# SharePoint cache poller — runs every 15 min, writes SHAREPOINT_INDEX.md
-# so L1 can read the document tree without exec.run / TOTP.
+# SharePoint cache poller — runs every 15 min.
+# Writes SHAREPOINT_INDEX.md (document tree) AND fetches full content of
+# markdown/text files into ~/.openclaw/workspace/sharepoint-cache/ so L1
+# can read any file instantly without queuing a read request or waiting.
 # ---------------------------------------------------------------------------
 SP_CACHE_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_cache_poller.py"
 SP_CACHE_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_cache_poller.py"
@@ -769,14 +771,16 @@ if [ -f "$SP_CACHE_SRC" ]; then
 
     SP_CACHE_CRON="*/15 * * * * python3 $SP_CACHE_DST >> $SP_CACHE_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "sharepoint_cache_poller.py"; echo "$SP_CACHE_CRON" ) | crontab -
-    info "SharePoint cache poller cron installed: every 15 minutes → SHAREPOINT_INDEX.md"
+    mkdir -p "$HOME/.openclaw/workspace/sharepoint-cache"
+    info "SharePoint cache poller cron installed: every 15 minutes → content mirror + SHAREPOINT_INDEX.md"
 else
     warn "SharePoint cache poller not found at $SP_CACHE_SRC — skipping"
 fi
 
 # ---------------------------------------------------------------------------
-# SharePoint queue processor — runs every 1 min, executes ops L1 writes
-# to sharepoint-queue.json without exec.run / TOTP.
+# SharePoint queue processor — runs every 1 min.
+# Handles WRITE operations only (create/update/append).
+# Reads are served from the local content mirror — no queue needed.
 # ---------------------------------------------------------------------------
 SP_QUEUE_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_queue_processor.py"
 SP_QUEUE_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_queue_processor.py"
@@ -793,7 +797,7 @@ if [ -f "$SP_QUEUE_SRC" ]; then
 
     SP_QUEUE_CRON="* * * * * python3 $SP_QUEUE_DST >> $SP_QUEUE_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "sharepoint_queue_processor.py"; echo "$SP_QUEUE_CRON" ) | crontab -
-    info "SharePoint queue processor cron installed: every 1 minute → SHAREPOINT_RESULT.md"
+    info "SharePoint queue processor cron installed: every 1 minute → write results in SHAREPOINT_RESULT.md"
 else
     warn "SharePoint queue processor not found at $SP_QUEUE_SRC — skipping"
 fi

@@ -951,6 +951,73 @@ def cmd_dev_test(token: str, chat_id: str, project: str) -> None:
             else f"All checks passed. Run `/dev-run {project}` to generate a preview."))
 
 
+def cmd_sp_sync(token: str, chat_id: str) -> None:
+    """Force an immediate SharePoint content mirror sync."""
+    poller = STATE_DIR / "integrations/microsoft/sharepoint_cache_poller.py"
+    if not poller.exists():
+        send(token, chat_id,
+             f"❌ SharePoint cache poller not found at `{poller}`.\n"
+             f"Run `/install` to deploy it.")
+        return
+
+    send(token, chat_id, "🔄 Syncing SharePoint content mirror… _(this may take 1–2 minutes)_")
+    try:
+        result = subprocess.run(
+            ["python3", str(poller)],
+            capture_output=True, text=True, timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        send(token, chat_id, "⏱ SharePoint sync timed out after 5 minutes.")
+        return
+    except Exception as e:
+        send(token, chat_id, f"❌ Sync failed unexpectedly:\n```{e}```")
+        return
+
+    output = (result.stdout + result.stderr).strip()
+
+    manifest_path = STATE_DIR / "workspace" / "sharepoint-cache" / ".manifest.json"
+    try:
+        manifest      = json.loads(manifest_path.read_text())
+        files_cached  = manifest.get("files_cached",  0)
+        files_skipped = manifest.get("files_skipped", 0)
+        orphans       = len(manifest.get("orphans_deleted", []))
+        synced_at     = manifest.get("synced_at", "")[:16].replace("T", " ")
+
+        cache_dir     = STATE_DIR / "workspace" / "sharepoint-cache"
+        total_kb      = sum(
+            f.stat().st_size for f in cache_dir.rglob("*")
+            if f.is_file() and not f.name.startswith(".")
+        ) // 1024
+
+        skipped_lines = []
+        for rel_path, meta in manifest.get("skipped", {}).items():
+            reason = meta.get("reason_detail", meta.get("reason", "?"))
+            skipped_lines.append(f"  • `{rel_path}` — {reason}")
+
+        skipped_summary = ""
+        if skipped_lines:
+            skipped_summary = "\n\n*Skipped:*\n" + "\n".join(skipped_lines[:10])
+            if len(skipped_lines) > 10:
+                skipped_summary += f"\n  … and {len(skipped_lines) - 10} more (see SHAREPOINT_INDEX.md)"
+
+        orphan_line = f"\n🗑 Orphans deleted: {orphans}" if orphans else ""
+
+        send(token, chat_id,
+             f"✅ *SharePoint sync complete* — {synced_at}\n\n"
+             f"📄 Files cached: {files_cached}\n"
+             f"⚠️ Files skipped: {files_skipped}\n"
+             f"💾 Total cache: {total_kb:,} KB"
+             f"{orphan_line}"
+             f"{skipped_summary}")
+
+    except Exception:
+        lines = output.splitlines()
+        tail  = "\n".join(lines[-20:])
+        icon  = "✅" if result.returncode == 0 else "❌"
+        send(token, chat_id,
+             f"{icon} SharePoint sync finished (exit {result.returncode}):\n```{tail}```")
+
+
 def cmd_cancel(token: str, chat_id: str) -> None:
     SOUL_PENDING_FLAG.unlink(missing_ok=True)
     send(token, chat_id, "↩️ Cancelled.")
@@ -977,6 +1044,8 @@ def cmd_help(token: str, chat_id: str) -> None:
          "*Dev Workflow*\n"
          "/dev-test <project> — npm install + lint + typecheck + build\n"
          "/dev-run <project> — npm install + build + Vercel preview URL\n\n"
+         "*SharePoint*\n"
+         "/sp-sync — force immediate SharePoint content mirror refresh\n\n"
          "*Identity*\n"
          "/soul — upload new SOUL.md (send as a .md file)\n\n"
          "/help — this message\n"
@@ -1001,6 +1070,7 @@ COMMANDS = {
     "/garmin":    cmd_garmin,
     "/disk":      cmd_disk,
     "/soul":      cmd_soul_start,
+    "/sp-sync":   cmd_sp_sync,
     "/cancel":    cmd_cancel,
     "/help":      cmd_help,
     "/start":     cmd_help,

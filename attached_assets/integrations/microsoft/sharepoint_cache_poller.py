@@ -1,26 +1,42 @@
 #!/usr/bin/env python3
 """
-SharePoint cache poller for OpenClaw.
+SharePoint content mirror & cache poller for OpenClaw.
 
-Runs every 15 minutes via cron. Calls the Microsoft Graph API directly
-(same token store as sharepoint.py) and writes SHAREPOINT_INDEX.md to
-the OpenClaw workspace so L1 can read SharePoint structure without any
-exec.run / TOTP approval.
+Runs every 15 minutes via cron. Does two things:
+  1. Builds SHAREPOINT_INDEX.md — the full document tree (names, sizes, dates).
+  2. Fetches full content of eligible files into a local mirror so the AI can
+     read them instantly without any queue or wait.
 
-WHAT IT WRITES
---------------
-~/.openclaw/workspace/SHAREPOINT_INDEX.md
-  Full folder/file tree of the Documents library, max 3 levels deep.
-  Includes name, type, size, last-modified date.
-  L1 reads this to understand what documents exist and plan writes.
+LOCAL MIRROR
+------------
+~/.openclaw/workspace/sharepoint-cache/<SP-path>
+  e.g. sharepoint-cache/Stackstone CRM/Opportunities/Croyde Medical.md
 
-WHY IT EXISTS
+Each cached file has a sync-timestamp header so the AI always knows how fresh
+the data is. A manifest JSON tracks every file — cached or skipped — so the
+AI is never silently unaware of missing context.
+
+ELIGIBILITY FOR CACHING
+------------------------
+  • File extension is .md or .txt
+  • File size <= 500 KB  (SHAREPOINT_MAX_FILE_KB env var overrides)
+  • Contained in a configured sync path  (SHAREPOINT_SYNC_PATHS env var,
+    comma-separated, default = sync everything)
+
+SKIPPED FILES
 -------------
-L1 using exec.run to call sharepoint.py live hits the TOTP gate.
-This poller pushes a fresh index into the workspace on a schedule.
-L1 reads the index natively (no exec) and queues writes to
-sharepoint-queue.json (also no exec). The queue processor handles
-the actual Graph API calls.
+Files that are not eligible are recorded in the manifest and listed in a
+dedicated section of SHAREPOINT_INDEX.md. The AI always knows what it is
+missing and why.
+
+ORPHAN CLEANUP
+--------------
+Local cache files with no matching SharePoint source are deleted automatically.
+
+READS
+-----
+The AI reads from the local cache directly — no queue entry needed for reads.
+The sharepoint_queue_processor.py handles writes (create/update/append) only.
 
 CRON SCHEDULE: every 15 minutes (installed by install-forked-openclaw.sh)
 """
@@ -36,9 +52,14 @@ import requests
 STATE_DIR   = Path.home() / ".openclaw"
 WORKSPACE   = STATE_DIR / "workspace"
 INDEX_MD    = WORKSPACE / "SHAREPOINT_INDEX.md"
+CACHE_DIR   = WORKSPACE / "sharepoint-cache"
+MANIFEST    = CACHE_DIR / ".manifest.json"
 LOG_FILE    = STATE_DIR / "integrations/microsoft/sp-cache-poller.log"
 GRAPH_BASE  = "https://graph.microsoft.com/v1.0"
-MAX_DEPTH   = 3
+MAX_DEPTH   = 5
+
+CACHEABLE_EXTENSIONS = {".md", ".txt"}
+MAX_FILE_KB_DEFAULT  = 500
 
 
 # ---------------------------------------------------------------------------
@@ -70,14 +91,24 @@ _load_dotenv()
 
 def log(msg: str) -> None:
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}\n"
     try:
         with LOG_FILE.open("a") as fh:
             fh.write(line)
+        _trim_log()
     except OSError:
         pass
     print(line, end="")
+
+
+def _trim_log(max_lines: int = 1000) -> None:
+    try:
+        lines = LOG_FILE.read_text().splitlines()
+        if len(lines) > max_lines:
+            LOG_FILE.write_text("\n".join(lines[-max_lines:]) + "\n")
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +213,8 @@ def _headers(token: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _resolve_site_and_drive(token: str) -> tuple[str, str]:
-    host      = os.environ.get("SHAREPOINT_HOST",      "seerepeat.sharepoint.com").strip()
-    site_path = os.environ.get("SHAREPOINT_SITE_PATH", "/sites/StackstoneConsulting").strip()
+    host       = os.environ.get("SHAREPOINT_HOST",       "seerepeat.sharepoint.com").strip()
+    site_path  = os.environ.get("SHAREPOINT_SITE_PATH",  "/sites/StackstoneConsulting").strip()
     drive_name = os.environ.get("SHAREPOINT_DRIVE_NAME", "Documents").strip()
 
     site_resp = requests.get(
@@ -212,7 +243,7 @@ def _resolve_site_and_drive(token: str) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Recursive folder listing
+# Recursive folder listing — returns tree lines AND flat file list
 # ---------------------------------------------------------------------------
 
 def _list_children(token: str, site_id: str, drive_id: str, path: str) -> list[dict]:
@@ -239,6 +270,7 @@ def _list_children(token: str, site_id: str, drive_id: str, path: str) -> list[d
 def _build_tree(
     token: str, site_id: str, drive_id: str,
     path: str, depth: int, lines: list[str], indent: str,
+    all_files: list[dict], sync_paths: list[str],
 ) -> None:
     if depth > MAX_DEPTH:
         lines.append(f"{indent}  _(too deep — truncated)_")
@@ -252,41 +284,218 @@ def _build_tree(
         is_dir   = "folder" in item
         modified = item.get("lastModifiedDateTime", "")[:10]
         size     = item.get("size", 0)
+        sp_path  = (path.rstrip("/") + "/" + name).lstrip("/")
 
         if is_dir:
             child_count = item.get("folder", {}).get("childCount", "?")
             lines.append(f"{indent}- 📁 **{name}/** ({child_count} items)")
-            child_path = f"{path}/{name}".lstrip("/")
-            _build_tree(token, site_id, drive_id, child_path, depth + 1, lines, indent + "  ")
+            _build_tree(
+                token, site_id, drive_id,
+                sp_path, depth + 1, lines, indent + "  ",
+                all_files, sync_paths,
+            )
         else:
             size_str = f"{size:,} bytes" if size else "empty"
             lines.append(f"{indent}- 📄 {name} — _{modified}, {size_str}_")
+            all_files.append({
+                "name":     name,
+                "sp_path":  sp_path,
+                "size":     size,
+                "modified": item.get("lastModifiedDateTime", ""),
+                "item_id":  item.get("id", ""),
+            })
+
+
+# ---------------------------------------------------------------------------
+# Sync-path filtering
+# ---------------------------------------------------------------------------
+
+def _in_sync_paths(sp_path: str, sync_paths: list[str]) -> bool:
+    """Return True if the file should be cached (matches a configured sync path)."""
+    if not sync_paths:
+        return True
+    sp_lower = sp_path.lower()
+    return any(sp_lower.startswith(p.lower().strip("/")) for p in sync_paths)
+
+
+# ---------------------------------------------------------------------------
+# File content fetching
+# ---------------------------------------------------------------------------
+
+def _fetch_file_content(
+    token: str, site_id: str, drive_id: str, sp_path: str
+) -> str:
+    """Fetch raw text content of a SharePoint file via Graph."""
+    clean = sp_path.strip("/")
+    url   = f"{GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{clean}:/content"
+    resp  = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+        allow_redirects=True,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"Content fetch failed ({resp.status_code}): {resp.text[:200]}")
+    return resp.text
+
+
+# ---------------------------------------------------------------------------
+# Local cache write
+# ---------------------------------------------------------------------------
+
+def _local_path_for(sp_path: str) -> Path:
+    """Convert a SharePoint path to a local cache path."""
+    clean = sp_path.strip("/")
+    return CACHE_DIR / clean
+
+
+def _write_cached_file(local_path: Path, sp_path: str, content: str, synced_at: str) -> None:
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    header = (
+        f"<!-- sharepoint-cache: /{sp_path} | synced: {synced_at} -->\n\n"
+    )
+    local_path.write_text(header + content, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Orphan cleanup
+# ---------------------------------------------------------------------------
+
+def _cleanup_orphans(known_sp_paths: set[str]) -> list[str]:
+    """Delete local cache files that no longer exist in SharePoint."""
+    deleted = []
+    if not CACHE_DIR.exists():
+        return deleted
+
+    for local_file in CACHE_DIR.rglob("*"):
+        if not local_file.is_file():
+            continue
+        if local_file.name.startswith("."):
+            continue
+        rel = str(local_file.relative_to(CACHE_DIR)).replace("\\", "/")
+        if rel not in known_sp_paths:
+            try:
+                local_file.unlink()
+                deleted.append(rel)
+                log(f"  Orphan deleted: {rel}")
+                # Remove empty parent dirs
+                parent = local_file.parent
+                while parent != CACHE_DIR:
+                    try:
+                        parent.rmdir()
+                        parent = parent.parent
+                    except OSError:
+                        break
+            except OSError as e:
+                log(f"  WARN: Could not delete orphan {rel}: {e}")
+    return deleted
+
+
+# ---------------------------------------------------------------------------
+# Manifest
+# ---------------------------------------------------------------------------
+
+def _write_manifest(
+    cached: dict, skipped: dict, orphans_deleted: list[str], synced_at: str
+) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "synced_at":       synced_at,
+        "files_cached":    len(cached),
+        "files_skipped":   len(skipped),
+        "orphans_deleted": orphans_deleted,
+        "cached":          cached,
+        "skipped":         skipped,
+    }
+    tmp = MANIFEST.with_suffix(".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    tmp.replace(MANIFEST)
 
 
 # ---------------------------------------------------------------------------
 # Write SHAREPOINT_INDEX.md
 # ---------------------------------------------------------------------------
 
-def _write_index(tree_lines: list[str], host: str, site_path: str) -> None:
+def _write_index(
+    tree_lines: list[str],
+    host: str, site_path: str,
+    cached: dict, skipped: dict,
+    synced_at: str,
+) -> None:
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
     lines = [
         "# SharePoint Document Index",
         "",
-        f"> Site: `{host}{site_path}` | Library: `Documents`  ",
-        f"> Last refreshed: {now}",
+        f"> Site: `{host}{site_path}` | Library: `Documents`",
+        f"> Index refreshed: {now}",
+        f"> Content mirror synced: {synced_at}",
         "",
-        "Use this index to understand what documents exist before deciding what to",
-        "create, update, or read. To perform a write, add an entry to",
-        "`~/.openclaw/sharepoint-queue.json` — the queue processor will execute it",
-        "within 1 minute without requiring TOTP approval.",
+        "---",
+        "",
+        "## Reading files",
+        "",
+        "**Do not queue read requests.** Read cached files directly:",
+        "",
+        "```",
+        "~/.openclaw/workspace/sharepoint-cache/<SP-path>",
+        "```",
+        "",
+        "Example:",
+        "```",
+        "~/.openclaw/workspace/sharepoint-cache/Stackstone CRM/Opportunities/Croyde Medical.md",
+        "```",
+        "",
+        "Each cached file starts with a sync timestamp comment so you know exactly how fresh it is.",
+        "The manifest with full metadata is at:",
+        "```",
+        "~/.openclaw/workspace/sharepoint-cache/.manifest.json",
+        "```",
+        "",
+        "**To write** (create/update/append): add an entry to `~/.openclaw/sharepoint-queue.json`.",
+        "The queue processor executes it within 1 minute without requiring TOTP approval.",
+        "",
+        "---",
         "",
         "## /Documents",
         "",
-    ] + tree_lines + [
+    ] + tree_lines
+
+    if cached:
+        lines += [
+            "",
+            "---",
+            "",
+            f"## Cached files ({len(cached)} files available for instant read)",
+            "",
+        ]
+        for rel_path in sorted(cached.keys()):
+            meta      = cached[rel_path]
+            size_kb   = meta.get("size", 0) // 1024
+            synced    = meta.get("synced_at", "")[:16].replace("T", " ")
+            lines.append(f"- `sharepoint-cache/{rel_path}` — _{size_kb} KB, synced {synced}_")
+
+    if skipped:
+        lines += [
+            "",
+            "---",
+            "",
+            f"## Skipped files ({len(skipped)} — NOT in local cache)",
+            "",
+            "_These files exist in SharePoint but were not cached. Reason shown for each._",
+            "",
+        ]
+        for rel_path in sorted(skipped.keys()):
+            meta   = skipped[rel_path]
+            reason = meta.get("reason_detail", meta.get("reason", "unknown"))
+            lines.append(f"- `/{rel_path}` — ⚠️ {reason}")
+
+    lines += [
         "",
         "_Index auto-generated by sharepoint_cache_poller.py_",
     ]
+
     INDEX_MD.write_text("\n".join(lines))
 
 
@@ -304,6 +513,16 @@ def main() -> None:
         log("ERROR: SHAREPOINT_HOST not set in ~/.openclaw/.env — skipping")
         sys.exit(1)
 
+    max_file_bytes = int(os.environ.get("SHAREPOINT_MAX_FILE_KB", MAX_FILE_KB_DEFAULT)) * 1024
+
+    sync_paths_raw = os.environ.get("SHAREPOINT_SYNC_PATHS", "").strip()
+    sync_paths     = [p.strip() for p in sync_paths_raw.split(",") if p.strip()] \
+                     if sync_paths_raw else []
+    if sync_paths:
+        log(f"Sync paths filter: {sync_paths}")
+    else:
+        log("Sync paths: all (no SHAREPOINT_SYNC_PATHS filter)")
+
     try:
         token = _get_access_token()
         log("Token refreshed OK")
@@ -318,22 +537,107 @@ def main() -> None:
         log(f"ERROR: Site/drive resolution failed: {e}")
         sys.exit(1)
 
+    # Build tree and collect all file entries
     tree_lines: list[str] = []
+    all_files:  list[dict] = []
     try:
-        _build_tree(token, site_id, drive_id, "", 1, tree_lines, "")
-        log(f"Tree built: {len(tree_lines)} lines")
+        _build_tree(token, site_id, drive_id, "", 1, tree_lines, "", all_files, sync_paths)
+        log(f"Tree built: {len(tree_lines)} index lines, {len(all_files)} files found")
     except Exception as e:
         log(f"ERROR: Tree build failed: {e}")
         sys.exit(1)
 
+    # Sync file contents
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    synced_at    = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cached:  dict = {}
+    skipped: dict = {}
+    known_sp_paths: set[str] = set()
+
+    for file_info in all_files:
+        sp_path  = file_info["sp_path"]
+        name     = file_info["name"]
+        size     = file_info["size"]
+        modified = file_info["modified"]
+        ext      = Path(name).suffix.lower()
+        rel_path = sp_path.strip("/")
+
+        known_sp_paths.add(rel_path)
+
+        # Filter by sync paths
+        if sync_paths and not _in_sync_paths(sp_path, sync_paths):
+            continue
+
+        # Check eligibility
+        if ext not in CACHEABLE_EXTENSIONS:
+            reason        = "non_text_file"
+            reason_detail = f"File type `{ext or 'no extension'}` is not cached (only .md and .txt)"
+            skipped[rel_path] = {
+                "sp_path": sp_path, "size": size, "sp_modified": modified,
+                "reason": reason, "reason_detail": reason_detail,
+            }
+            log(f"  SKIP [{reason}] {sp_path}")
+            continue
+
+        if size > max_file_bytes:
+            size_kb       = size // 1024
+            limit_kb      = max_file_bytes // 1024
+            reason        = "file_too_large"
+            reason_detail = f"File is {size_kb:,} KB — limit is {limit_kb:,} KB"
+            skipped[rel_path] = {
+                "sp_path": sp_path, "size": size, "sp_modified": modified,
+                "reason": reason, "reason_detail": reason_detail,
+            }
+            log(f"  SKIP [{reason}] {sp_path} ({size_kb} KB > {limit_kb} KB limit)")
+            continue
+
+        # Fetch and cache
+        local_path = _local_path_for(sp_path)
+        try:
+            content = _fetch_file_content(token, site_id, drive_id, sp_path)
+            _write_cached_file(local_path, sp_path, content, synced_at)
+            cached[rel_path] = {
+                "sp_path":    sp_path,
+                "size":       size,
+                "sp_modified": modified,
+                "synced_at":  synced_at,
+                "local_path": str(local_path.relative_to(WORKSPACE)),
+            }
+            log(f"  CACHED {sp_path} ({size // 1024} KB)")
+        except Exception as e:
+            reason_detail = f"Fetch error: {str(e)[:150]}"
+            skipped[rel_path] = {
+                "sp_path": sp_path, "size": size, "sp_modified": modified,
+                "reason": "fetch_error", "reason_detail": reason_detail,
+            }
+            log(f"  SKIP [fetch_error] {sp_path}: {e}")
+
+    log(f"Content sync done: {len(cached)} cached, {len(skipped)} skipped")
+
+    # Orphan cleanup
+    orphans_deleted = _cleanup_orphans(known_sp_paths)
+    if orphans_deleted:
+        log(f"Orphans deleted: {len(orphans_deleted)}")
+
+    # Write manifest
     try:
-        _write_index(tree_lines, host, site_path)
+        _write_manifest(cached, skipped, orphans_deleted, synced_at)
+        log(f"Manifest written: {MANIFEST}")
+    except Exception as e:
+        log(f"WARN: Manifest write failed: {e}")
+
+    # Write index
+    try:
+        _write_index(tree_lines, host, site_path, cached, skipped, synced_at)
         log(f"SHAREPOINT_INDEX.md written ({INDEX_MD.stat().st_size:,} bytes)")
     except Exception as e:
-        log(f"ERROR: Write failed: {e}")
+        log(f"ERROR: Index write failed: {e}")
         sys.exit(1)
 
-    log("Done")
+    total_cache_kb = sum(
+        f.stat().st_size for f in CACHE_DIR.rglob("*") if f.is_file() and not f.name.startswith(".")
+    ) // 1024
+    log(f"Done. Total cache size: {total_cache_kb:,} KB")
 
 
 if __name__ == "__main__":
