@@ -87,8 +87,8 @@ def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subproce
 # GitHub API
 # ---------------------------------------------------------------------------
 
-def github_request(method: str, path: str, token: str, data: dict | None = None) -> dict:
-    url = f"https://api.github.com{path}"
+def _github_raw(method: str, path: str, token: str, data: dict | None = None):
+    url     = f"https://api.github.com{path}"
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
@@ -97,9 +97,14 @@ def github_request(method: str, path: str, token: str, data: dict | None = None)
     }
     body = json.dumps(data).encode() if data else None
     req  = urllib.request.Request(url, data=body, headers=headers, method=method)
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read())
+
+
+def github_request(method: str, path: str, token: str, data: dict | None = None) -> dict:
+    """Make a GitHub API call; fail loudly on any error."""
     try:
-        with urllib.request.urlopen(req) as resp:
-            return json.loads(resp.read())
+        return _github_raw(method, path, token, data)
     except urllib.error.HTTPError as e:
         body_text = e.read().decode(errors="replace")
         try:
@@ -110,6 +115,14 @@ def github_request(method: str, path: str, token: str, data: dict | None = None)
              f"  Hint: token needs 'repo' scope")
     except urllib.error.URLError as e:
         fail(f"Network error reaching GitHub API: {e.reason}")
+
+
+def github_probe(method: str, path: str, token: str) -> dict | None:
+    """Like github_request but returns None on any HTTP error (silent 404 check)."""
+    try:
+        return _github_raw(method, path, token)
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -164,12 +177,8 @@ def main() -> None:
     # ── Step 3: Create GitHub repo ───────────────────────────────────────────
     step(3, f"Create GitHub repo: {owner}/{project}")
 
-    # Check if repo already exists
-    existing = None
-    try:
-        existing = github_request("GET", f"/repos/{owner}/{project}", token)
-    except SystemExit:
-        pass  # 404 = doesn't exist, which is what we want
+    # Check if repo already exists (silent — 404 just means it needs creating)
+    existing = github_probe("GET", f"/repos/{owner}/{project}", token)
 
     if existing:
         clone_url = existing["clone_url"]
@@ -263,23 +272,32 @@ def main() -> None:
     # ── Step 8: Push to GitHub ───────────────────────────────────────────────
     step(8, "Push to GitHub")
 
-    push = run(
-        ["git", "push", "-u", "origin", "main"],
-        cwd=project_dir, check=False,
-    )
-    if push.returncode != 0:
+    # Embed token in URL so git doesn't prompt for credentials, then clean up
+    auth_url  = f"https://{token}@github.com/{owner}/{project}.git"
+    clean_url = f"https://github.com/{owner}/{project}.git"
+
+    run(["git", "remote", "set-url", "origin", auth_url], cwd=project_dir)
+    try:
+        push = run(
+            ["git", "push", "-u", "origin", "main"],
+            cwd=project_dir, check=False,
+        )
         out = (push.stdout + push.stderr).strip()
-        # Handle "already up to date" or non-fast-forward
-        if "Everything up-to-date" in out or "up-to-date" in out.lower():
-            info("Already up to date on GitHub")
-        elif "non-fast-forward" in out or "rejected" in out:
-            info("Remote has diverged — attempting force push (safe: first push of project)...")
-            run(["git", "push", "-u", "--force", "origin", "main"], cwd=project_dir)
-            info("Force pushed successfully")
+        if push.returncode != 0:
+            if "Everything up-to-date" in out or "up-to-date" in out.lower():
+                info("Already up to date on GitHub")
+            elif "non-fast-forward" in out or "rejected" in out:
+                info("Remote has diverged — attempting force push (safe: first push of project)...")
+                run(["git", "push", "-u", "--force", "origin", "main"], cwd=project_dir)
+                info("Force pushed successfully")
+            else:
+                fail(f"Push failed:\n{out}")
         else:
-            fail(f"Push failed:\n{out}")
-    else:
-        info(push.stdout.strip() or "Pushed successfully")
+            info(push.stdout.strip() or "Pushed successfully")
+    finally:
+        # Always restore clean URL so the token isn't stored in .git/config
+        run(["git", "remote", "set-url", "origin", clean_url], cwd=project_dir, check=False)
+        info(f"Remote URL restored to: {clean_url}")
 
     # ── Done ─────────────────────────────────────────────────────────────────
     log_out = run(["git", "log", "--oneline", "-3"], cwd=project_dir, check=False).stdout.strip()
