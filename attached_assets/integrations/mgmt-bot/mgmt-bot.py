@@ -819,6 +819,45 @@ def _load_vercel_creds() -> tuple[str, str]:
     return token, scope
 
 
+def _dev_env() -> dict:
+    """Return an env dict that adds npm/node global bin dirs to PATH.
+
+    The mgmt-bot runs as a systemd service with a minimal PATH, so tools
+    installed globally via npm (like vercel) are invisible without this.
+    We extend PATH with all common npm global bin locations so every
+    dev subprocess can find node tools regardless of how they were installed.
+    """
+    env  = os.environ.copy()
+    home = str(Path.home())
+    extra = [
+        f"{home}/.npm-global/bin",     # npm prefix = ~/.npm-global
+        f"{home}/.local/bin",           # pip / manual installs
+        f"{home}/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ]
+    existing = env.get("PATH", "")
+    env["PATH"] = ":".join(extra) + (":" + existing if existing else "")
+    return env
+
+
+def _find_vercel() -> list[str]:
+    """Return the command list to invoke the Vercel CLI.
+
+    Checks PATH (via shutil.which using the extended dev env), then falls
+    back to npx so we never hard-code a specific install location.
+    """
+    import shutil
+    dev_path = _dev_env().get("PATH", "")
+    vercel   = shutil.which("vercel", path=dev_path)
+    if vercel:
+        return [vercel]
+    # Fall back to npx — it resolves global packages even off PATH
+    npx = shutil.which("npx", path=dev_path) or "npx"
+    return [npx, "--yes", "vercel"]
+
+
 def _run_dev_pipeline(token: str, chat_id: str, project_dir: Path, project: str) -> None:
     """Core pipeline: npm install → npm run build → vercel preview."""
     vercel_token, vercel_scope = _load_vercel_creds()
@@ -826,11 +865,14 @@ def _run_dev_pipeline(token: str, chat_id: str, project_dir: Path, project: str)
         send(token, chat_id, "❌ `VERCEL_TOKEN` not set in `~/.openclaw/.env`")
         return
 
+    env = _dev_env()
+
     send(token, chat_id, f"📦 Running `npm install` in `{project}`…")
     install = subprocess.run(
         ["npm", "install"],
         cwd=str(project_dir),
         capture_output=True, text=True, timeout=300,
+        env=env,
     )
     if install.returncode != 0:
         tail = (install.stdout + install.stderr).strip()[-1500:]
@@ -842,14 +884,16 @@ def _run_dev_pipeline(token: str, chat_id: str, project_dir: Path, project: str)
         ["npm", "run", "build"],
         cwd=str(project_dir),
         capture_output=True, text=True, timeout=300,
+        env=env,
     )
     if build.returncode != 0:
         tail = (build.stdout + build.stderr).strip()[-1500:]
         send(token, chat_id, f"❌ `npm run build` failed:\n```{tail}```")
         return
 
-    send(token, chat_id, "✅ Build passed. Deploying Vercel preview…")
-    vercel_cmd = ["vercel", "--token", vercel_token, "--yes"]
+    vercel_bin = _find_vercel()
+    send(token, chat_id, f"✅ Build passed. Deploying Vercel preview…")
+    vercel_cmd = vercel_bin + ["--token", vercel_token, "--yes"]
     if vercel_scope:
         vercel_cmd += ["--scope", vercel_scope]
 
@@ -857,6 +901,7 @@ def _run_dev_pipeline(token: str, chat_id: str, project_dir: Path, project: str)
         vercel_cmd,
         cwd=str(project_dir),
         capture_output=True, text=True, timeout=300,
+        env=env,
     )
     vercel_out = (vercel.stdout + vercel.stderr).strip()
     urls = re.findall(r'https://[^\s]+\.vercel\.app', vercel_out)
@@ -910,10 +955,12 @@ def cmd_dev_test(token: str, chat_id: str, project: str) -> None:
         return
 
     send(token, chat_id, f"🧪 Testing `{project}`…\n\n📦 Running `npm install` first…")
+    env = _dev_env()
     install = subprocess.run(
         ["npm", "install"],
         cwd=str(project_dir),
         capture_output=True, text=True, timeout=300,
+        env=env,
     )
     if install.returncode != 0:
         tail = (install.stdout + install.stderr).strip()[-1000:]
@@ -939,6 +986,7 @@ def cmd_dev_test(token: str, chat_id: str, project: str) -> None:
             cmd_str.split(),
             cwd=str(project_dir),
             capture_output=True, text=True, timeout=180,
+            env=env,
         )
         if r.returncode == 0:
             results.append(f"✅ `{cmd_str}` — passed")
