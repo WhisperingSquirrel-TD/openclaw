@@ -15,10 +15,13 @@ Usage:
   reply_to_message_id (optional) Microsoft message ID to thread the reply to
 
 Options:
-  --account <slug>    Account to send from. Use "assistant" for
-                      assistant@stackstoneconsulting.co.uk or "microsoft"
-                      for tom@stackstoneconsulting.co.uk
-  --token-file <path> Explicit path to token JSON file
+  --account <slug>      Account slug to locate the token file (e.g. "assistant",
+                        "microsoft")
+  --from-address <addr> SMTP address to send FROM. Required when sending from a
+                        shared mailbox (e.g. assistant@stackstoneconsulting.co.uk).
+                        Uses /users/{addr}/sendMail instead of /me/sendMail.
+                        Omit to send as the authenticated user (tom@).
+  --token-file <path>   Explicit path to OAuth token JSON file
 
 Exit codes:
   0  Success
@@ -48,6 +51,8 @@ def parse_args() -> argparse.Namespace:
                    help="Microsoft message ID to thread as a reply")
     p.add_argument("--account",      default=None,
                    help="Account slug (used to locate token file)")
+    p.add_argument("--from-address", default=None, dest="from_address",
+                   help="SMTP address to send FROM (required for shared mailboxes)")
     p.add_argument("--token-file",   default=None,
                    help="Explicit path to OAuth token JSON file")
     p.add_argument("--subject-file", default=None,
@@ -156,7 +161,7 @@ def refresh_access_token(token_data: dict, token_file: Path) -> str:
         "client_id":     token_data["client_id"],
         "refresh_token": token_data["refresh_token"],
         "grant_type":    "refresh_token",
-        "scope":         "Mail.Send offline_access",
+        "scope":         "Mail.Send Mail.Send.Shared offline_access",
     }
     # Only include client_secret for confidential clients
     secret = token_data.get("client_secret", "")
@@ -186,11 +191,17 @@ def send_email(
     subject: str,
     body: str,
     reply_to_message_id: str | None = None,
+    from_address: str | None = None,
 ) -> None:
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type":  "application/json",
     }
+
+    # When from_address is set we route through the shared mailbox endpoint.
+    # Otherwise /me/ is used (sends as the authenticated user).
+    mailbox = from_address or "me"
+    mailbox_base = f"{GRAPH_BASE}/users/{mailbox}" if from_address else f"{GRAPH_BASE}/me"
 
     # Build the message payload
     message: dict = {
@@ -204,9 +215,19 @@ def send_email(
         ],
     }
 
+    # Explicitly set the From field when sending via a shared mailbox
+    if from_address:
+        message["from"] = {
+            "emailAddress": {
+                "name":    from_name,
+                "address": from_address,
+            }
+        }
+
     if reply_to_message_id:
-        # Use createReply endpoint to properly thread the email
-        create_url = f"{GRAPH_BASE}/me/messages/{reply_to_message_id}/createReply"
+        # Use createReply endpoint to properly thread the email.
+        # For shared mailboxes use /users/{addr}/messages/{id}/createReply.
+        create_url = f"{mailbox_base}/messages/{reply_to_message_id}/createReply"
         resp = requests.post(create_url, headers=headers, timeout=15)
         if not resp.ok:
             print(f"createReply failed: {resp.status_code} {resp.text}", file=sys.stderr)
@@ -215,7 +236,7 @@ def send_email(
         draft_id = draft["id"]
 
         # Update the draft with our content
-        update_url = f"{GRAPH_BASE}/me/messages/{draft_id}"
+        update_url = f"{mailbox_base}/messages/{draft_id}"
         resp = requests.patch(update_url, headers=headers, json={
             "subject": subject,
             "body": message["body"],
@@ -226,13 +247,13 @@ def send_email(
             sys.exit(2)
 
         # Send the draft
-        send_url = f"{GRAPH_BASE}/me/messages/{draft_id}/send"
+        send_url = f"{mailbox_base}/messages/{draft_id}/send"
         resp = requests.post(send_url, headers=headers, timeout=15)
     else:
-        # Send directly
+        # Send directly via the appropriate mailbox endpoint
         payload = {"message": message, "saveToSentItems": True}
         resp = requests.post(
-            f"{GRAPH_BASE}/me/sendMail",
+            f"{mailbox_base}/sendMail",
             headers=headers,
             json=payload,
             timeout=15,
