@@ -58,8 +58,24 @@ LOG_FILE    = STATE_DIR / "integrations/microsoft/sp-cache-poller.log"
 GRAPH_BASE  = "https://graph.microsoft.com/v1.0"
 MAX_DISPLAY_DEPTH = 5   # Tree display in SHAREPOINT_INDEX.md — folders beyond this depth are summarised
 
-CACHEABLE_EXTENSIONS = {".md", ".txt"}
-MAX_FILE_KB_DEFAULT  = 500
+CACHEABLE_EXTENSIONS   = {".md", ".txt"}
+MAX_FILE_KB_DEFAULT    = 500
+
+BINARY_MAX_FILE_KB_DEFAULT = 5000  # 5 MB — binaries larger than this are skipped
+
+# Binary extraction is imported lazily so the poller works even if the
+# extractor module or its dependencies are not yet installed.
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from sharepoint_binary_extractor import (  # type: ignore
+        extract_text as _extract_binary_text,
+        EXTRACTABLE_EXTENSIONS as _EXTRACTABLE_EXTENSIONS,
+    )
+    EXTRACTABLE_EXTENSIONS: frozenset[str] = _EXTRACTABLE_EXTENSIONS
+except ImportError:
+    _extract_binary_text      = None        # type: ignore
+    EXTRACTABLE_EXTENSIONS    = frozenset()
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +398,23 @@ def _fetch_file_content(
     return resp.text
 
 
+def _fetch_file_bytes(
+    token: str, site_id: str, drive_id: str, sp_path: str
+) -> bytes:
+    """Fetch raw binary content of a SharePoint file via Graph."""
+    clean = sp_path.strip("/")
+    url   = f"{GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{clean}:/content"
+    resp  = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=60,
+        allow_redirects=True,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"Binary fetch failed ({resp.status_code}): {resp.text[:200]}")
+    return resp.content
+
+
 # ---------------------------------------------------------------------------
 # Local cache write
 # ---------------------------------------------------------------------------
@@ -398,6 +431,17 @@ def _write_cached_file(local_path: Path, sp_path: str, content: str, synced_at: 
         f"<!-- sharepoint-cache: /{sp_path} | synced: {synced_at} -->\n\n"
     )
     local_path.write_text(header + content, encoding="utf-8")
+
+
+def _write_extracted_file(
+    local_path: Path, sp_path: str, extracted_text: str, synced_at: str,
+) -> None:
+    """Write binary-extracted text to <original-path>.extracted.md."""
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    header = (
+        f"<!-- sharepoint-binary-extract: /{sp_path} | synced: {synced_at} -->\n\n"
+    )
+    local_path.write_text(header + extracted_text, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -447,20 +491,24 @@ def _cleanup_orphans(should_be_cached: set[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def _write_manifest(
-    cached: dict, skipped: dict, orphans_deleted: list[str], synced_at: str
+    cached: dict, skipped: dict, orphans_deleted: list[str], synced_at: str,
+    extracted: dict | None = None,
 ) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    extracted     = extracted or {}
     files_stale   = sum(1 for v in cached.values() if v.get("stale"))
     files_fresh   = len(cached) - files_stale
     manifest = {
-        "synced_at":       synced_at,
-        "files_cached":    len(cached),
-        "files_fresh":     files_fresh,
-        "files_stale":     files_stale,
-        "files_skipped":   len(skipped),
-        "orphans_deleted": orphans_deleted,
-        "cached":          cached,
-        "skipped":         skipped,
+        "synced_at":           synced_at,
+        "files_cached":        len(cached),
+        "files_fresh":         files_fresh,
+        "files_stale":         files_stale,
+        "files_extracted":     len(extracted),
+        "files_skipped":       len(skipped),
+        "orphans_deleted":     orphans_deleted,
+        "cached":              cached,
+        "extracted":           extracted,
+        "skipped":             skipped,
     }
     tmp = MANIFEST.with_suffix(".tmp")
     tmp.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
@@ -476,6 +524,7 @@ def _write_index(
     host: str, site_path: str,
     cached: dict, skipped: dict,
     synced_at: str,
+    extracted: dict | None = None,
 ) -> None:
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -517,19 +566,43 @@ def _write_index(
         "",
     ] + tree_lines
 
+    extracted = extracted or {}
+
     if cached:
         lines += [
             "",
             "---",
             "",
-            f"## Cached files ({len(cached)} files available for instant read)",
+            f"## Cached files ({len(cached)} text files — instant read)",
             "",
         ]
         for rel_path in sorted(cached.keys()):
-            meta      = cached[rel_path]
-            size_kb   = meta.get("size", 0) // 1024
-            synced    = meta.get("synced_at", "")[:16].replace("T", " ")
+            meta    = cached[rel_path]
+            size_kb = meta.get("size", 0) // 1024
+            synced  = meta.get("synced_at", "")[:16].replace("T", " ")
             lines.append(f"- `sharepoint-cache/{rel_path}` — _{size_kb} KB, synced {synced}_")
+
+    if extracted:
+        lines += [
+            "",
+            "---",
+            "",
+            f"## Extracted binary files ({len(extracted)} files — text extracted, instant read)",
+            "",
+            "_Text (and images where available) have been extracted from these binary files._",
+            "_Read the `.extracted.md` file directly — no queue entry needed._",
+            "",
+        ]
+        for rel_path in sorted(extracted.keys()):
+            meta     = extracted[rel_path]
+            sp_path  = meta.get("sp_path", "")
+            orig_ext = meta.get("original_ext", "")
+            size_kb  = meta.get("size", 0) // 1024
+            synced   = meta.get("synced_at", "")[:16].replace("T", " ")
+            lines.append(
+                f"- `sharepoint-cache/{rel_path}` "
+                f"← `{sp_path}` ({orig_ext}, {size_kb} KB, extracted {synced})"
+            )
 
     if skipped:
         lines += [
@@ -635,6 +708,12 @@ def main() -> None:
     # is genuinely removed from SharePoint or becomes ineligible.
     eligible_sp_paths: set[str] = set()
 
+    binary_max_file_bytes = int(
+        os.environ.get("SHAREPOINT_MAX_BINARY_KB", BINARY_MAX_FILE_KB_DEFAULT)
+    ) * 1024
+
+    extracted: dict = {}  # rel_path → metadata for binary-extracted files
+
     for file_info in all_files:
         sp_path  = file_info["sp_path"]
         name     = file_info["name"]
@@ -647,55 +726,105 @@ def main() -> None:
         if sync_paths and not _in_sync_paths(sp_path, sync_paths):
             continue
 
-        # Check eligibility — wrong type or too large → skipped (and ineligible)
-        if ext not in CACHEABLE_EXTENSIONS:
-            reason        = "non_text_file"
-            reason_detail = f"File type `{ext or 'no extension'}` is not cached (only .md and .txt)"
-            skipped[rel_path] = {
-                "sp_path": sp_path, "size": size, "sp_modified": modified,
-                "reason": reason, "reason_detail": reason_detail,
-            }
-            log(f"  SKIP [{reason}] {sp_path}")
+        # ── Text files (.md / .txt) ─────────────────────────────────────────
+        if ext in CACHEABLE_EXTENSIONS:
+            if size > max_file_bytes:
+                size_kb   = size // 1024
+                limit_kb  = max_file_bytes // 1024
+                skipped[rel_path] = {
+                    "sp_path": sp_path, "size": size, "sp_modified": modified,
+                    "reason": "file_too_large",
+                    "reason_detail": f"File is {size_kb:,} KB — limit is {limit_kb:,} KB",
+                }
+                log(f"  SKIP [file_too_large] {sp_path} ({size_kb} KB > {limit_kb} KB limit)")
+                continue
+
+            eligible_sp_paths.add(rel_path)
+            local_path = _local_path_for(sp_path)
+            try:
+                content = _fetch_file_content(token, site_id, drive_id, sp_path)
+                _write_cached_file(local_path, sp_path, content, synced_at)
+                cached[rel_path] = {
+                    "sp_path":     sp_path,
+                    "size":        size,
+                    "sp_modified": modified,
+                    "synced_at":   synced_at,
+                    "local_path":  str(local_path.relative_to(WORKSPACE)),
+                }
+                log(f"  CACHED {sp_path} ({size // 1024} KB)")
+            except Exception as e:
+                skipped[rel_path] = {
+                    "sp_path": sp_path, "size": size, "sp_modified": modified,
+                    "reason": "fetch_error",
+                    "reason_detail": f"Fetch error: {str(e)[:150]}",
+                }
+                log(f"  SKIP [fetch_error] {sp_path}: {e}")
+                # Keep in eligible_sp_paths — the previous local copy is still valid
             continue
 
-        if size > max_file_bytes:
-            size_kb       = size // 1024
-            limit_kb      = max_file_bytes // 1024
-            reason        = "file_too_large"
-            reason_detail = f"File is {size_kb:,} KB — limit is {limit_kb:,} KB"
-            skipped[rel_path] = {
-                "sp_path": sp_path, "size": size, "sp_modified": modified,
-                "reason": reason, "reason_detail": reason_detail,
-            }
-            log(f"  SKIP [{reason}] {sp_path} ({size_kb} KB > {limit_kb} KB limit)")
+        # ── Binary files (.docx / .pdf / .pptx / .msg) ─────────────────────
+        if ext in EXTRACTABLE_EXTENSIONS:
+            if _extract_binary_text is None:
+                # Extractor module not installed — record as skipped
+                skipped[rel_path] = {
+                    "sp_path": sp_path, "size": size, "sp_modified": modified,
+                    "reason": "extractor_unavailable",
+                    "reason_detail": "sharepoint_binary_extractor not installed",
+                }
+                continue
+
+            if size > binary_max_file_bytes:
+                size_kb  = size // 1024
+                limit_kb = binary_max_file_bytes // 1024
+                skipped[rel_path] = {
+                    "sp_path": sp_path, "size": size, "sp_modified": modified,
+                    "reason": "binary_too_large",
+                    "reason_detail": f"Binary is {size_kb:,} KB — extraction limit is {limit_kb:,} KB",
+                }
+                log(f"  SKIP [binary_too_large] {sp_path} ({size_kb} KB > {limit_kb} KB limit)")
+                continue
+
+            # Extracted text lives at <original-path>.extracted.md
+            extracted_rel  = rel_path + ".extracted.md"
+            extracted_path = _local_path_for(sp_path + ".extracted.md")
+            image_dir      = extracted_path.parent / (Path(name).stem + ".images")
+            eligible_sp_paths.add(extracted_rel)
+
+            try:
+                raw_bytes      = _fetch_file_bytes(token, site_id, drive_id, sp_path)
+                extracted_text = _extract_binary_text(name, raw_bytes, image_dir=image_dir)
+                _write_extracted_file(extracted_path, sp_path, extracted_text, synced_at)
+                extracted[extracted_rel] = {
+                    "sp_path":        sp_path,
+                    "original_ext":   ext,
+                    "size":           size,
+                    "sp_modified":    modified,
+                    "synced_at":      synced_at,
+                    "local_path":     str(extracted_path.relative_to(WORKSPACE)),
+                }
+                log(f"  EXTRACTED {sp_path} ({size // 1024} KB) → {extracted_rel}")
+            except Exception as e:
+                skipped[rel_path] = {
+                    "sp_path": sp_path, "size": size, "sp_modified": modified,
+                    "reason": "extraction_error",
+                    "reason_detail": f"Extraction error: {str(e)[:150]}",
+                }
+                log(f"  SKIP [extraction_error] {sp_path}: {e}")
+                # Keep extracted_rel in eligible_sp_paths — previous extracted copy kept
             continue
 
-        # File is eligible — mark it as a file that should exist in local cache
-        eligible_sp_paths.add(rel_path)
+        # ── Other file types — indexed only, not cached ─────────────────────
+        skipped[rel_path] = {
+            "sp_path": sp_path, "size": size, "sp_modified": modified,
+            "reason": "non_cacheable_type",
+            "reason_detail": (
+                f"File type `{ext or 'no extension'}` is not cached. "
+                f"Only .md/.txt are cached; .docx/.pdf/.pptx/.msg are extracted."
+            ),
+        }
+        log(f"  SKIP [non_cacheable_type] {sp_path}")
 
-        # Fetch and cache
-        local_path = _local_path_for(sp_path)
-        try:
-            content = _fetch_file_content(token, site_id, drive_id, sp_path)
-            _write_cached_file(local_path, sp_path, content, synced_at)
-            cached[rel_path] = {
-                "sp_path":    sp_path,
-                "size":       size,
-                "sp_modified": modified,
-                "synced_at":  synced_at,
-                "local_path": str(local_path.relative_to(WORKSPACE)),
-            }
-            log(f"  CACHED {sp_path} ({size // 1024} KB)")
-        except Exception as e:
-            reason_detail = f"Fetch error: {str(e)[:150]}"
-            skipped[rel_path] = {
-                "sp_path": sp_path, "size": size, "sp_modified": modified,
-                "reason": "fetch_error", "reason_detail": reason_detail,
-            }
-            log(f"  SKIP [fetch_error] {sp_path}: {e}")
-            # Keep in eligible_sp_paths — the previous local copy is still valid
-
-    log(f"Content sync done: {len(cached)} cached this run, {len(skipped)} skipped")
+    log(f"Content sync done: {len(cached)} text cached, {len(extracted)} binary extracted, {len(skipped)} skipped")
 
     # Orphan cleanup — only performed when the Graph enumeration was complete.
     # If _collect_all_files raised at any point (full_scan_ok=False), we skip
@@ -720,18 +849,21 @@ def main() -> None:
     sp_meta_by_rel: dict[str, dict] = {f["sp_path"].strip("/"): f for f in all_files}
 
     for rel_path in eligible_sp_paths:
-        if rel_path in cached:
-            continue  # freshly fetched — already correct
+        already_handled = rel_path in cached or rel_path in extracted
+        if already_handled:
+            continue  # freshly processed — already correct
         local_path = CACHE_DIR / rel_path
         if not local_path.exists():
             continue  # not on disk (never fetched, or just deleted as orphan)
-        # File is on disk from a previous run — record it with a "stale_cached" note
-        sp_meta = sp_meta_by_rel.get(rel_path, {})
+        # File is on disk from a previous run — record it with a "stale" note
+        is_extracted = rel_path.endswith(".extracted.md")
+        # For extracted files, the SP path is the rel_path minus ".extracted.md"
+        sp_key = rel_path[: -len(".extracted.md")] if is_extracted else rel_path
+        sp_meta = sp_meta_by_rel.get(sp_key, {})
         try:
             file_size = local_path.stat().st_size
         except OSError:
             file_size = 0
-        # Try to read the original sync timestamp from the cached file header
         stale_synced_at = ""
         try:
             first_line = local_path.read_text(encoding="utf-8", errors="ignore").split("\n", 1)[0]
@@ -739,22 +871,31 @@ def main() -> None:
                 stale_synced_at = first_line.split("synced:")[-1].strip(" -->").strip()
         except OSError:
             pass
-        cached[rel_path] = {
-            "sp_path":      sp_meta.get("sp_path", "/" + rel_path),
-            "size":         sp_meta.get("size", file_size),
-            "sp_modified":  sp_meta.get("modified", ""),
-            "synced_at":    stale_synced_at or "(previous run)",
-            "local_path":   str(local_path.relative_to(WORKSPACE)),
-            "stale":        True,
+        entry = {
+            "sp_path":     sp_meta.get("sp_path", "/" + sp_key),
+            "size":        sp_meta.get("size", file_size),
+            "sp_modified": sp_meta.get("modified", ""),
+            "synced_at":   stale_synced_at or "(previous run)",
+            "local_path":  str(local_path.relative_to(WORKSPACE)),
+            "stale":       True,
         }
-        log(f"  STALE CACHE RETAINED: {rel_path} (fetch failed this run, previous copy kept)")
+        if is_extracted:
+            entry["original_ext"] = Path(sp_key).suffix.lower()
+            extracted[rel_path]   = entry
+        else:
+            cached[rel_path] = entry
+        log(f"  STALE RETAINED: {rel_path} (previous copy kept)")
 
-    log(f"On-disk manifest: {len(cached)} files (freshly fetched + retained from previous runs)")
+    log(
+        f"On-disk manifest: {len(cached)} text files, "
+        f"{len(extracted)} extracted binaries "
+        f"(freshly synced + retained from previous runs)"
+    )
 
     # Write manifest — fatal on failure: /sp-sync depends on fresh manifest data,
     # so a manifest write failure must not silently produce an ambiguous success.
     try:
-        _write_manifest(cached, skipped, orphans_deleted, synced_at)
+        _write_manifest(cached, skipped, orphans_deleted, synced_at, extracted)
         log(f"Manifest written: {MANIFEST}")
     except Exception as e:
         log(f"ERROR: Manifest write failed — aborting: {e}")
@@ -762,7 +903,7 @@ def main() -> None:
 
     # Write index
     try:
-        _write_index(tree_lines, host, site_path, cached, skipped, synced_at)
+        _write_index(tree_lines, host, site_path, cached, skipped, synced_at, extracted)
         log(f"SHAREPOINT_INDEX.md written ({INDEX_MD.stat().st_size:,} bytes)")
     except Exception as e:
         log(f"ERROR: Index write failed: {e}")

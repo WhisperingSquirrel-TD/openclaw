@@ -54,6 +54,15 @@ SP_SCRIPT   = STATE_DIR / "integrations/microsoft-l1/sharepoint.py"
 LOG_MAX     = 500
 
 WRITE_OPERATIONS = {"create", "update", "append"}
+READ_OPERATIONS  = {"read_binary"}  # on-demand binary extraction
+
+# Binary extractor — same directory as this script
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from sharepoint_binary_extractor import extract_text as _extract_binary_text  # type: ignore
+except ImportError:
+    _extract_binary_text = None  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +166,145 @@ def _write_queue(items: list[dict]) -> None:
 
 def _clear_queue() -> None:
     QUEUE_FILE.write_text("[]")
+
+
+# ---------------------------------------------------------------------------
+# Token refresh + binary fetch (mirrors sharepoint_cache_poller.py)
+# ---------------------------------------------------------------------------
+
+GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+
+def _get_sp_access_token() -> tuple[str, str, str]:
+    """Return (access_token, site_id, drive_id) for binary reads."""
+    import requests as _req
+
+    candidates = [
+        STATE_DIR / "integrations/microsoft/token-assistant.json",
+        STATE_DIR / "integrations/microsoft-l1/token.json",
+        STATE_DIR / "integrations/microsoft/token-assistant.json",
+    ]
+    token_file = next((c for c in candidates if c.exists()), None)
+    if not token_file:
+        raise RuntimeError(
+            "No assistant@ token found. Run:\n"
+            "  python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py reauth"
+        )
+
+    raw  = token_file.read_text()
+    data = json.loads(raw)
+    if "RefreshToken" in data and "AccessToken" in data:
+        at_list  = list(data.get("AccessToken",  {}).values())
+        rt_list  = list(data.get("RefreshToken", {}).values())
+        app_list = list(data.get("AppMetadata",  {}).values())
+        at  = at_list[0]  if at_list  else {}
+        rt  = rt_list[0]
+        app = app_list[0] if app_list else {}
+        data = {
+            "client_id":     at.get("client_id") or app.get("client_id", ""),
+            "client_secret": "",
+            "tenant_id":     at.get("realm", "common"),
+            "refresh_token": rt["secret"],
+            "access_token":  at.get("secret", ""),
+        }
+
+    tenant = data.get("tenant_id", "common")
+    resp = _req.post(
+        f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+        data={
+            "client_id":     data["client_id"],
+            "refresh_token": data["refresh_token"],
+            "grant_type":    "refresh_token",
+            "scope":         "Files.ReadWrite Sites.ReadWrite.All offline_access",
+        },
+        timeout=15,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"Token refresh failed ({resp.status_code}): {resp.text[:300]}")
+
+    new_tok = resp.json()
+    access_token = new_tok["access_token"]
+
+    host       = os.environ.get("SHAREPOINT_HOST",       "seerepeat.sharepoint.com").strip()
+    site_path  = os.environ.get("SHAREPOINT_SITE_PATH",  "/sites/StackstoneConsulting").strip()
+    drive_name = os.environ.get("SHAREPOINT_DRIVE_NAME", "Documents").strip()
+
+    hdrs = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+    site_resp = _req.get(f"{GRAPH_BASE}/sites/{host}:{site_path}", headers=hdrs, timeout=15)
+    if not site_resp.ok:
+        raise RuntimeError(f"Site lookup failed ({site_resp.status_code})")
+    site_id = site_resp.json()["id"]
+
+    drives_resp = _req.get(f"{GRAPH_BASE}/sites/{site_id}/drives", headers=hdrs, timeout=15)
+    drives = drives_resp.json().get("value", [])
+    drive_id = next(
+        (d["id"] for d in drives if d.get("name", "").lower() == drive_name.lower()),
+        drives[0]["id"] if drives else None,
+    )
+    if not drive_id:
+        raise RuntimeError("No drives found on SharePoint site")
+
+    return access_token, site_id, drive_id
+
+
+def _fetch_binary_bytes(access_token: str, site_id: str, drive_id: str, sp_path: str) -> bytes:
+    import requests as _req
+    clean = sp_path.strip("/")
+    url   = f"{GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{clean}:/content"
+    resp  = _req.get(
+        url,
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=60,
+        allow_redirects=True,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"Binary fetch failed ({resp.status_code}): {resp.text[:200]}")
+    return resp.content
+
+
+# ---------------------------------------------------------------------------
+# Execute a single read_binary operation
+# ---------------------------------------------------------------------------
+
+CACHE_DIR = STATE_DIR / "workspace" / "sharepoint-cache"
+WORKSPACE = STATE_DIR / "workspace"
+
+
+def _run_read_binary_operation(op: dict) -> tuple[bool, str]:
+    """Download and extract a binary SharePoint file into the local cache."""
+    sp_path = op.get("path", "").strip()
+    if not sp_path:
+        return False, "Missing 'path' field"
+
+    if _extract_binary_text is None:
+        return False, (
+            "sharepoint_binary_extractor is not installed. "
+            "Run: pip3 install --break-system-packages python-docx pdfminer.six python-pptx extract-msg"
+        )
+
+    filename      = Path(sp_path).name
+    rel_path      = sp_path.strip("/")
+    extracted_rel = rel_path + ".extracted.md"
+    local_path    = CACHE_DIR / extracted_rel
+    image_dir     = local_path.parent / (Path(filename).stem + ".images")
+
+    try:
+        access_token, site_id, drive_id = _get_sp_access_token()
+        raw_bytes = _fetch_binary_bytes(access_token, site_id, drive_id, sp_path)
+    except Exception as e:
+        return False, f"Download failed: {e}"
+
+    extracted_text = _extract_binary_text(filename, raw_bytes, image_dir=image_dir)
+
+    now    = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    header = f"<!-- sharepoint-binary-extract: {sp_path} | synced: {now} -->\n\n"
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    local_path.write_text(header + extracted_text, encoding="utf-8")
+
+    return True, (
+        f"Extracted to: sharepoint-cache/{extracted_rel}\n"
+        f"Read it with: cat ~/.openclaw/workspace/sharepoint-cache/{extracted_rel}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -279,10 +427,18 @@ def main() -> None:
                 path       = op.get("path", "?")
                 log(f"Processing [{op_id}] {op_name.upper()} {path}")
 
-                if op_name.lower() not in WRITE_OPERATIONS:
+                op_lower = op_name.lower()
+
+                if op_lower in READ_OPERATIONS:
+                    success, output = _run_read_binary_operation(op)
+                elif op_lower in WRITE_OPERATIONS:
+                    success, output = _run_write_operation(op)
+                else:
                     msg = (
-                        f"'{op_name}' is not a write operation — skipped. "
-                        f"For reads, use the local cache at "
+                        f"Unknown operation '{op_name}'. "
+                        f"Write operations: {', '.join(sorted(WRITE_OPERATIONS))}. "
+                        f"Read operations: {', '.join(sorted(READ_OPERATIONS))}. "
+                        f"For plain text files, read directly from "
                         f"~/.openclaw/workspace/sharepoint-cache/<path>."
                     )
                     log(f"  REJECTED: {msg}")
@@ -295,7 +451,6 @@ def main() -> None:
                     })
                     continue
 
-                success, output = _run_write_operation(op)
                 status = "OK" if success else "FAILED"
                 log(f"  → {status}: {output[:120]}")
 

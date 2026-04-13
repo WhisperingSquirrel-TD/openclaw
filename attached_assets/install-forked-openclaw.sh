@@ -764,10 +764,48 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# SharePoint binary extractor — shared library used by both the cache poller
+# and the queue processor. Deploy first so both can import it.
+# Supports: .docx (python-docx), .pdf (pdfminer.six), .pptx (python-pptx),
+#           .msg (extract-msg). Images optional (pymupdf).
+# ---------------------------------------------------------------------------
+SP_EXTRACTOR_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_binary_extractor.py"
+SP_EXTRACTOR_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_binary_extractor.py"
+
+if [ -f "$SP_EXTRACTOR_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/microsoft"
+    ln -sf "$SP_EXTRACTOR_SRC" "$SP_EXTRACTOR_DST"
+    info "SharePoint binary extractor linked: $SP_EXTRACTOR_DST"
+
+    # Install extraction libraries (idempotent pip checks)
+    SP_EXTRACT_PKGS="python-docx pdfminer.six python-pptx extract-msg"
+    for pkg in $SP_EXTRACT_PKGS; do
+        py_import="${pkg//-/_}"
+        # Map package name to its import name for the pip-show check
+        case "$pkg" in
+            python-docx)   py_import="docx"       ;;
+            pdfminer.six)  py_import="pdfminer"   ;;
+            python-pptx)   py_import="pptx"       ;;
+            extract-msg)   py_import="extract_msg" ;;
+        esac
+        if pip3 show "$pkg" &>/dev/null 2>&1; then
+            info "$pkg already installed"
+        else
+            pip3 install --quiet --break-system-packages --timeout 120 "$pkg" \
+                && info "$pkg installed" \
+                || warn "$pkg install failed — run manually: pip3 install --break-system-packages $pkg"
+        fi
+    done
+else
+    warn "SharePoint binary extractor not found at $SP_EXTRACTOR_SRC — skipping"
+fi
+
+# ---------------------------------------------------------------------------
 # SharePoint cache poller — runs every 15 min.
-# Writes SHAREPOINT_INDEX.md (document tree) AND fetches full content of
-# markdown/text files into ~/.openclaw/workspace/sharepoint-cache/ so L1
-# can read any file instantly without queuing a read request or waiting.
+# Writes SHAREPOINT_INDEX.md (document tree) AND mirrors content locally:
+#   • .md / .txt files — raw text cached directly
+#   • .docx / .pdf / .pptx / .msg — text extracted into <file>.extracted.md
+# L1 reads all of these directly from sharepoint-cache/ with no queue entry.
 # ---------------------------------------------------------------------------
 SP_CACHE_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_cache_poller.py"
 SP_CACHE_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_cache_poller.py"
@@ -781,15 +819,16 @@ if [ -f "$SP_CACHE_SRC" ]; then
     SP_CACHE_CRON="*/15 * * * * python3 $SP_CACHE_DST >> $SP_CACHE_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "sharepoint_cache_poller.py"; echo "$SP_CACHE_CRON" ) | crontab -
     mkdir -p "$HOME/.openclaw/workspace/sharepoint-cache"
-    info "SharePoint cache poller cron installed: every 15 minutes → content mirror + SHAREPOINT_INDEX.md"
+    info "SharePoint cache poller cron installed: every 15 minutes → text + binary extraction → SHAREPOINT_INDEX.md"
 else
     warn "SharePoint cache poller not found at $SP_CACHE_SRC — skipping"
 fi
 
 # ---------------------------------------------------------------------------
 # SharePoint queue processor — runs every 1 min.
-# Handles WRITE operations only (create/update/append).
-# Reads are served from the local content mirror — no queue needed.
+# Handles WRITE ops (create/update/append) AND on-demand binary reads
+# (read_binary) — L1 queues a read_binary entry; result lands in cache
+# within ~1 min so L1 can read it like any other cached file.
 # ---------------------------------------------------------------------------
 SP_QUEUE_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_queue_processor.py"
 SP_QUEUE_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_queue_processor.py"
@@ -806,7 +845,7 @@ if [ -f "$SP_QUEUE_SRC" ]; then
 
     SP_QUEUE_CRON="* * * * * python3 $SP_QUEUE_DST >> $SP_QUEUE_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "sharepoint_queue_processor.py"; echo "$SP_QUEUE_CRON" ) | crontab -
-    info "SharePoint queue processor cron installed: every 1 minute → write results in SHAREPOINT_RESULT.md"
+    info "SharePoint queue processor cron installed: every 1 minute → writes + on-demand binary reads"
 else
     warn "SharePoint queue processor not found at $SP_QUEUE_SRC — skipping"
 fi
