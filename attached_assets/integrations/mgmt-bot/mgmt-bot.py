@@ -543,9 +543,13 @@ def cmd_install(token: str, chat_id: str) -> None:
     prefix = f"_(showing last 40 of {len(lines)} lines)_\n\n" if len(lines) > 40 else ""
 
     if install.returncode == 0:
-        send(token, chat_id, f"✅ Install complete:\n\n{prefix}```{tail}```")
+        send(token, chat_id,
+             f"✅ Install complete:\n\n{prefix}```{tail}```\n\n"
+             f"🔄 _Restarting mgmt-bot in ~5 seconds — I'll be back shortly._")
     else:
-        send(token, chat_id, f"⚠️ Install finished with errors:\n\n{prefix}```{tail}```")
+        send(token, chat_id,
+             f"⚠️ Install finished with errors:\n\n{prefix}```{tail}```\n\n"
+             f"🔄 _Restarting mgmt-bot in ~5 seconds regardless._")
 
 
 def cmd_health(token: str, chat_id: str) -> None:

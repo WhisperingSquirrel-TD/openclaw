@@ -1420,3 +1420,16 @@ echo "      # edit: memory.qmd.searchMode = \"vsearch\""
 echo "      sudo chattr +i ~/.openclaw/openclaw.json"
 echo "      systemctl --user restart openclaw-gateway.service"
 echo ""
+
+# ---------------------------------------------------------------------------
+# Auto-restart mgmt-bot so newly symlinked code is live immediately.
+# Uses a 5-second deferred restart so this script can finish (and the bot can
+# send its "install complete" message) before systemd kills the old process.
+# ---------------------------------------------------------------------------
+if systemctl --user is-active openclaw-mgmt-bot.service >/dev/null 2>&1; then
+    nohup sh -c 'sleep 5 && systemctl --user restart openclaw-mgmt-bot.service' \
+        >/dev/null 2>&1 &
+    info "mgmt-bot restarting in 5 seconds — new code will be live automatically"
+else
+    info "mgmt-bot is not running — start it with: systemctl --user start openclaw-mgmt-bot.service"
+fi
