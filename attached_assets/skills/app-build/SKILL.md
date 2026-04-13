@@ -70,15 +70,29 @@ cat ~/.openclaw/workspace/specs/<project-name>.md
 
 Identify exactly what Phase N specifies. Note the acceptance criteria.
 
-### Step 2 — Check current state
+### Step 2 — Verify repo exists and GitHub remote is set
 
 ```bash
 cd ~/.openclaw/workspace/projects/<project-name>
+
+# Confirm this is a git repo with a GitHub remote
+git remote -v
 git status
 git log --oneline -5
 ```
 
-Ensure you are on the correct branch and the working tree is clean.
+**If there is no `origin` remote, or the remote does not point to a GitHub URL, stop immediately.**
+The project was not initialised correctly. Report:
+
+> "No GitHub remote found for `<project-name>`. Run app-init first, or create the repo
+> manually with `python3 ~/.openclaw/integrations/github/create-repo.py --name <project-name>`
+> then set the remote: `git remote add origin <clone-url>` and push: `git push -u origin main`"
+
+Do not write any code until the remote is confirmed. The Vercel deploy in the build trigger
+works from local files only — without a GitHub remote, code is not backed up and the
+workflow is incomplete.
+
+Ensure you are on the correct branch (`main`) and the working tree is clean.
 
 ### Step 3 — Implement
 
@@ -164,7 +178,8 @@ Next phase: Phase N+1 — <name from spec>
 
 Stop immediately and report if:
 - Spec file not found
-- Repo not found
+- Repo not found at `~/.openclaw/workspace/projects/<project-name>/`
+- No `origin` remote set (GitHub repo was never created — run app-init first)
 - Any self-test step fails (fix before pushing, not after)
 - Push fails
 - Phase description is ambiguous (ask Tom before building)
@@ -176,6 +191,7 @@ Stop immediately and report if:
 | Situation | Action |
 |-----------|--------|
 | Spec not found | Stop — "Spec not found. Run app-plan first." |
+| No GitHub remote | Stop — "No origin remote. Create the repo with create-repo.py then git remote add origin <url> && git push -u origin main" |
 | Phase N not in spec | Stop — "Phase N not defined in spec. Check the spec or ask Tom." |
 | Lint fails | Fix it. Do not push. |
 | Typecheck fails | Fix it. Do not push. |
