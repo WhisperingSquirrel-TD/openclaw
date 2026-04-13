@@ -176,14 +176,25 @@ info "Dependencies installed"
 warn "Building from TypeScript source (this may take a while on Pi)..."
 cd ~/openclaw
 
-# The canvas A2UI bundle requires the full macOS/iOS app sources
-# (apps/shared/OpenClawKit/Tools/CanvasA2UI) which are never present on a Pi.
-# If the bundle file is absent, scripts/bundle-a2ui.sh exits with error 1
-# even when vendor/a2ui/renderers/lit exists but is incomplete.
-# Fix: always pre-create a stub bundle so bundle-a2ui.sh takes the
-# "sources missing; keeping prebuilt bundle" exit path (exit 0).
-# This is safe — the Pi L1 gateway uses Telegram/WhatsApp, not the desktop canvas.
+# bundle-a2ui.sh only takes the "keep prebuilt bundle" exit path when the
+# source directories are ABSENT. pnpm install creates vendor/a2ui/renderers/lit
+# as a workspace package directory (even though the TS sources are gitignored),
+# so bundle-a2ui.sh sees the dir, skips the early exit, and tries to run tsc —
+# which fails on the missing tsconfig.json.
+# Fix: remove the incomplete vendor/a2ui dir (and apps/shared CanvasA2UI dir if
+# present) so bundle-a2ui.sh enters its "sources missing" branch, then pre-create
+# the stub bundle so it takes the "keep prebuilt" exit (exit 0).
+_A2UI_VENDOR="$HOME/openclaw/vendor/a2ui"
+_A2UI_APP="$HOME/openclaw/apps/shared/OpenClawKit/Tools/CanvasA2UI"
 _A2UI_BUNDLE="$HOME/openclaw/src/canvas-host/a2ui/a2ui.bundle.js"
+if [ -d "$_A2UI_VENDOR" ] && [ ! -f "$_A2UI_VENDOR/renderers/lit/tsconfig.json" ]; then
+    warn "vendor/a2ui is incomplete (Pi build) — removing to bypass bundler"
+    rm -rf "$_A2UI_VENDOR"
+fi
+if [ -d "$_A2UI_APP" ] && [ ! -f "$_A2UI_APP/Package.swift" ]; then
+    warn "CanvasA2UI app dir is incomplete (Pi build) — removing"
+    rm -rf "$_A2UI_APP"
+fi
 if [ ! -f "$_A2UI_BUNDLE" ]; then
     warn "canvas bundle missing — creating stub for Pi build"
     mkdir -p "$(dirname "$_A2UI_BUNDLE")"
