@@ -175,6 +175,22 @@ info "Dependencies installed"
 # Step 7: Build TypeScript
 warn "Building from TypeScript source (this may take a while on Pi)..."
 cd ~/openclaw
+
+# vendor/a2ui is gitignored and only present in dev environments.
+# On the Pi the canvas A2UI bundle is not needed (L1 uses Telegram/WhatsApp,
+# not the desktop canvas). If vendor sources AND the prebuilt bundle are both
+# absent, scripts/bundle-a2ui.sh exits with error and the whole build fails.
+# Fix: create a minimal stub bundle so bundle-a2ui.sh takes the
+# "sources missing; keeping prebuilt bundle" exit path.
+_A2UI_BUNDLE="$HOME/openclaw/src/canvas-host/a2ui/a2ui.bundle.js"
+_A2UI_VENDOR="$HOME/openclaw/vendor/a2ui/renderers/lit"
+if [ ! -d "$_A2UI_VENDOR" ] && [ ! -f "$_A2UI_BUNDLE" ]; then
+    warn "vendor/a2ui not present — creating stub canvas bundle (Pi build)"
+    mkdir -p "$(dirname "$_A2UI_BUNDLE")"
+    echo "// stub — canvas A2UI not built on this Pi install" > "$_A2UI_BUNDLE"
+    info "Stub a2ui bundle created at $_A2UI_BUNDLE"
+fi
+
 rm -rf dist 2>/dev/null || true
 pnpm run build || fail "Build failed — check for TypeScript errors"
 COMMIT_SHORT=$(cd ~/openclaw && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
