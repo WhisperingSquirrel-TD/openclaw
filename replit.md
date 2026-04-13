@@ -336,6 +336,20 @@ The CRM runs at 06:00 every morning and another job runs at 07:00. No background
 | `/mnt/l1-secure/SOUL.md` | L1 personality and context file — edit with `nano /mnt/l1-secure/SOUL.md` |
 | `~/l1-hashes.txt` | SHA-256 integrity hashes of secure files — regenerated on every install |
 
+### SharePoint mirror (read-only local cache + write queue)
+| File / Path | Purpose |
+|---|---|
+| `~/.openclaw/workspace/SHAREPOINT_INDEX.md` | Full document tree: all paths, sizes, cached vs. skipped status |
+| `~/.openclaw/workspace/sharepoint-cache/<SP-path>` | Local mirror of `.md`/`.txt` files (≤500 KB). Read directly — no queue needed. Each file starts with a sync-timestamp header. |
+| `~/.openclaw/workspace/sharepoint-cache/.manifest.json` | Per-file cache status (path, cached, reason_skipped, last_synced) |
+| `~/.openclaw/sharepoint-queue.json` | Write queue — L1 writes JSON entries directly (no exec/TOTP). Processor runs every 1 min. |
+| `~/.openclaw/workspace/SHAREPOINT_RESULT.md` | Write results — check ~1 min after queuing to confirm success/failure |
+| `~/.openclaw/integrations/microsoft/sp-cache-poller.log` | Cache poller log — check if index or cache is not updating |
+| `~/.openclaw/integrations/microsoft/sp-queue-processor.log` | Queue processor log — check if writes are failing |
+| `~/.openclaw/skills/sharepoint/SKILL.md` | L1 skill — read/write patterns, queue format, error states |
+
+Cache refreshes every **15 minutes** via cron. Non-`.md`/`.txt` files (docx, pdf, xlsx) are indexed but not cached; use the queue to request content.
+
 ### Google Tasks (WhatsApp watch actions)
 | File | Purpose |
 |---|---|
