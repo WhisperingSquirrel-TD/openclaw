@@ -40,8 +40,8 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="OpenClaw Microsoft Graph email sender")
-    p.add_argument("to",        help="Recipient email address")
-    p.add_argument("from_name", help="Display name for the From field")
+    p.add_argument("to",        nargs="?", default=None, help="Recipient email address")
+    p.add_argument("from_name", nargs="?", default=None, help="Display name for the From field")
     p.add_argument("subject",   nargs="?", default="",
                    help="Email subject (overridden by --subject-file if given)")
     p.add_argument("body",      nargs="?", default="",
@@ -280,6 +280,10 @@ def main() -> None:
         print(f"Token file: {token_file}")
         whoami(access_token)
         sys.exit(0)
+
+    if not args.to or not args.from_name:
+        print("ERROR: to and from_name are required when sending email", file=sys.stderr)
+        sys.exit(3)
 
     # Resolve subject and body — file flags take priority over positional args.
     # This avoids embedding large/sensitive content in the shell command itself,
