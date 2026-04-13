@@ -88,7 +88,24 @@ npx vercel link --yes --project <project-name> --token $VERCEL_TOKEN
 
 If this step fails, stop and report clearly. Do not continue.
 
-### Step 6 — Commit initial setup
+### Step 6 — Create session journal
+
+Create the `PROGRESS.md` file so that future sessions have a journal to read and write:
+
+```bash
+cat > ~/.openclaw/workspace/projects/<project-name>/PROGRESS.md << 'EOF'
+# PROGRESS — <project-name>
+
+Session journal. Most recent entry at the top.
+Each entry written by L1 at the end of a build session.
+
+---
+EOF
+```
+
+This file is committed alongside the initial setup and updated after every build phase.
+
+### Step 7 — Commit initial setup
 
 ```bash
 git add .

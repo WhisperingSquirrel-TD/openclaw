@@ -140,6 +140,90 @@ Do not claim tests have passed. Do not claim a preview URL exists. The mgmt-bot 
 
 ---
 
+### Step 6 — Update the session journal (PROGRESS.md)
+
+Write a dated entry to `PROGRESS.md` inside the project directory. This file is how future
+sessions (and Tom) know exactly where work left off — do not skip it.
+
+```bash
+PROJECT_DIR="$HOME/.openclaw/workspace/projects/<project-name>"
+PROGRESS="$PROJECT_DIR/PROGRESS.md"
+
+# Create file with header if it doesn't exist yet
+if [ ! -f "$PROGRESS" ]; then
+cat > "$PROGRESS" << 'HEADER'
+# PROGRESS — <project-name>
+
+Session journal. Most recent entry at the top.
+Each entry written by L1 at the end of a build session.
+
+---
+HEADER
+fi
+```
+
+Then prepend a new entry (most recent at top):
+
+```python
+python3 - << 'EOF'
+import pathlib, datetime, sys
+
+project   = "<project-name>"
+proj_dir  = pathlib.Path.home() / ".openclaw/workspace/projects" / project
+progress  = proj_dir / "PROGRESS.md"
+
+today     = datetime.date.today().isoformat()
+phase     = "N"   # replace with actual phase number
+summary   = "<2–3 sentence summary of what was built this session>"
+decisions = "<any architectural or design decisions made>"
+tests     = "<what was tested, what passed, what was skipped>"
+issues    = "<any known failures, limitations, or deferred items>"
+next_step = "<exact next action for the next session>"
+
+entry = f"""## {today} — Phase {phase}
+
+**What was done:**
+{summary}
+
+**Decisions made:**
+{decisions}
+
+**Testing:**
+{tests}
+
+**Known issues / deferred:**
+{issues}
+
+**Next step:**
+{next_step}
+
+---
+"""
+
+existing = progress.read_text() if progress.exists() else ""
+# Insert after the header block (after first ---)
+if "---\n" in existing:
+    header, _, rest = existing.partition("---\n")
+    progress.write_text(header + "---\n" + entry + rest)
+else:
+    progress.write_text(existing + entry)
+
+print(f"PROGRESS.md updated: {progress}")
+EOF
+```
+
+Commit PROGRESS.md alongside the code changes (it was already staged with `git add .` in Step 4).
+If the commit is already done, do a follow-up commit:
+
+```bash
+cd ~/.openclaw/workspace/projects/<project-name>
+git add PROGRESS.md
+git diff --cached --quiet || git commit -m "docs: update session journal for phase N"
+git push origin main
+```
+
+---
+
 ## Output — preview handoff report
 
 Always return this exact format after a successful build:
