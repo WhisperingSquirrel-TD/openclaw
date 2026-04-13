@@ -893,17 +893,26 @@ def _run_dev_pipeline(token: str, chat_id: str, project_dir: Path, project: str)
 
     vercel_bin = _find_vercel()
     send(token, chat_id, f"✅ Build passed. Deploying Vercel preview…")
-    vercel_cmd = vercel_bin + ["--token", vercel_token, "--yes"]
-    if vercel_scope:
-        vercel_cmd += ["--scope", vercel_scope]
 
-    vercel = subprocess.run(
-        vercel_cmd,
-        cwd=str(project_dir),
-        capture_output=True, text=True, timeout=300,
-        env=env,
-    )
+    def _run_vercel(with_scope: bool) -> subprocess.CompletedProcess:
+        cmd = vercel_bin + ["--token", vercel_token, "--yes"]
+        if with_scope and vercel_scope:
+            cmd += ["--scope", vercel_scope]
+        return subprocess.run(
+            cmd,
+            cwd=str(project_dir),
+            capture_output=True, text=True, timeout=300,
+            env=env,
+        )
+
+    vercel = _run_vercel(with_scope=True)
     vercel_out = (vercel.stdout + vercel.stderr).strip()
+
+    # Vercel CLI rejects --scope for personal accounts; retry without it
+    if "You cannot set your Personal Account as the scope" in vercel_out:
+        vercel = _run_vercel(with_scope=False)
+        vercel_out = (vercel.stdout + vercel.stderr).strip()
+
     urls = re.findall(r'https://[^\s]+\.vercel\.app', vercel_out)
     preview_url = urls[-1] if urls else None
 
