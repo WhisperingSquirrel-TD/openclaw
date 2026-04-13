@@ -15,9 +15,9 @@ Usage:
   reply_to_message_id (optional) Microsoft message ID to thread the reply to
 
 Options:
-  --account <slug>    Account to send from (default: "assistant" — sends from
-                      assistant@stackstoneconsulting.co.uk; use "microsoft" or
-                      "tom" to send as tom@stackstoneconsulting.co.uk)
+  --account <slug>    Account to send from. Use "assistant" for
+                      assistant@stackstoneconsulting.co.uk or "microsoft"
+                      for tom@stackstoneconsulting.co.uk
   --token-file <path> Explicit path to token JSON file
 
 Exit codes:
@@ -46,8 +46,8 @@ def parse_args() -> argparse.Namespace:
                    help="Email body plain text, \\n for newlines (overridden by --body-file if given)")
     p.add_argument("reply_to_message_id", nargs="?", default=None,
                    help="Microsoft message ID to thread as a reply")
-    p.add_argument("--account",      default="assistant",
-                   help="Account slug (used to locate token file); defaults to 'assistant'")
+    p.add_argument("--account",      default=None,
+                   help="Account slug (used to locate token file)")
     p.add_argument("--token-file",   default=None,
                    help="Explicit path to OAuth token JSON file")
     p.add_argument("--subject-file", default=None,
