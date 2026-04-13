@@ -606,6 +606,13 @@ fi
 deploy_integration "$INTEGRATIONS_SRC/google/gmail_poll.py"        "$INTEGRATIONS_DST/google/gmail_poll.py"
 
 # ---------------------------------------------------------------------------
+# GitHub helpers (repo creation + retroactive push)
+# ---------------------------------------------------------------------------
+mkdir -p "$INTEGRATIONS_DST/github"
+deploy_integration "$INTEGRATIONS_SRC/github/create-repo.py"       "$INTEGRATIONS_DST/github/create-repo.py"
+deploy_integration "$INTEGRATIONS_SRC/github/retro-push.py"        "$INTEGRATIONS_DST/github/retro-push.py"
+
+# ---------------------------------------------------------------------------
 # Garmin Connect daily health poller
 # Fetches resting HR, HRV, sleep, stress, body battery, steps, last activity.
 # Writes GARMIN_DAILY.md once per day at 06:10.
