@@ -6,27 +6,29 @@ Creates a calendar event (optionally a Teams meeting) from the
 assistant@ or personal Microsoft account using a stored OAuth token.
 
 Usage:
+  create-event.py --subject "Team sync" --start "2026-04-08T10:00" --end "2026-04-08T11:00" \
+      --attendees "alice@example.com,bob@example.com" --teams
+
+  File arguments avoid embedding user content in the shell command,
+  which prevents accidental matches against exec security denylist patterns:
   create-event.py --start "2026-04-08T10:00" --end "2026-04-08T11:00" \
       --title-file /tmp/oc-event-title.txt \
       --attendees-file /tmp/oc-event-attendees.txt \
       --teams
 
-  All file arguments avoid embedding user content in the shell command,
-  which prevents accidental matches against exec security denylist patterns.
-
 Arguments:
-  --title <str>             Event title (overridden by --title-file if given)
-  --title-file <path>       Read event title from this file
-  --start <ISO datetime>    Start time — YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS
-  --end <ISO datetime>      End time   — YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS
-  --duration <minutes>      Duration in minutes (used if --end not given, default 60)
-  --attendees <emails>      Comma-separated email addresses
-  --attendees-file <path>   Read attendees from this file (one email per line or comma-sep)
-  --timezone <tz>           IANA timezone (default: Europe/London)
-  --teams                   Add Teams online meeting link (default: true)
-  --no-teams                Do not add Teams link
-  --account <slug>          Token account slug (default: assistant)
-  --token-file <path>       Explicit token file path
+  --subject / --title <str>   Event subject/title (aliases; overridden by --title-file)
+  --title-file <path>         Read event subject from this file (overrides --subject)
+  --start <ISO datetime>      Start time — YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS (required)
+  --end <ISO datetime>        End time   — YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS (optional)
+  --duration <minutes>        Duration in minutes when --end is omitted (default: 60)
+  --attendees <emails>        Comma-separated attendee email addresses (optional)
+  --attendees-file <path>     Read attendees from this file — one per line or comma-separated
+  --timezone <tz>             IANA timezone name (default: Europe/London)
+  --teams                     Add Teams online meeting link (default: on)
+  --no-teams                  Do not add a Teams link
+  --account <slug>            Token account slug (default: assistant)
+  --token-file <path>         Explicit path to OAuth token JSON file
 
 Exit codes:
   0  Success
@@ -46,31 +48,44 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="OpenClaw Microsoft Graph calendar event creator")
-    p.add_argument("--title",          default="",
-                   help="Event title (overridden by --title-file)")
+    p = argparse.ArgumentParser(
+        description="OpenClaw Microsoft Graph calendar event creator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--subject", "--title", dest="title", default="",
+                   metavar="SUBJECT",
+                   help="Event subject/title (overridden by --title-file)")
     p.add_argument("--title-file",     default=None,
-                   help="Read event title from this file")
+                   metavar="PATH",
+                   help="Read event subject/title from this file (overrides --subject/--title)")
     p.add_argument("--start",          required=True,
-                   help="Start datetime: YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS")
+                   metavar="DATETIME",
+                   help="Start datetime — YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS (required)")
     p.add_argument("--end",            default=None,
-                   help="End datetime: YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS")
+                   metavar="DATETIME",
+                   help="End datetime — YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS (optional; use --duration instead)")
     p.add_argument("--duration",       type=int, default=60,
-                   help="Duration in minutes when --end is not given (default 60)")
+                   metavar="MINUTES",
+                   help="Duration in minutes when --end is not given (default: 60)")
     p.add_argument("--attendees",      default="",
-                   help="Comma-separated attendee emails (overridden by --attendees-file)")
+                   metavar="EMAILS",
+                   help="Comma-separated attendee email addresses (optional; overridden by --attendees-file)")
     p.add_argument("--attendees-file", default=None,
-                   help="Read attendee emails from this file (one per line or comma-separated)")
+                   metavar="PATH",
+                   help="Read attendee emails from this file — one per line or comma-separated (overrides --attendees)")
     p.add_argument("--timezone",       default="Europe/London",
-                   help="IANA timezone name (default: Europe/London)")
+                   metavar="TZ",
+                   help="IANA timezone name for start/end times (default: Europe/London)")
     p.add_argument("--teams",          action="store_true", default=True,
                    help="Include a Teams online meeting link (default: on)")
     p.add_argument("--no-teams",       action="store_true", default=False,
-                   help="Do not add a Teams link")
+                   help="Do not add a Teams online meeting link")
     p.add_argument("--account",        default="assistant",
-                   help="Account slug for token lookup (default: assistant)")
+                   metavar="SLUG",
+                   help="Account slug used to locate the OAuth token file (default: assistant)")
     p.add_argument("--token-file",     default=None,
-                   help="Explicit path to OAuth token JSON file")
+                   metavar="PATH",
+                   help="Explicit path to OAuth token JSON file (overrides --account lookup)")
     return p.parse_args()
 
 
@@ -250,7 +265,7 @@ def main() -> None:
             print(f"ERROR: Cannot read --title-file: {e}", file=sys.stderr)
             sys.exit(3)
     if not title:
-        print("ERROR: --title or --title-file is required.", file=sys.stderr)
+        print("ERROR: --subject (or --title) or --title-file is required.", file=sys.stderr)
         sys.exit(3)
 
     # Resolve attendees

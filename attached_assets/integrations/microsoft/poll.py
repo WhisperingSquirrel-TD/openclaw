@@ -334,22 +334,26 @@ def process_emails(emails: list, last_seen: dict, known_contacts: list, directio
     known_alert      = False
 
     for msg in emails:
-        received  = msg.get("receivedDateTime", "")
-        sender    = msg.get("from", {}).get("emailAddress", {})
-        from_addr = sender.get("address", "").lower()
-        from_name = sender.get("name", from_addr)
-        subject   = msg.get("subject", "(no subject)")
+        try:
+            received  = msg.get("receivedDateTime", "")
+            sender    = msg.get("from", {}).get("emailAddress", {})
+            from_addr = sender.get("address", "").lower()
+            from_name = sender.get("name", from_addr)
+            subject   = msg.get("subject", "(no subject)")
 
-        if from_addr in known_contacts:
-            prev_ts = last_seen.get(from_addr, "")
-            if received > prev_ts:
-                last_seen[from_addr] = received
-                write_alert(subject, from_addr, from_name, received, direction)
-                known_alert = True
-            prefix = "SENT" if direction == "SENT" else ""
-            trusted_entries.append(format_trusted_entry(msg, prefix=prefix))
-        else:
-            external_entries.append(format_external_entry(msg))
+            if from_addr in known_contacts:
+                prev_ts = last_seen.get(from_addr, "")
+                if received > prev_ts:
+                    last_seen[from_addr] = received
+                    write_alert(subject, from_addr, from_name, received, direction)
+                    known_alert = True
+                prefix = "SENT" if direction == "SENT" else ""
+                trusted_entries.append(format_trusted_entry(msg, prefix=prefix))
+            else:
+                external_entries.append(format_external_entry(msg))
+        except Exception as e:
+            msg_id = msg.get("id", "<unknown>") if isinstance(msg, dict) else "<unknown>"
+            log(f"WARNING: Skipping malformed {direction} message id={msg_id}: {e}")
 
     return trusted_entries, external_entries, known_alert
 
@@ -390,6 +394,27 @@ def rebuild_external_md(external_inbox: list):
     EXTERNAL_MD.write_text(content)
 
 
+def _trim_log_on_startup() -> None:
+    """If the log file already exceeds LOG_MAX_LINES, truncate it immediately on startup."""
+    if not LOG_FILE.exists():
+        return
+    try:
+        existing = LOG_FILE.read_text().splitlines(keepends=True)
+    except OSError:
+        return
+    if len(existing) > LOG_MAX_LINES:
+        trimmed = existing[-LOG_TRIM_TO:]
+        tmp = LOG_FILE.with_suffix(".tmp")
+        try:
+            tmp.write_text("".join(trimmed))
+            tmp.replace(LOG_FILE)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def main():
     args = parse_args()
     resolve_paths(args)
@@ -409,6 +434,8 @@ def main():
         )
         sys.exit(0)  # Clean exit — systemd will restart us shortly
 
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _trim_log_on_startup()
     log(f"Microsoft email poller starting — account: {ACCOUNT_LABEL}, token: {TOKEN_FILE}")
 
     # Backwards-compat: if the old token path (token.json) exists and the new one
@@ -440,7 +467,13 @@ def main():
 
                 trusted_inbox, external_inbox, _ = process_emails(inbox_emails, last_seen, known_contacts, "INBOX")
                 # Sent items: show ALL (no known-contacts filter — outbound is safe)
-                all_sent = [format_sent_entry(m) for m in sent_emails]
+                all_sent = []
+                for m in sent_emails:
+                    try:
+                        all_sent.append(format_sent_entry(m))
+                    except Exception as e:
+                        msg_id = m.get("id", "<unknown>") if isinstance(m, dict) else "<unknown>"
+                        log(f"WARNING: Skipping malformed SENT message id={msg_id}: {e}")
 
                 save_last_seen(last_seen)
                 rebuild_inbox_md(trusted_inbox, all_sent)

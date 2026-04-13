@@ -262,11 +262,17 @@ def write_calendar_md(events: list) -> None:
         f"# Outlook Calendar (Next {LOOK_AHEAD} Days)\n",
         f"Last updated: {ts}\n\n",
     ]
+    formatted_count = 0
     if events:
         for evt in events:
-            lines.append(format_event(evt))
-            lines.append("\n")
-    else:
+            try:
+                lines.append(format_event(evt))
+                lines.append("\n")
+                formatted_count += 1
+            except Exception as e:
+                evt_id = evt.get("id", "<unknown>") if isinstance(evt, dict) else "<unknown>"
+                log(f"WARNING: Skipping malformed calendar event id={evt_id}: {e}")
+    if not formatted_count:
         lines.append("_(no events in the next 14 days)_\n")
 
     content = "".join(lines)
@@ -286,6 +292,27 @@ def write_calendar_md(events: list) -> None:
 # Main loop
 # ---------------------------------------------------------------------------
 
+def _trim_log_on_startup() -> None:
+    """If the log file already exceeds LOG_MAX_LINES, truncate it immediately on startup."""
+    if not LOG_FILE.exists():
+        return
+    try:
+        existing = LOG_FILE.read_text().splitlines(keepends=True)
+    except OSError:
+        return
+    if len(existing) > LOG_MAX_LINES:
+        trimmed = existing[-LOG_TRIM_TO:]
+        tmp = LOG_FILE.with_suffix(".tmp")
+        try:
+            tmp.write_text("".join(trimmed))
+            tmp.replace(LOG_FILE)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def main() -> None:
     if not TOKEN_FILE.exists():
         print(
@@ -296,6 +323,8 @@ def main() -> None:
         )
         sys.exit(1)
 
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _trim_log_on_startup()
     log(f"Calendar poller starting — token: {TOKEN_FILE}, output: {CALENDAR_MD}")
 
     while True:
