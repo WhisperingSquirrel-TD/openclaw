@@ -68,8 +68,12 @@ def resolve_token_file(args: argparse.Namespace) -> Path:
 
     integrations_dir = STATE_DIR / "integrations"
 
-    # All microsoft* subdirectories under ~/.openclaw/integrations/
-    ms_dirs = sorted(integrations_dir.glob("microsoft*/")) if integrations_dir.exists() else []
+    # All microsoft* subdirectories — longer names (e.g. microsoft-l1) before
+    # the base microsoft/ dir so account-specific tokens take priority.
+    ms_dirs = sorted(
+        integrations_dir.glob("microsoft*/"),
+        key=lambda p: (-len(p.name), p.name),
+    ) if integrations_dir.exists() else []
 
     candidates = []
 
