@@ -160,12 +160,29 @@ def send(token: str, chat_id: str, text: str) -> None:
 
 
 def get_updates(token: str, offset: int) -> list:
-    result = _tg(
-        token, "getUpdates",
-        offset=offset, timeout=30,
-        allowed_updates=["message"],
+    """Long-poll Telegram for new messages.
+
+    The Telegram timeout=30 is the server-side wait (seconds).
+    The socket timeout must be larger — give 10 s of headroom.
+    """
+    url  = TELEGRAM_API.format(token=token, method="getUpdates")
+    data = json.dumps({
+        "offset": offset,
+        "timeout": 30,
+        "allowed_updates": ["message"],
+    }).encode()
+    req = urllib.request.Request(
+        url, data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
-    return result.get("result", [])
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            result = json.loads(resp.read())
+            return result.get("result", [])
+    except Exception as e:
+        print(f"[mgmt-bot] getUpdates error: {e}", file=sys.stderr)
+        return []
 
 
 def get_file(token: str, file_id: str) -> str | None:
@@ -1626,12 +1643,8 @@ def main() -> None:
                 print(f"[mgmt-bot] Dev-cmd check error: {e}", file=sys.stderr)
             last_trigger_check = now
 
-        try:
-            updates = get_updates(token, offset)
-        except Exception as e:
-            print(f"[mgmt-bot] getUpdates error: {e}", file=sys.stderr)
-            time.sleep(10)
-            continue
+        # get_updates already handles its own exceptions and returns []
+        updates = get_updates(token, offset)
 
         for update in updates:
             offset = update["update_id"] + 1
