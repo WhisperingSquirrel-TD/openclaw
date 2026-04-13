@@ -1264,33 +1264,6 @@ def _register_commands(token: str) -> None:
         print(f"[mgmt-bot] setMyCommands failed (non-fatal): {e}", file=sys.stderr)
 
 
-COMMANDS = {
-    "/status":    cmd_status,
-    "/openai":    lambda t, c: cmd_switch(t, c, "openai"),
-    "/anthropic": lambda t, c: cmd_switch(t, c, "anthropic"),
-    "/codex":     lambda t, c: cmd_switch(t, c, "codex"),
-    "/restart":   cmd_restart,
-    "/reboot":    cmd_reboot,
-    "/pull":      cmd_pull,
-    "/install":   cmd_install,
-    "/health":    cmd_health,
-    "/logs":      cmd_logs,
-    "/garmin":    cmd_garmin,
-    "/disk":      cmd_disk,
-    "/soul":      cmd_soul_start,
-    "/sp-sync":    cmd_sp_sync,
-    "/sp_sync":    cmd_sp_sync,        # underscore alias (Telegram menu)
-    "/dev-pause":  cmd_dev_pause,
-    "/dev_pause":  cmd_dev_pause,
-    "/dev-resume": cmd_dev_resume,
-    "/dev_resume": cmd_dev_resume,
-    "/dev-queue":  cmd_dev_queue,
-    "/dev_queue":  cmd_dev_queue,
-    "/cancel":     cmd_cancel,
-    "/help":       cmd_help,
-    "/start":      cmd_help,
-}
-
 
 # ---------------------------------------------------------------------------
 # Dev-command queue — L1 writes .dev-cmd.json; mgmt-bot executes it
@@ -1615,6 +1588,38 @@ def _check_dev_triggers(token: str, chat_id: str) -> None:
             header += f"\n_{change}_"
         send(token, chat_id, header)
         _run_dev_pipeline(token, chat_id, project_dir, project)
+
+
+COMMANDS = {
+    "/status":     cmd_status,
+    "/openai":     lambda t, c: cmd_switch(t, c, "openai"),
+    "/anthropic":  lambda t, c: cmd_switch(t, c, "anthropic"),
+    "/codex":      lambda t, c: cmd_switch(t, c, "codex"),
+    "/restart":    cmd_restart,
+    "/reboot":     cmd_reboot,
+    "/pull":       cmd_pull,
+    "/install":    cmd_install,
+    "/health":     cmd_health,
+    "/logs":       cmd_logs,
+    "/garmin":     cmd_garmin,
+    "/disk":       cmd_disk,
+    "/soul":       cmd_soul_start,
+    "/sp-sync":    cmd_sp_sync,
+    "/sp_sync":    cmd_sp_sync,
+    "/dev-run":    cmd_dev_run,
+    "/dev_run":    cmd_dev_run,
+    "/dev-test":   cmd_dev_test,
+    "/dev_test":   cmd_dev_test,
+    "/dev-pause":  cmd_dev_pause,
+    "/dev_pause":  cmd_dev_pause,
+    "/dev-resume": cmd_dev_resume,
+    "/dev_resume": cmd_dev_resume,
+    "/dev-queue":  cmd_dev_queue,
+    "/dev_queue":  cmd_dev_queue,
+    "/cancel":     cmd_cancel,
+    "/help":       cmd_help,
+    "/start":      cmd_help,
+}
 
 
 def main() -> None:
