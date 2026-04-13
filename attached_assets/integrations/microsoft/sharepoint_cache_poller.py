@@ -751,12 +751,14 @@ def main() -> None:
 
     log(f"On-disk manifest: {len(cached)} files (freshly fetched + retained from previous runs)")
 
-    # Write manifest
+    # Write manifest — fatal on failure: /sp-sync depends on fresh manifest data,
+    # so a manifest write failure must not silently produce an ambiguous success.
     try:
         _write_manifest(cached, skipped, orphans_deleted, synced_at)
         log(f"Manifest written: {MANIFEST}")
     except Exception as e:
-        log(f"WARN: Manifest write failed: {e}")
+        log(f"ERROR: Manifest write failed — aborting: {e}")
+        sys.exit(1)
 
     # Write index
     try:

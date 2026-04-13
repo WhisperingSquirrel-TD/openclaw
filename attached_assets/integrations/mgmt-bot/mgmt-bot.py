@@ -79,7 +79,7 @@ import tempfile
 import time
 import urllib.request
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 STATE_DIR   = Path.home() / ".openclaw"
@@ -962,6 +962,7 @@ def cmd_sp_sync(token: str, chat_id: str) -> None:
         return
 
     send(token, chat_id, "🔄 Syncing SharePoint content mirror… _(this may take 1–2 minutes)_")
+    sync_started_at = datetime.now(timezone.utc)
     try:
         result = subprocess.run(
             ["python3", str(poller)],
@@ -989,13 +990,20 @@ def cmd_sp_sync(token: str, chat_id: str) -> None:
         manifest   = json.loads(manifest_path.read_text())
         synced_at  = manifest.get("synced_at", "")
 
-        # Reject manifest older than 10 minutes — it predates this sync run
+        # Verify manifest was written during this sync run by comparing its
+        # synced_at timestamp against the moment the bot invoked the poller.
+        # This avoids false stale warnings from arbitrary time windows and is
+        # accurate regardless of how long a large-library sync takes.
         if synced_at:
             try:
                 manifest_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
-                age_s = (datetime.now(timezone.utc) - manifest_dt).total_seconds()
-                if age_s > 600:
-                    raise ValueError(f"Manifest is {age_s:.0f}s old — too stale to trust")
+                # Allow up to 10s clock skew between Pi and UTC time source
+                cmd_started = sync_started_at if sync_started_at.tzinfo else sync_started_at.replace(tzinfo=timezone.utc)
+                if manifest_dt < cmd_started - timedelta(seconds=10):
+                    raise ValueError(
+                        f"Manifest timestamp {synced_at} predates this sync run "
+                        f"(started {sync_started_at.strftime('%H:%M:%S')} UTC)"
+                    )
             except (ValueError, TypeError) as age_err:
                 tail = "\n".join(output.splitlines()[-10:])
                 send(token, chat_id,
