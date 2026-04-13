@@ -1095,6 +1095,64 @@ def cmd_help(token: str, chat_id: str) -> None:
 # Main loop
 # ---------------------------------------------------------------------------
 
+# Telegram menu commands registered via setMyCommands.
+# Telegram only allows a-z, 0-9, and underscore in registered command names,
+# so commands with dashes (dev-run, dev-test, sp-sync) are registered with
+# underscores here. Both forms are accepted by the handler (see COMMANDS below).
+MENU_COMMANDS = [
+    # System
+    ("status",    "Current provider, service state, Pi uptime"),
+    ("health",    "Run system health check now"),
+    ("logs",      "Show recent errors across all poller logs"),
+    ("disk",      "Disk space on the Pi"),
+    # Control
+    ("restart",   "Restart the L1 gateway service"),
+    ("pull",      "Git pull latest from GitHub"),
+    ("install",   "Git pull + run install script"),
+    ("reboot",    "Reboot the Pi (refused if not safe)"),
+    # Model switching
+    ("openai",    "Switch to OpenAI API model"),
+    ("anthropic", "Switch to Anthropic API model"),
+    ("codex",     "Switch to OpenAI Codex OAuth model"),
+    # Integrations
+    ("garmin",    "Manually trigger the Garmin poller"),
+    ("sp_sync",   "Force SharePoint content mirror refresh"),
+    # Dev workflow
+    ("dev_run",   "Build + Vercel preview — specify project name"),
+    ("dev_test",  "Lint + typecheck + build — specify project name"),
+    # Identity / misc
+    ("soul",      "Upload a new SOUL.md (.md file)"),
+    ("cancel",    "Cancel a pending operation"),
+    ("help",      "Show all commands"),
+]
+
+
+def _register_commands(token: str) -> None:
+    """Register the command menu with Telegram so / shows a pickable list."""
+    payload = json.dumps({
+        "commands": [
+            {"command": cmd, "description": desc}
+            for cmd, desc in MENU_COMMANDS
+        ]
+    }).encode()
+
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/setMyCommands",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+            if result.get("ok"):
+                print(f"[mgmt-bot] Command menu registered ({len(MENU_COMMANDS)} commands)")
+            else:
+                print(f"[mgmt-bot] setMyCommands warning: {result}", file=sys.stderr)
+    except Exception as e:
+        print(f"[mgmt-bot] setMyCommands failed (non-fatal): {e}", file=sys.stderr)
+
+
 COMMANDS = {
     "/status":    cmd_status,
     "/openai":    lambda t, c: cmd_switch(t, c, "openai"),
@@ -1110,6 +1168,7 @@ COMMANDS = {
     "/disk":      cmd_disk,
     "/soul":      cmd_soul_start,
     "/sp-sync":   cmd_sp_sync,
+    "/sp_sync":   cmd_sp_sync,       # underscore alias (Telegram menu)
     "/cancel":    cmd_cancel,
     "/help":      cmd_help,
     "/start":     cmd_help,
@@ -1145,6 +1204,7 @@ def main() -> None:
     allowed_id = _require("MGMT_BOT_CHAT_ID")
 
     print(f"[mgmt-bot] Starting. Listening on chat_id={allowed_id}…")
+    _register_commands(token)
 
     offset            = load_offset()
     last_trigger_check = 0.0
@@ -1201,11 +1261,11 @@ def main() -> None:
             cmd   = parts[0].split("@")[0].lower() if parts else ""
             arg   = parts[1].strip() if len(parts) > 1 else ""
 
-            # Commands that take an argument
-            if cmd in ("/dev-run", "/dev-test"):
+            # Commands that take an argument (accept both dash and underscore forms)
+            if cmd in ("/dev-run", "/dev_run", "/dev-test", "/dev_test"):
                 print(f"[mgmt-bot] Command: {cmd} {arg!r} from {chat_id}")
                 try:
-                    if cmd == "/dev-run":
+                    if cmd in ("/dev-run", "/dev_run"):
                         cmd_dev_run(token, chat_id, arg)
                     else:
                         cmd_dev_test(token, chat_id, arg)
