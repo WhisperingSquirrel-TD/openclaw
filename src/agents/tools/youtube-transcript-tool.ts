@@ -1,4 +1,11 @@
 import { Type } from "@sinclair/typebox";
+
+// The youtube-transcript package declares "type":"module" but its "main" field
+// points to a CJS bundle (dist/youtube-transcript.common.js). Node.js at
+// runtime resolves via "main" and then tries to load the CJS file as ESM
+// (because "type":"module"), which breaks named exports. Importing directly
+// from the ESM dist file bypasses the broken "main" resolution entirely.
+// This is safe because the version is locked in pnpm-lock.yaml.
 import {
   YoutubeTranscript,
   YoutubeTranscriptDisabledError,
@@ -7,8 +14,7 @@ import {
   YoutubeTranscriptNotAvailableLanguageError,
   YoutubeTranscriptTooManyRequestError,
   YoutubeTranscriptVideoUnavailableError,
-  type TranscriptResponse,
-} from "youtube-transcript";
+} from "youtube-transcript/dist/youtube-transcript.esm.js";
 
 import type { OpenClawConfig } from "../../config/config.js";
 import type { AnyAgentTool } from "./common.js";
@@ -19,6 +25,8 @@ import {
   readCache,
   writeCache,
 } from "./web-shared.js";
+
+type TranscriptResponse = { text: string; duration: number; offset: number; lang: string };
 
 // ---------------------------------------------------------------------------
 // Constants
