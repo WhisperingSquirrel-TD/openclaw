@@ -33,10 +33,15 @@ from pathlib import Path
 
 STATE_DIR    = Path.home() / ".openclaw"
 WORKSPACE_MD = STATE_DIR / "workspace/STACKSTONE_REPORTS.md"
+STATE_FILE   = STATE_DIR / "integrations/stackstone/report-poller-state.json"
 GRAPH_BASE   = "https://graph.microsoft.com/v1.0"
 LOCK_FILE    = Path("/tmp/openclaw-stackstone-report-poller.lock")
 LOG_PREFIX   = "[stackstone-report-poller]"
 REPORTS_RETAIN_DAYS = 90
+
+# Alert suppression: only Telegram-alert on the 1st failure and then every
+# ALERT_EVERY_N_FAILURES runs thereafter. At */5 cron that = every 30 min.
+ALERT_EVERY_N_FAILURES = 6
 
 
 # ── Load .env early — cron runs with a minimal shell environment ──────────────
@@ -395,6 +400,32 @@ def send_report_email(access_token: str, report: dict) -> None:
         raise RuntimeError(f"Graph sendMail {resp.status_code}: {resp.text}")
 
 
+# ── State file — tracks consecutive failures for alert suppression ────────────
+
+def _write_atomic(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.replace(path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def load_state() -> dict:
+    try:
+        if STATE_FILE.exists():
+            return json.loads(STATE_FILE.read_text())
+    except Exception as e:
+        log(f"WARNING: Could not read state file: {e} — starting fresh")
+    return {"consecutive_failures": 0}
+
+
+def save_state(state: dict) -> None:
+    _write_atomic(STATE_FILE, state)
+
+
 # ── Stackstone integration API ────────────────────────────────────────────────
 
 def get_base_url() -> str:
@@ -412,19 +443,47 @@ def get_api_key() -> str:
 
 
 def fetch_unsent_reports() -> list[dict]:
+    """Fetch unsent reports with 2 retries and split connect/read timeout."""
     base    = get_base_url()
     api_key = get_api_key()
-    resp = requests.get(
-        f"{base}/api/integration/reports",
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=15,
-    )
-    if resp.status_code == 404:
-        log("Integration API not yet deployed — nothing to do.")
-        return []
-    resp.raise_for_status()
-    data = resp.json()
-    return data if isinstance(data, list) else data.get("reports", [])
+    max_attempts = 3
+    last_err: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = requests.get(
+                f"{base}/api/integration/reports",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=(8, 20),  # 8s connect, 20s read
+            )
+            if resp.status_code == 404:
+                log("Integration API not yet deployed — nothing to do.")
+                return []
+            # Check Content-Type before calling .raise_for_status() so we
+            # get a clear message when a CDN/maintenance page slips through.
+            ct = resp.headers.get("Content-Type", "")
+            if resp.ok and "html" in ct.lower():
+                raise RuntimeError(
+                    f"API returned HTML instead of JSON (Content-Type: {ct}). "
+                    f"Website may be in maintenance or a CDN error page is intercepting. "
+                    f"Response preview: {resp.text[:300]}"
+                )
+            resp.raise_for_status()
+            data = resp.json()
+            return data if isinstance(data, list) else data.get("reports", [])
+        except requests.exceptions.Timeout as e:
+            last_err = e
+            log(f"Attempt {attempt}/{max_attempts}: Timeout — {e}")
+        except requests.exceptions.ConnectionError as e:
+            last_err = e
+            log(f"Attempt {attempt}/{max_attempts}: Connection error — {e}")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            last_err = e
+            log(f"Attempt {attempt}/{max_attempts}: Error — {e}")
+        if attempt < max_attempts:
+            time.sleep(4)
+    raise RuntimeError(f"All {max_attempts} attempts failed: {last_err}")
 
 
 def mark_report_sent(uuid: str) -> None:
@@ -515,12 +574,28 @@ def main() -> None:
 
     log("Poll starting")
 
+    state = load_state()
+
     try:
         reports = fetch_unsent_reports()
     except Exception as e:
         log_err(f"Failed to fetch reports: {e}")
-        notify(f"FAILED to poll integration API for unsent reports: {e}")
+        failures = state.get("consecutive_failures", 0) + 1
+        state["consecutive_failures"] = failures
+        save_state(state)
+        # Only Telegram-alert on the 1st failure and every ALERT_EVERY_N_FAILURES
+        # runs thereafter — avoids a Telegram storm when the site is down for an hour.
+        if failures == 1 or failures % ALERT_EVERY_N_FAILURES == 0:
+            notify(f"FAILED to poll Stackstone reports API (failure #{failures}): {e}")
+        else:
+            log(f"Suppressing Telegram alert — failure #{failures} (alerts on 1 and every {ALERT_EVERY_N_FAILURES})")
         return
+
+    # Successful fetch — reset failure counter
+    if state.get("consecutive_failures", 0) > 0:
+        log(f"API recovered after {state['consecutive_failures']} consecutive failure(s)")
+        state["consecutive_failures"] = 0
+        save_state(state)
 
     if not reports:
         log("No unsent reports.")

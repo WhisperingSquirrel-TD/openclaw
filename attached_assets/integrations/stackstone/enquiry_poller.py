@@ -98,6 +98,11 @@ STALE_HOURS            = 24   # alert if no enquiries seen in this many hours
 STALE_INTERVAL_HOURS   = 6    # only re-alert staleness every this many hours
 ENQUIRIES_RETAIN_DAYS  = 90   # rolling window kept in workspace file
 
+# Alert suppression: only Telegram-alert on the 1st API failure and then
+# every ALERT_EVERY_N_FAILURES runs thereafter.
+# At */2 cron that = every 30 min (15 runs × 2 min each).
+ALERT_EVERY_N_FAILURES = 15
+
 
 # ---------------------------------------------------------------------------
 # Load .env early — cron has a minimal shell environment
@@ -231,10 +236,11 @@ def load_state() -> dict:
     except Exception as e:
         log(f"WARNING: Could not read state file: {e} — starting fresh")
     return {
-        "alerted_ids":           [],
-        "last_enquiry_seen_at":  None,
-        "last_stale_alert_at":   None,
-        "total_alerted":         0,
+        "alerted_ids":              [],
+        "last_enquiry_seen_at":     None,
+        "last_stale_alert_at":      None,
+        "total_alerted":            0,
+        "consecutive_api_failures": 0,
     }
 
 
@@ -331,8 +337,11 @@ def fetch_enquiries() -> list[dict] | None:
         resp = requests.get(
             f"{base}/api/integration/enquiries",
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=15,
+            timeout=(8, 20),  # 8s connect, 20s read
         )
+    except requests.exceptions.Timeout as e:
+        log_err(f"Timeout fetching enquiries (connect+read): {e}")
+        return None
     except Exception as e:
         log_err(f"Network error fetching enquiries: {e}")
         return None
@@ -345,10 +354,21 @@ def fetch_enquiries() -> list[dict] | None:
         log_err(f"API error: {resp.status_code} {resp.text[:200]}")
         return None
 
+    # Detect HTML responses — happens when a CDN/maintenance page intercepts
+    # the request and returns HTTP 200 with an HTML body instead of JSON.
+    ct = resp.headers.get("Content-Type", "")
+    if "html" in ct.lower():
+        log_err(
+            f"API returned HTML instead of JSON (Content-Type: {ct}). "
+            f"Website may be in maintenance or a CDN error page is intercepting. "
+            f"Preview: {resp.text[:300]}"
+        )
+        return None
+
     try:
         data = resp.json()
     except Exception as e:
-        log_err(f"JSON parse error: {e} — raw: {resp.text[:200]}")
+        log_err(f"JSON parse error: {e} — Content-Type: {ct} — raw: {resp.text[:300]}")
         return None
 
     return data if isinstance(data, list) else data.get("enquiries", [])
@@ -525,10 +545,24 @@ def main() -> None:
     enquiries = fetch_enquiries()
 
     if enquiries is None:
-        # API call failed — alert and exit
-        alert_api_failure("Could not reach /api/integration/enquiries (see poller log for detail)")
+        # API call failed — increment failure counter and conditionally alert.
+        # Avoids a Telegram flood when the website is down for an extended period.
+        failures = state.get("consecutive_api_failures", 0) + 1
+        state["consecutive_api_failures"] = failures
         save_state(state)
+        if failures == 1 or failures % ALERT_EVERY_N_FAILURES == 0:
+            alert_api_failure(
+                f"Could not reach /api/integration/enquiries (failure #{failures}) — "
+                f"see enquiry-poller.log for detail"
+            )
+        else:
+            log(f"Suppressing Telegram alert — failure #{failures} (alerts on 1 and every {ALERT_EVERY_N_FAILURES})")
         return
+
+    # Successful fetch — reset failure counter
+    if state.get("consecutive_api_failures", 0) > 0:
+        log(f"API recovered after {state['consecutive_api_failures']} consecutive failure(s)")
+        state["consecutive_api_failures"] = 0
 
     log(f"API returned {len(enquiries)} enquiry record(s)")
 
