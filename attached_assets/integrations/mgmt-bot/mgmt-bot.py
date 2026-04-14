@@ -632,6 +632,7 @@ def cmd_health(token: str, chat_id: str) -> None:
 
 def cmd_logs(token: str, chat_id: str) -> None:
     log_paths = [
+        STATE_DIR / "gateway.log",
         STATE_DIR / "integrations/stackstone/poller.log",
         STATE_DIR / "integrations/stackstone/enquiry-poller.log",
         STATE_DIR / "integrations/health/health-check.log",

@@ -1358,15 +1358,33 @@ fi
 GATEWAY_SVC="$HOME/.config/systemd/user/openclaw-gateway.service"
 NPM_BIN="$HOME/.npm-packages/bin"
 
+GATEWAY_LOG="$HOME/.openclaw/gateway.log"
+
 if [ -f "$GATEWAY_SVC" ]; then
+    PATCHED=false
+
+    # Patch 1: inject PATH if missing
     if grep -q "npm-packages" "$GATEWAY_SVC"; then
         info "Gateway service PATH already includes ~/.npm-packages/bin"
     else
-        # Insert Environment line after [Service] section header
         sed -i "/^\[Service\]/a Environment=\"PATH=$NPM_BIN:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"" \
             "$GATEWAY_SVC"
-        systemctl --user daemon-reload
+        PATCHED=true
         info "Gateway service patched — PATH now includes $NPM_BIN"
+    fi
+
+    # Patch 2: add file-based logging if missing (journalctl never works on this Pi)
+    if grep -q "StandardOutput=append" "$GATEWAY_SVC"; then
+        info "Gateway service already has file logging"
+    else
+        sed -i "/^\[Service\]/a StandardError=append:$GATEWAY_LOG\nStandardOutput=append:$GATEWAY_LOG" \
+            "$GATEWAY_SVC"
+        PATCHED=true
+        info "Gateway service patched — logs will go to $GATEWAY_LOG"
+    fi
+
+    if $PATCHED; then
+        systemctl --user daemon-reload
     fi
 else
     warn "Gateway service unit not found at $GATEWAY_SVC — skipping PATH patch"
