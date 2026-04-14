@@ -118,14 +118,33 @@ def main() -> None:
 
     log(f"Model switched: {current} -> {CODEX_MODEL}")
 
+    # systemctl --user requires DBUS_SESSION_BUS_ADDRESS and XDG_RUNTIME_DIR,
+    # which are NOT set in a cron environment.  Derive them from the running UID.
+    uid = os.getuid()
+    env = dict(os.environ)
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+
     result = subprocess.run(
         ["systemctl", "--user", "restart", SERVICE_NAME],
-        capture_output=True, text=True
+        capture_output=True, text=True, env=env,
     )
     if result.returncode == 0:
         log("Gateway restarted successfully")
     else:
-        log(f"WARNING: Gateway restart failed: {result.stderr.strip()}")
+        log(f"WARNING: systemctl --user restart failed (rc={result.returncode}): "
+            f"{result.stderr.strip()} — trying sudo fallback")
+        # Fallback: some Pi setups run the gateway as a system service
+        result2 = subprocess.run(
+            ["sudo", "systemctl", "restart", SERVICE_NAME],
+            capture_output=True, text=True,
+        )
+        if result2.returncode == 0:
+            log("Gateway restarted successfully via sudo fallback")
+        else:
+            log(f"ERROR: Both restart methods failed. "
+                f"sudo stderr: {result2.stderr.strip()}. "
+                f"Config is written — gateway will use Codex on next manual restart.")
 
     log("Daily reset complete")
 
