@@ -646,6 +646,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# YouTube transcript extractor
+# ---------------------------------------------------------------------------
+mkdir -p "$INTEGRATIONS_DST/youtube"
+deploy_integration "$INTEGRATIONS_SRC/youtube/transcript.py"       "$INTEGRATIONS_DST/youtube/transcript.py"
+if pip3 show youtube-transcript-api &>/dev/null 2>&1; then
+    info "youtube-transcript-api already installed"
+else
+    pip3 install --quiet --break-system-packages --timeout 120 youtube-transcript-api \
+        && info "youtube-transcript-api installed" \
+        || warn "youtube-transcript-api install failed — run manually: pip3 install --break-system-packages youtube-transcript-api"
+fi
+
+# ---------------------------------------------------------------------------
 # GitHub helpers (repo creation + retroactive push)
 # ---------------------------------------------------------------------------
 mkdir -p "$INTEGRATIONS_DST/github"
@@ -1524,6 +1537,21 @@ if [ -f "$SETUP_DEV" ]; then
 else
     warn "setup-dev-workflow.sh not found — skills not deployed"
     warn "  Run manually: bash ~/openclaw/scripts/setup-dev-workflow.sh"
+fi
+
+# Deploy extra skills from attached_assets/skills/ (symlinked into ~/.openclaw/skills/)
+EXTRA_SKILLS_SRC="$HOME/openclaw/attached_assets/skills"
+EXTRA_SKILLS_DST="$HOME/.openclaw/skills"
+if [ -d "$EXTRA_SKILLS_SRC" ]; then
+    mkdir -p "$EXTRA_SKILLS_DST"
+    for skill_dir in "$EXTRA_SKILLS_SRC"/*/; do
+        skill_name="$(basename "$skill_dir")"
+        if [ -f "$skill_dir/SKILL.md" ]; then
+            mkdir -p "$EXTRA_SKILLS_DST/$skill_name"
+            ln -sf "$skill_dir/SKILL.md" "$EXTRA_SKILLS_DST/$skill_name/SKILL.md"
+        fi
+    done
+    info "Extra skills synced from attached_assets/skills/"
 fi
 
 # ---------------------------------------------------------------------------

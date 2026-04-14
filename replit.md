@@ -350,6 +350,21 @@ The CRM runs at 06:00 every morning and another job runs at 07:00. No background
 
 Cache refreshes every **15 minutes** via cron. Non-`.md`/`.txt` files (docx, pdf, xlsx) are indexed but not cached; use the queue to request content.
 
+### YouTube transcripts
+| File | Purpose |
+|---|---|
+| `~/.openclaw/integrations/youtube/transcript.py` | YouTube transcript extractor — no API key needed |
+| `~/.openclaw/skills/youtube-transcript/SKILL.md` | L1 skill — usage patterns, URL formats, exit codes |
+
+Accepts YouTube URLs or bare video IDs. Returns plain text transcript (manual or auto-generated captions). Use `--timestamps` for timestamped output, `--lang XX` for specific language, `--list-langs` to see available languages. Exit code 1 means no captions available.
+
+### Web search (Tavily — native provider)
+Tavily is integrated as a **native `web_search` provider** in OpenClaw's built-in tool system. No exec or Python script needed — L1 calls `web_search` directly.
+- Auto-detected from `TAVILY_API_KEY` in `~/.openclaw/.env`
+- Can be forced via config: `tools.web.search.provider: "tavily"`
+- Auto-detection priority: Perplexity → Tavily → Brave → Gemini → Grok → Kimi
+- The Python script at `~/.openclaw/integrations/tavily/search.py` is a redundant fallback
+
 ### Google Tasks (WhatsApp watch actions)
 | File | Purpose |
 |---|---|
