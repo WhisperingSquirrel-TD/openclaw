@@ -633,6 +633,19 @@ fi
 deploy_integration "$INTEGRATIONS_SRC/google/gmail_poll.py"        "$INTEGRATIONS_DST/google/gmail_poll.py"
 
 # ---------------------------------------------------------------------------
+# Tavily web search
+# ---------------------------------------------------------------------------
+mkdir -p "$INTEGRATIONS_DST/tavily"
+deploy_integration "$INTEGRATIONS_SRC/tavily/search.py"            "$INTEGRATIONS_DST/tavily/search.py"
+if ! grep -q "TAVILY_API_KEY" "$HOME/.openclaw/.env" 2>/dev/null; then
+    warn "TAVILY_API_KEY not set — web search will fail."
+    warn "  Add to ~/.openclaw/.env:"
+    warn "    TAVILY_API_KEY=tvly-xxxx"
+else
+    info "TAVILY_API_KEY found (web search ready)"
+fi
+
+# ---------------------------------------------------------------------------
 # GitHub helpers (repo creation + retroactive push)
 # ---------------------------------------------------------------------------
 mkdir -p "$INTEGRATIONS_DST/github"
