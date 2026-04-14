@@ -22,7 +22,7 @@ import { createSessionsSendTool } from "./tools/sessions-send-tool.js";
 import { createSessionsSpawnTool } from "./tools/sessions-spawn-tool.js";
 import { createSubagentsTool } from "./tools/subagents-tool.js";
 import { createTtsTool } from "./tools/tts-tool.js";
-import { createWebFetchTool, createWebSearchTool } from "./tools/web-tools.js";
+import { createWebFetchTool, createWebSearchTool, createYoutubeTranscriptTool } from "./tools/web-tools.js";
 import { resolveWorkspaceRoot } from "./workspace-dir.js";
 
 export function createOpenClawTools(
@@ -189,6 +189,7 @@ export function createOpenClawTools(
     }),
     ...(webSearchTool ? [webSearchTool] : []),
     ...(webFetchTool ? [webFetchTool] : []),
+    createYoutubeTranscriptTool({ config: options?.config }),
     ...(imageTool ? [imageTool] : []),
     ...(pdfTool ? [pdfTool] : []),
   ];
