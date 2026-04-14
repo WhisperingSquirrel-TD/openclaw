@@ -43,16 +43,42 @@ const TRANSCRIPT_CACHE = new Map<string, CacheEntry<string>>();
 // Video ID extraction
 // ---------------------------------------------------------------------------
 
-const YT_ID_REGEX =
-  /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/i;
+// YouTube video IDs are always exactly 11 chars: [A-Za-z0-9_-]
+const BARE_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
+// Ordered list of explicit patterns — covers every common URL variant.
+// Each pattern has exactly one capture group containing the 11-char ID.
+const YT_URL_PATTERNS: RegExp[] = [
+  // Standard watch URL:  youtube.com/watch?v=ID  (also handles ?v= anywhere in query)
+  /[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/i,
+  // Short link:          youtu.be/ID
+  /youtu\.be\/([A-Za-z0-9_-]{11})(?:[?&#]|$)/i,
+  // Shorts:              youtube.com/shorts/ID
+  /youtube\.com\/shorts\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i,
+  // Live:                youtube.com/live/ID
+  /youtube\.com\/live\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i,
+  // Embed:               youtube.com/embed/ID  or  youtube.com/e/ID
+  /youtube\.com\/(?:embed|e)\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i,
+  // Legacy /v/ path:     youtube.com/v/ID
+  /youtube\.com\/v\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i,
+];
 
 function extractVideoId(input: string): string | null {
   const trimmed = input.trim();
-  if (/^[A-Za-z0-9_-]{11}$/.test(trimmed)) {
+
+  // Bare 11-char ID passed directly
+  if (BARE_ID_RE.test(trimmed)) {
     return trimmed;
   }
-  const match = trimmed.match(YT_ID_REGEX);
-  return match?.[1] ?? null;
+
+  for (const pattern of YT_URL_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,9 +345,24 @@ export function createYoutubeTranscriptTool(options?: {
       const lang = readStringParam(args, "lang")?.trim() || undefined;
       const includeTimestamps = args.includeTimestamps === true;
 
-      // ── Cache check ────────────────────────────────────────────────────────
+      // ── Extract video ID early — required for both paths ───────────────────
+      // We extract the ID ourselves and pass the bare 11-char ID to the
+      // youtube-transcript package so its own weaker URL parser is bypassed.
+      // This is what makes shorts, live, and other non-standard URLs work.
+      const videoId = extractVideoId(url);
+      if (!videoId) {
+        return jsonResult({
+          error:
+            `Could not extract a YouTube video ID from: ${url}\n` +
+            `Accepted formats: youtube.com/watch?v=ID, youtu.be/ID, ` +
+            `youtube.com/shorts/ID, youtube.com/live/ID, youtube.com/embed/ID, ` +
+            `or a bare 11-character video ID.`,
+        });
+      }
+
+      // ── Cache check (keyed on extracted ID so all URL variants share cache) ─
       const cacheKey = normalizeCacheKey(
-        `yt:${url}:${lang ?? "auto"}:${includeTimestamps}`,
+        `yt:${videoId}:${lang ?? "auto"}:${includeTimestamps}`,
       );
       const cached = readCache<string>(TRANSCRIPT_CACHE, cacheKey);
       if (cached) {
@@ -333,7 +374,9 @@ export function createYoutubeTranscriptTool(options?: {
         null;
 
       try {
-        const segments = await YoutubeTranscript.fetchTranscript(url, {
+        // Pass bare videoId — package accepts 11-char IDs directly, bypassing
+        // its own regex which doesn't handle shorts/live URLs.
+        const segments = await YoutubeTranscript.fetchTranscript(videoId, {
           ...(lang ? { lang } : {}),
         });
 
@@ -388,13 +431,7 @@ export function createYoutubeTranscriptTool(options?: {
 
       // ── Step 2: Gemini AI transcription fallback ───────────────────────────
       // Reached when: kind === "no_captions" | "disabled"
-
-      const videoId = extractVideoId(url);
-      if (!videoId) {
-        return jsonResult({
-          error: `Could not extract a valid YouTube video ID from: ${url}`,
-        });
-      }
+      // videoId is already resolved at the top of execute.
 
       const geminiApiKey = resolveGeminiApiKey(options?.config);
 
