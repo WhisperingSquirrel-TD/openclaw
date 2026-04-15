@@ -428,14 +428,19 @@ if agents.get('totpWindowMinutes') != 5:
 else:
     agents['totpWindowMinutes'] = 5
 agents.setdefault('trustLevel', 1)
-# requireApproval: only exec.run and message.send are intercepted by the trust gate
-# (these are the only two actions with hardcoded trust gate enforcement in the codebase).
-# Adding other tool names here has no effect — the gate doesn't call them.
+# requireApproval: only exec.run is intercepted by the trust gate for TOTP.
+# message.send must NOT be in this list — it gates ALL outgoing messages including
+# cron job deliveries and subagent announces, breaking routine L1 communication.
+# WhatsApp outgoing is already blocked by watch mode; no need to gate message.send.
 required = agents.setdefault('requireApproval', [])
 if not isinstance(required, list):
     agents['requireApproval'] = []
     required = agents['requireApproval']
-for cmd in ['exec.run', 'message.send']:
+# Remove message.send if it was mistakenly added by a previous install run
+if 'message.send' in required:
+    required.remove('message.send')
+    print('Removed message.send from requireApproval — was incorrectly gating cron deliveries')
+for cmd in ['exec.run']:
     if cmd not in required:
         required.append(cmd)
         print(f'Added {cmd} to requireApproval')
