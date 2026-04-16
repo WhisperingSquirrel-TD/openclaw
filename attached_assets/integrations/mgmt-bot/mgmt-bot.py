@@ -75,6 +75,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -638,13 +639,27 @@ def cmd_install(token: str, chat_id: str) -> None:
     )
     wrapper_path.chmod(0o700)
 
-    subprocess.Popen(
-        [sys.executable, str(wrapper_path)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,   # detach from mgmt-bot process group
-    )
+    # Escape the mgmt-bot systemd cgroup so systemd doesn't kill the wrapper
+    # when it restarts this service during the install. systemd-run --user
+    # puts the wrapper in its own transient unit with its own cgroup.
+    # Falls back to start_new_session if systemd-run is unavailable.
+    _sdr = shutil.which("systemd-run")
+    if _sdr:
+        subprocess.Popen(
+            [_sdr, "--user", "--no-block",
+             sys.executable, str(wrapper_path)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        subprocess.Popen(
+            [sys.executable, str(wrapper_path)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
 
 
 def cmd_health(token: str, chat_id: str) -> None:
