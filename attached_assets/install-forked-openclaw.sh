@@ -715,7 +715,7 @@ elif [ -f "$GARMIN_COOKIE_DST" ]; then
 fi
 
 # ── Daily provider reset (04:00) ──────────────────────────────────────────────
-# Resets L1 to the Codex OAuth model at 4am each day — cheapest option first.
+# Resets L1 to openai-codex/gpt-5.4-mini at 4am each day — cheapest option first.
 # User can switch during the day via /openai, /anthropic, /codex, /codexmini.
 RESET_SRC="$HOME/openclaw/attached_assets/integrations/provider-switch/daily-reset.py"
 RESET_DST="$HOME/.openclaw/integrations/provider-switch/daily-reset.py"
@@ -726,7 +726,7 @@ if [ -f "$RESET_SRC" ]; then
     ln -sf "$RESET_SRC" "$RESET_DST"
     RESET_CRON="0 4 * * * $PYTHON3_BIN $RESET_DST >> $RESET_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "daily-reset.py"; echo "$RESET_CRON" ) | crontab -
-    info "Daily provider reset cron installed: 04:00 daily → ${OPENCLAW_CODEX_MODEL:-openai-codex/gpt-5.4}"
+    info "Daily provider reset cron installed: 04:00 daily → ${OPENCLAW_CODEX_MODEL:-openai-codex/gpt-5.4-mini}"
 else
     warn "daily-reset.py not found at $RESET_SRC — skipping"
 fi
