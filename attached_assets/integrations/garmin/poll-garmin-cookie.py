@@ -1,0 +1,676 @@
+#!/usr/bin/env python3
+"""
+Garmin Connect cookie-based health data poller for OpenClaw.
+
+Bypasses garth/OAuth entirely — uses browser session cookies to call
+Garmin Connect's internal API directly. No rate-limit risk from auth flows.
+
+Setup (one-time):
+  python3 poll-garmin-cookie.py --setup
+
+  Follow the prompts to paste cookie values from your browser.
+  Cookies are saved to ~/.openclaw/integrations/garmin/garmin-cookies.json.
+
+When cookies expire (usually 7-14 days):
+  1. Log into connect.garmin.com in your browser
+  2. Run: python3 poll-garmin-cookie.py --setup
+  3. Paste fresh cookies
+
+Normal run (cron-safe, no interaction needed):
+  python3 poll-garmin-cookie.py
+
+Outputs:
+  GARMIN_DAILY.md   — today's full snapshot (overwritten each run)
+  GARMIN_ARCHIVE.md — rolling 28-day compact history
+"""
+import os
+import sys
+import json
+import argparse
+from datetime import datetime, date, timedelta
+from pathlib import Path
+
+try:
+    import urllib.request as urllib_request
+    import urllib.error as urllib_error
+except ImportError:
+    pass
+
+OPENCLAW       = Path.home() / ".openclaw"
+GARMIN_DIR     = OPENCLAW / "integrations" / "garmin"
+COOKIE_FILE    = GARMIN_DIR / "garmin-cookies.json"
+OUTPUT_MD      = OPENCLAW / "workspace" / "GARMIN_DAILY.md"
+ARCHIVE_MD     = OPENCLAW / "workspace" / "GARMIN_ARCHIVE.md"
+LOG_FILE       = OPENCLAW / "workspace" / "memory" / "poll-garmin-log.txt"
+
+LOG_MAX_LINES     = 1000
+LOG_TRIM_TO       = 800
+ARCHIVE_RETAIN_DAYS = 28
+
+BASE_URL = "https://connect.garmin.com"
+
+
+# ── Logging ────────────────────────────────────────────────────────────────────
+
+def log(msg: str):
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ts   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}\n"
+    try:
+        existing = LOG_FILE.read_text(encoding="utf-8").splitlines(keepends=True)
+    except FileNotFoundError:
+        existing = []
+    if len(existing) >= LOG_MAX_LINES:
+        existing = existing[-LOG_TRIM_TO:]
+    existing.append(line)
+    tmp = LOG_FILE.with_suffix(".tmp")
+    try:
+        tmp.write_text("".join(existing), encoding="utf-8")
+        tmp.replace(LOG_FILE)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+    print(line, end="", flush=True)
+
+
+# ── Atomic write ───────────────────────────────────────────────────────────────
+
+def write_atomic(path: Path, content: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+# ── Cookie management ──────────────────────────────────────────────────────────
+
+def load_cookies() -> dict:
+    if not COOKIE_FILE.exists():
+        log("ERROR: Cookie file not found. Run: python3 poll-garmin-cookie.py --setup")
+        log("FLAG TO TOM: Garmin cookie file missing — run setup on the Pi.")
+        sys.exit(1)
+    try:
+        data = json.loads(COOKIE_FILE.read_text(encoding="utf-8"))
+        if not data.get("SESSIONID"):
+            log("ERROR: Cookie file is missing SESSIONID. Run --setup again.")
+            sys.exit(1)
+        return data
+    except Exception as e:
+        log(f"ERROR: Could not read cookie file: {e}")
+        sys.exit(1)
+
+
+def cookies_to_header(cookies: dict) -> str:
+    parts = []
+    for key, val in cookies.items():
+        if val and key not in ("_saved_at", "_note"):
+            parts.append(f"{key}={val}")
+    return "; ".join(parts)
+
+
+def setup_cookies():
+    print("\n=== Garmin Cookie Setup ===")
+    print("1. Open connect.garmin.com in your browser and log in")
+    print("2. Press F12 → Application tab → Cookies → https://connect.garmin.com")
+    print("3. Paste the values below (press Enter to skip optional ones)\n")
+
+    cookies = {}
+
+    sessionid = input("SESSIONID (required): ").strip()
+    if not sessionid:
+        print("ERROR: SESSIONID is required.")
+        sys.exit(1)
+    cookies["SESSIONID"] = sessionid
+
+    session = input("session (optional but recommended): ").strip()
+    if session:
+        cookies["session"] = session
+
+    cflb = input("_cflb (optional): ").strip()
+    if cflb:
+        cookies["_cflb"] = cflb
+
+    jwt = input("JWT_WEB (optional): ").strip()
+    if jwt:
+        cookies["JWT_WEB"] = jwt
+
+    cookies["_saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    cookies["_note"] = "Created by poll-garmin-cookie.py --setup"
+
+    GARMIN_DIR.mkdir(parents=True, exist_ok=True)
+    COOKIE_FILE.write_text(json.dumps(cookies, indent=2), encoding="utf-8")
+    print(f"\nCookies saved to {COOKIE_FILE}")
+    print("Running a quick test fetch...")
+
+    try:
+        display_name = get_display_name(cookies)
+        print(f"SUCCESS — logged in as: {display_name}")
+        log(f"Cookie setup complete. Display name: {display_name}")
+    except Exception as e:
+        print(f"WARNING: Test fetch failed ({e}) — cookies may be incomplete or expired.")
+        log(f"WARNING: Cookie setup test failed: {e}")
+
+
+# ── HTTP helpers ───────────────────────────────────────────────────────────────
+
+def _get(path: str, cookies: dict, params: dict = None) -> dict:
+    url = BASE_URL + path
+    if params:
+        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        url = f"{url}?{qs}"
+
+    req = urllib_request.Request(url)
+    req.add_header("Cookie", cookies_to_header(cookies))
+    req.add_header("NK", "NT")
+    req.add_header("X-app-ver", "4.61.2.0")
+    req.add_header("Accept", "application/json, text/javascript, */*; q=0.01")
+    req.add_header("User-Agent",
+        "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    req.add_header("Referer", "https://connect.garmin.com/modern/")
+    req.add_header("X-Requested-With", "XMLHttpRequest")
+
+    try:
+        with urllib_request.urlopen(req, timeout=20) as resp:
+            body = resp.read().decode("utf-8")
+            if not body.strip():
+                return {}
+            return json.loads(body)
+    except urllib_error.HTTPError as e:
+        code = e.code
+        if code == 401:
+            raise RuntimeError("COOKIES_EXPIRED")
+        if code == 429:
+            raise RuntimeError("RATE_LIMITED")
+        raise RuntimeError(f"HTTP {code}: {e.reason}")
+    except Exception as e:
+        raise RuntimeError(str(e))
+
+
+def _safe_get(label: str, path: str, cookies: dict, params: dict = None):
+    try:
+        return _get(path, cookies, params)
+    except RuntimeError as e:
+        err = str(e)
+        if "COOKIES_EXPIRED" in err:
+            log(f"ERROR: Garmin cookies have expired. Run --setup on the Pi to refresh them.")
+            log("FLAG TO TOM: Garmin cookies expired — log into connect.garmin.com and run --setup.")
+            sys.exit(1)
+        if "RATE_LIMITED" in err:
+            log("ERROR: Garmin rate-limited (429). Wait and try again later.")
+            sys.exit(1)
+        log(f"WARNING: {label} failed: {err}")
+        return {}
+    except Exception as e:
+        log(f"WARNING: {label} failed: {e}")
+        return {}
+
+
+# ── Data fetchers ──────────────────────────────────────────────────────────────
+
+def get_display_name(cookies: dict) -> str:
+    data = _get("/modern/proxy/userprofile-service/userprofile/settings", cookies)
+    name = (data.get("userData", {}).get("displayName")
+            or data.get("displayName")
+            or data.get("userName"))
+    if not name:
+        raise RuntimeError("Could not find displayName in userprofile response")
+    return name
+
+
+def fetch_stats(cookies: dict, display_name: str, today: str) -> dict:
+    return _safe_get("stats",
+        f"/modern/proxy/userstats-service/statistics/daily/{display_name}",
+        cookies,
+        {"fromDate": today, "untilDate": today, "metricId": "60,61,51,71,2,56,57"})
+
+
+def fetch_wellness(cookies: dict, display_name: str, today: str) -> dict:
+    return _safe_get("wellness",
+        f"/modern/proxy/wellness-service/wellness/dailySummaryChart/{display_name}",
+        cookies,
+        {"date": today})
+
+
+def fetch_hrv(cookies: dict, today: str) -> dict:
+    return _safe_get("hrv",
+        f"/modern/proxy/hrv-service/hrv/{today}",
+        cookies)
+
+
+def fetch_sleep(cookies: dict, display_name: str, today: str) -> dict:
+    return _safe_get("sleep",
+        f"/modern/proxy/wellness-service/wellness/dailySleepData/{display_name}",
+        cookies,
+        {"date": today, "nonSleepBufferMinutes": "60"})
+
+
+def fetch_spo2(cookies: dict, display_name: str, today: str) -> dict:
+    return _safe_get("spo2",
+        f"/modern/proxy/wellness-service/wellness/dailySpo2/{display_name}",
+        cookies,
+        {"calendarDate": today})
+
+
+def fetch_body_battery(cookies: dict, today: str):
+    data = _safe_get("body_battery",
+        "/modern/proxy/wellness-service/wellness/bodyBattery/reports/daily",
+        cookies,
+        {"startDate": today, "endDate": today})
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return data.get("bodyBatteryFeedbackList") or data.get("bodyBatteryList") or []
+    return []
+
+
+def fetch_last_activity(cookies: dict) -> dict:
+    data = _safe_get("activities",
+        "/modern/proxy/activitylist-service/activities/search/activities",
+        cookies,
+        {"limit": "1", "start": "0"})
+    if isinstance(data, list) and data:
+        return data[0]
+    return {}
+
+
+def fetch_resting_hr(cookies: dict, display_name: str, today: str) -> dict:
+    return _safe_get("resting_hr",
+        f"/modern/proxy/wellness-service/wellness/dailyHeartRate/{display_name}",
+        cookies,
+        {"date": today})
+
+
+# ── Value helpers ──────────────────────────────────────────────────────────────
+
+def _safe(val, unit: str = "", fallback: str = "n/a") -> str:
+    if val is None or val == -1:
+        return fallback
+    try:
+        if isinstance(val, float) and val != val:
+            return fallback
+    except Exception:
+        pass
+    return f"{val}{unit}"
+
+
+def _fmt_dur(seconds) -> str:
+    if not seconds:
+        return "n/a"
+    try:
+        s = int(seconds)
+        h = s // 3600
+        m = (s % 3600) // 60
+        return f"{h}h {m}m" if h else f"{m}m"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _fmt_km(metres) -> str:
+    if not metres:
+        return "n/a"
+    try:
+        return f"{float(metres) / 1000:.2f} km"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _fmt_int(val) -> str:
+    if val is None or val == -1:
+        return "n/a"
+    try:
+        return f"{int(val):,}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+# ── Stat extraction helpers ────────────────────────────────────────────────────
+
+def extract_stats(stats_raw: dict, wellness_raw, hr_raw: dict) -> dict:
+    """
+    The userstats endpoint returns a list of metric objects. Flatten them
+    into a simple key→value dict for the rest of the script.
+    Fallback to wellness chart data where userstats is empty.
+    """
+    out = {}
+
+    # userstats returns {"allMetrics": {"metricsMap": {"WELLNESS_TOTAL_STEPS": [...], ...}}}
+    metrics_map = {}
+    if isinstance(stats_raw, dict):
+        metrics_map = (stats_raw.get("allMetrics", {}) or {}).get("metricsMap", {}) or {}
+
+    def _metric(key):
+        entries = metrics_map.get(key, [])
+        if isinstance(entries, list) and entries:
+            return entries[0].get("value")
+        return None
+
+    out["totalSteps"]               = _metric("WELLNESS_TOTAL_STEPS")
+    out["totalKilocalories"]        = _metric("WELLNESS_TOTAL_CALORIES")
+    out["activeKilocalories"]       = _metric("WELLNESS_ACTIVE_CALORIES")
+    out["moderateIntensityMinutes"] = _metric("WELLNESS_MODERATE_INTENSITY_MINUTES")
+    out["vigorousIntensityMinutes"] = _metric("WELLNESS_VIGOROUS_INTENSITY_MINUTES")
+    out["averageStressLevel"]       = _metric("WELLNESS_AVERAGE_STRESS")
+    out["restingHeartRate"]         = _metric("WELLNESS_RESTING_HEART_RATE")
+
+    # Fallback resting HR from dailyHeartRate endpoint
+    if out["restingHeartRate"] is None and isinstance(hr_raw, dict):
+        out["restingHeartRate"] = hr_raw.get("restingHeartRate")
+
+    # Fallback steps/calories from wellness chart if userstats empty
+    if out["totalSteps"] is None and isinstance(wellness_raw, list) and wellness_raw:
+        total_steps = sum(
+            (e.get("steps") or 0) for e in wellness_raw if isinstance(e, dict)
+        )
+        if total_steps:
+            out["totalSteps"] = total_steps
+
+    return out
+
+
+def extract_hrv(hrv_raw: dict) -> dict:
+    if not hrv_raw:
+        return {}
+    summary = hrv_raw.get("hrvSummary") or hrv_raw
+    return {
+        "status":    summary.get("status") or summary.get("weeklyAvgStr"),
+        "lastNight": summary.get("lastNight") or summary.get("lastNightAvg"),
+        "weeklyAvg": summary.get("weeklyAvg") or summary.get("weekly5DayAvg"),
+    }
+
+
+def extract_sleep(sleep_raw: dict) -> dict:
+    if not sleep_raw:
+        return {}
+    dto = sleep_raw.get("dailySleepDTO") or sleep_raw
+    scores = dto.get("sleepScores") or {}
+    overall = scores.get("overall") or {}
+    return {
+        "score":       overall.get("value"),
+        "sleepSecs":   dto.get("sleepTimeSeconds") or dto.get("sleepTimeTotalSeconds"),
+        "deepSecs":    dto.get("deepSleepSeconds"),
+        "remSecs":     dto.get("remSleepSeconds"),
+        "lightSecs":   dto.get("lightSleepSeconds"),
+        "awakeSecs":   dto.get("awakeSleepSeconds"),
+        "sleepHR":     dto.get("sleepHeartRate") or dto.get("avgSleepHeartRate"),
+    }
+
+
+def extract_spo2(spo2_raw) -> str:
+    if not spo2_raw:
+        return "n/a"
+    if isinstance(spo2_raw, dict):
+        val = spo2_raw.get("averageSpO2") or spo2_raw.get("averageSpo2")
+        if val:
+            return f"{val} %"
+    if isinstance(spo2_raw, list) and spo2_raw:
+        vals = [e.get("value") or e.get("spo2") for e in spo2_raw if isinstance(e, dict)]
+        vals = [v for v in vals if v is not None]
+        if vals:
+            return f"{sum(vals) / len(vals):.0f} %"
+    return "n/a"
+
+
+def parse_body_battery(data) -> tuple:
+    if not data:
+        return "n/a", "n/a"
+    values = []
+    try:
+        for entry in data:
+            charged = None
+            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                charged = entry[1]
+            elif isinstance(entry, dict):
+                charged = (entry.get("charged")
+                           or entry.get("value")
+                           or entry.get("bodyBatteryLevel"))
+            if charged is not None:
+                try:
+                    values.append(int(charged))
+                except (TypeError, ValueError):
+                    pass
+    except Exception as e:
+        log(f"WARNING: body battery parse error: {e}")
+    if not values:
+        return "n/a", "n/a"
+    return str(max(values)), str(min(values))
+
+
+# ── Markdown builder ───────────────────────────────────────────────────────────
+
+def build_markdown(stats: dict, hrv: dict, sleep: dict,
+                   spo2_str: str, body_battery_raw, activity: dict) -> str:
+    now   = datetime.now()
+    today = date.today().strftime("%A, %d %B %Y")
+    updated = now.strftime("%Y-%m-%d %H:%M")
+
+    resting_hr  = _safe(stats.get("restingHeartRate"), " bpm")
+    steps       = _fmt_int(stats.get("totalSteps"))
+    calories    = _fmt_int(stats.get("totalKilocalories"))
+    active_cals = _fmt_int(stats.get("activeKilocalories"))
+    avg_stress  = _safe(stats.get("averageStressLevel"))
+    avg_stress  = f"{avg_stress}/100" if avg_stress != "n/a" else "n/a"
+    active_mins = "n/a"
+    try:
+        m = int(stats.get("moderateIntensityMinutes") or 0)
+        v = int(stats.get("vigorousIntensityMinutes") or 0)
+        if m or v:
+            active_mins = f"{m + v} min ({m} mod + {v} vig)"
+    except (TypeError, ValueError):
+        pass
+
+    hrv_status = _safe(hrv.get("status"))
+    hrv_last   = _safe(hrv.get("lastNight"), " ms")
+    hrv_weekly = _safe(hrv.get("weeklyAvg"), " ms")
+
+    sleep_score = _safe(sleep.get("score"), "/100")
+    sleep_dur   = _fmt_dur(sleep.get("sleepSecs"))
+    deep_dur    = _fmt_dur(sleep.get("deepSecs"))
+    rem_dur     = _fmt_dur(sleep.get("remSecs"))
+    light_dur   = _fmt_dur(sleep.get("lightSecs"))
+    awake_dur   = _fmt_dur(sleep.get("awakeSecs"))
+    sleep_hr    = _safe(sleep.get("sleepHR"), " bpm")
+
+    bb_high, bb_low = parse_body_battery(body_battery_raw)
+
+    act_name = (activity.get("activityName")
+                or (activity.get("activityType") or {}).get("typeKey") or "n/a")
+    act_dist = _fmt_km(activity.get("distance"))
+    act_dur  = _fmt_dur(activity.get("duration"))
+    act_hr   = _safe(activity.get("averageHR"), " bpm")
+    act_date = (activity.get("startTimeLocal") or activity.get("startTimeGMT") or "")[:10] or "n/a"
+
+    lines = [
+        f"# Garmin Daily — {today}",
+        f"_Last updated: {updated}_",
+        "",
+        "## Heart Rate",
+        f"- **Resting HR**: {resting_hr}",
+        f"- **Avg HR during sleep**: {sleep_hr}",
+        "",
+        "## HRV",
+        f"- **Status**: {hrv_status}",
+        f"- **Last night**: {hrv_last}",
+        f"- **Weekly average**: {hrv_weekly}",
+        "",
+        "## Sleep",
+        f"- **Duration**: {sleep_dur}",
+        f"- **Score**: {sleep_score}",
+        f"- **Deep**: {deep_dur}",
+        f"- **REM**: {rem_dur}",
+        f"- **Light**: {light_dur}",
+        f"- **Awake**: {awake_dur}",
+        "",
+        "## Oxygen",
+        f"- **SpO2 (overnight avg)**: {spo2_str}",
+        "",
+        "## Stress & Energy",
+        f"- **Average stress**: {avg_stress}",
+        f"- **Body battery high**: {bb_high}",
+        f"- **Body battery low**: {bb_low}",
+        "",
+        "## Activity",
+        f"- **Steps**: {steps}",
+        f"- **Calories (total)**: {calories} kcal",
+        f"- **Calories (active)**: {active_cals} kcal",
+        f"- **Active minutes**: {active_mins}",
+        "",
+        "## Most Recent Activity",
+    ]
+
+    if activity:
+        lines += [
+            f"- **Name**: {act_name}",
+            f"- **Date**: {act_date}",
+            f"- **Distance**: {act_dist}",
+            f"- **Duration**: {act_dur}",
+            f"- **Avg HR**: {act_hr}",
+        ]
+    else:
+        lines.append("- No activity recorded")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ── Rolling archive ────────────────────────────────────────────────────────────
+
+def build_archive_entry(stats: dict, hrv: dict, sleep: dict,
+                        spo2_str: str, body_battery_raw, activity: dict) -> str:
+    resting_hr = _safe(stats.get("restingHeartRate"), " bpm")
+    steps      = _fmt_int(stats.get("totalSteps"))
+    avg_stress = _safe(stats.get("averageStressLevel"), "/100")
+
+    hrv_val    = _safe(hrv.get("lastNight"), " ms")
+    hrv_status = _safe(hrv.get("status"))
+    hrv_str    = f"{hrv_val} ({hrv_status})" if hrv_val != "n/a" else "n/a"
+
+    sleep_score = _safe(sleep.get("score"), "/100")
+    sleep_dur   = _fmt_dur(sleep.get("sleepSecs"))
+    sleep_str   = f"{sleep_dur} ({sleep_score})" if sleep_dur != "n/a" else "n/a"
+
+    bb_high, bb_low = parse_body_battery(body_battery_raw)
+    bb_str = f"{bb_high}↑ {bb_low}↓" if bb_high != "n/a" else "n/a"
+
+    act_name = (activity.get("activityName")
+                or (activity.get("activityType") or {}).get("typeKey") or "")
+    act_dist = _fmt_km(activity.get("distance"))
+    act_str  = f"{act_name} {act_dist}".strip() if activity else "n/a"
+
+    return (
+        f"HR: {resting_hr} | HRV: {hrv_str} | Sleep: {sleep_str} | "
+        f"Stress: {avg_stress} | BB: {bb_str} | Steps: {steps} | Activity: {act_str}"
+    )
+
+
+def update_archive(entry_line: str, today_str: str):
+    import re
+    cutoff = (date.today() - timedelta(days=ARCHIVE_RETAIN_DAYS)).strftime("%Y-%m-%d")
+    try:
+        raw = ARCHIVE_MD.read_text(encoding="utf-8") if ARCHIVE_MD.exists() else ""
+    except Exception as e:
+        log(f"WARNING: Could not read archive: {e} — starting fresh")
+        raw = ""
+
+    date_pattern = re.compile(r"^## (\d{4}-\d{2}-\d{2})$", re.MULTILINE)
+    matches = list(date_pattern.finditer(raw))
+    sections: dict = {}
+    for i, m in enumerate(matches):
+        sec_date = m.group(1)
+        start    = m.end()
+        end      = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        sections[sec_date] = raw[start:end].strip()
+
+    sections[today_str] = entry_line
+    sections = {d: v for d, v in sections.items() if d >= cutoff}
+
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = [
+        "# Garmin Archive — Rolling 28 Days",
+        f"_Last updated: {updated}_",
+        "",
+        "_One entry per day. HR = resting heart rate. BB = body battery high↑/low↓. "
+        "Sleep shown as duration (score/100)._",
+        "",
+    ]
+    for d in sorted(sections.keys(), reverse=True):
+        lines.append(f"## {d}")
+        lines.append(sections[d])
+        lines.append("")
+
+    try:
+        write_atomic(ARCHIVE_MD, "\n".join(lines))
+        log(f"Archive updated: {len(sections)} entries → {ARCHIVE_MD}")
+    except Exception as e:
+        log(f"WARNING: Could not write archive: {e}")
+
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--setup", action="store_true",
+                        help="Interactive cookie setup — paste values from browser")
+    args = parser.parse_args()
+
+    if args.setup:
+        setup_cookies()
+        return
+
+    log("Garmin cookie-poller starting")
+    today = date.today().strftime("%Y-%m-%d")
+
+    cookies = load_cookies()
+
+    try:
+        display_name = get_display_name(cookies)
+        log(f"Garmin: session active — display name: {display_name}")
+    except RuntimeError as e:
+        err = str(e)
+        if "COOKIES_EXPIRED" in err:
+            log("ERROR: Garmin cookies have expired.")
+            log("FLAG TO TOM: Log into connect.garmin.com and run: python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup")
+            sys.exit(1)
+        log(f"ERROR: Could not verify Garmin session: {err}")
+        log("FLAG TO TOM: Garmin cookie-poller could not verify session. Run --setup.")
+        sys.exit(1)
+
+    log(f"Fetching data for {today}")
+    stats_raw   = fetch_stats(cookies, display_name, today)
+    wellness_raw = fetch_wellness(cookies, display_name, today)
+    hr_raw      = fetch_resting_hr(cookies, display_name, today)
+    hrv_raw     = fetch_hrv(cookies, today)
+    sleep_raw   = fetch_sleep(cookies, display_name, today)
+    spo2_raw    = fetch_spo2(cookies, display_name, today)
+    body_bat    = fetch_body_battery(cookies, today)
+    activity    = fetch_last_activity(cookies)
+
+    stats = extract_stats(stats_raw, wellness_raw, hr_raw)
+    hrv   = extract_hrv(hrv_raw)
+    sleep = extract_sleep(sleep_raw)
+    spo2  = extract_spo2(spo2_raw)
+
+    md = build_markdown(stats, hrv, sleep, spo2, body_bat, activity)
+
+    try:
+        write_atomic(OUTPUT_MD, md)
+        log(f"Written: {OUTPUT_MD}")
+    except Exception as e:
+        log(f"ERROR: Failed to write {OUTPUT_MD}: {e}")
+        log("FLAG TO TOM: poll-garmin-cookie.py could not write GARMIN_DAILY.md.")
+        sys.exit(1)
+
+    try:
+        archive_entry = build_archive_entry(stats, hrv, sleep, spo2, body_bat, activity)
+        update_archive(archive_entry, today)
+    except Exception as e:
+        log(f"WARNING: Archive update failed: {e} — daily file is unaffected")
+
+    log("Garmin cookie-poller complete")
+
+
+if __name__ == "__main__":
+    main()

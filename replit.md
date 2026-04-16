@@ -261,6 +261,14 @@ Lessons from applying upstream changes — follow this checklist every sync.
 ### Scheduling constraint — avoid 06:xx
 The CRM runs at 06:00 every morning and another job runs at 07:00. No background jobs should be scheduled in the 06:xx or 07:xx windows. All timed tasks should be scheduled at 08:00 or later. The Garmin poller is set to 09:00 for this reason. Enforce this for any new pollers or cron jobs added in future.
 
+### Garmin poller — cookie-based (no OAuth)
+The Garmin poller switched from garth/OAuth (`poll-garmin.py`) to a cookie-based approach (`poll-garmin-cookie.py`) after persistent 429 rate-limiting from Garmin's auth endpoints.
+- **Primary**: `~/.openclaw/integrations/garmin/poll-garmin-cookie.py` — uses browser session cookies, no OAuth
+- **Setup** (one-time, or when cookies expire ~7-14 days): log into connect.garmin.com in the Pi browser, then run `python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup` and paste SESSIONID from browser devtools (F12 → Application → Cookies)
+- **Cookie file**: `~/.openclaw/integrations/garmin/garmin-cookies.json`
+- **Legacy fallback**: `poll-garmin.py` (garth-based) kept on disk but not in cron
+- The mgmt-bot `/garmin` command auto-selects the cookie poller if present, legacy if not
+
 ### Background services (Pi)
 - Python pollers must run as **systemd user services**, not bare background processes. They will not survive a Pi reboot or openclaw restart otherwise. The install script creates `openclaw-email-microsoft` and `openclaw-email-gmail` services automatically.
 - `loginctl enable-linger $USER` is required so user services start at boot without a login session. The install script applies this.

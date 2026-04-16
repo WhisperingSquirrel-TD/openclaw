@@ -672,46 +672,46 @@ deploy_integration "$INTEGRATIONS_SRC/github/create-repo.py"       "$INTEGRATION
 deploy_integration "$INTEGRATIONS_SRC/github/retro-push.py"        "$INTEGRATIONS_DST/github/retro-push.py"
 
 # ---------------------------------------------------------------------------
-# Garmin Connect daily health poller
+# Garmin Connect daily health poller (cookie-based — no OAuth, no rate-limit risk)
 # Fetches resting HR, HRV, sleep, stress, body battery, steps, last activity.
-# Writes GARMIN_DAILY.md once per day at 06:10.
-# First-run: tokens are cached interactively; subsequent runs are unattended.
-# Requires GARMIN_EMAIL and GARMIN_PASSWORD in ~/.openclaw/.env
+# Writes GARMIN_DAILY.md once per day at 09:00.
+# Auth: uses browser session cookies stored in ~/.openclaw/integrations/garmin/garmin-cookies.json
+# Setup (one-time, or when cookies expire): python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup
 # ---------------------------------------------------------------------------
-GARMIN_POLLER_SRC="$HOME/openclaw/attached_assets/integrations/garmin/poll-garmin.py"
-GARMIN_POLLER_DST="$HOME/.openclaw/integrations/garmin/poll-garmin.py"
-GARMIN_TOKEN_STORE="$HOME/.openclaw/integrations/garmin/tokens"
+GARMIN_COOKIE_SRC="$HOME/openclaw/attached_assets/integrations/garmin/poll-garmin-cookie.py"
+GARMIN_COOKIE_DST="$HOME/.openclaw/integrations/garmin/poll-garmin-cookie.py"
+GARMIN_OLD_SRC="$HOME/openclaw/attached_assets/integrations/garmin/poll-garmin.py"
+GARMIN_OLD_DST="$HOME/.openclaw/integrations/garmin/poll-garmin.py"
 GARMIN_LOG="$HOME/.openclaw/workspace/memory/poll-garmin-log.txt"
 
-if [ -f "$GARMIN_POLLER_SRC" ]; then
-    mkdir -p "$HOME/.openclaw/integrations/garmin"
-    mkdir -p "$GARMIN_TOKEN_STORE"
-    ln -sf "$GARMIN_POLLER_SRC" "$GARMIN_POLLER_DST"
-    info "Garmin poller linked: $GARMIN_POLLER_DST"
+mkdir -p "$HOME/.openclaw/integrations/garmin"
 
-    # Install garminconnect library (idempotent)
-    if pip3 show garminconnect &>/dev/null; then
-        info "garminconnect already installed: $(pip3 show garminconnect | grep ^Version | awk '{print $2}')"
-    else
-        warn "Installing garminconnect Python library..."
-        pip3 install --quiet --break-system-packages --timeout 120 garminconnect || warn "garminconnect install failed — run manually: pip3 install --break-system-packages garminconnect"
-    fi
-
-    # Cron job at 09:00 daily (idempotent).
-    # NOT 06:xx (CRM runs at 06:00) and NOT 07:xx (another job runs there).
-    if crontab -l 2>/dev/null | grep -q "poll-garmin.py"; then
-        info "Garmin cron already present (active or commented out) — leaving as-is."
-    elif [ -n "${GARMIN_EMAIL:-}" ] && [ -n "${GARMIN_PASSWORD:-}" ]; then
-        GARMIN_CRON="0 9 * * * python3 $GARMIN_POLLER_DST >> $GARMIN_LOG 2>&1"
-        ( crontab -l 2>/dev/null; echo "$GARMIN_CRON" ) | crontab -
-        info "Garmin cron installed: daily at 09:00"
-    else
-        warn "GARMIN_EMAIL / GARMIN_PASSWORD not set — Garmin cron not installed."
-        warn "  Add them to ~/.openclaw/.env, source it, then re-run this script."
-        warn "  First run: python3 $GARMIN_POLLER_DST  (interactive MFA if required)"
-    fi
+# Deploy cookie-based poller (primary)
+if [ -f "$GARMIN_COOKIE_SRC" ]; then
+    ln -sf "$GARMIN_COOKIE_SRC" "$GARMIN_COOKIE_DST"
+    info "Garmin cookie-poller linked: $GARMIN_COOKIE_DST"
 else
-    warn "Garmin poller not found at $GARMIN_POLLER_SRC — skipping"
+    warn "Garmin cookie-poller not found at $GARMIN_COOKIE_SRC — skipping"
+fi
+
+# Keep old garth-based poller as a fallback (no install needed if cookie poller is primary)
+if [ -f "$GARMIN_OLD_SRC" ]; then
+    ln -sf "$GARMIN_OLD_SRC" "$GARMIN_OLD_DST"
+    info "Garmin legacy poller linked (fallback only): $GARMIN_OLD_DST"
+fi
+
+# Cron: add cookie-poller at 09:00 if not already present.
+# NOT 06:xx (CRM) and NOT 07:xx (another job).
+# If the old poll-garmin.py cron exists (active or commented), we leave it and
+# add the cookie-poller separately — both can coexist.
+if crontab -l 2>/dev/null | grep -qF "poll-garmin-cookie.py"; then
+    info "Garmin cookie-poller cron already present — leaving as-is."
+elif [ -f "$GARMIN_COOKIE_DST" ]; then
+    GARMIN_CRON="0 9 * * * python3 $GARMIN_COOKIE_DST >> $GARMIN_LOG 2>&1"
+    ( crontab -l 2>/dev/null; echo "$GARMIN_CRON" ) | crontab -
+    info "Garmin cookie-poller cron installed: daily at 09:00"
+    warn "IMPORTANT: Run setup before the cron fires:"
+    warn "  python3 $GARMIN_COOKIE_DST --setup"
 fi
 
 # ── Daily provider reset (04:00) ──────────────────────────────────────────────
@@ -1556,13 +1556,18 @@ echo "    One-time re-auth (device code — works on Pi without a browser):"
 echo "      python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py reauth"
 echo "    Test: python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py list /"
 echo ""
-echo "  Garmin Connect poller:"
+echo "  Garmin Connect poller (cookie-based — no OAuth, no rate-limit risk):"
 echo "    Runs daily at 09:00 — writes GARMIN_DAILY.md (resting HR, HRV, sleep, stress, body battery, steps, last activity)"
 echo "    Also writes GARMIN_ARCHIVE.md — rolling 28-day compact history for L1 trend analysis"
 echo "    (09:00 chosen — 06:xx busy with CRM, 07:xx busy with another job)"
-echo "    Requires GARMIN_EMAIL and GARMIN_PASSWORD in ~/.openclaw/.env"
-echo "    First-run (interactive MFA if needed): python3 ~/.openclaw/integrations/garmin/poll-garmin.py"
+echo "    Auth: browser session cookies in ~/.openclaw/integrations/garmin/garmin-cookies.json"
+echo "    One-time setup (or when cookies expire ~7-14 days):"
+echo "      1. Log into connect.garmin.com in the Pi browser"
+echo "      2. python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup"
+echo "      3. Paste SESSIONID (and optionally session, _cflb, JWT_WEB) from browser devtools"
+echo "    Test run: python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py"
 echo "    Logs: ~/.openclaw/workspace/memory/poll-garmin-log.txt"
+echo "    Legacy garth-based poller kept at poll-garmin.py (fallback if needed)"
 echo ""
 echo "  CRM lead importer (no LLM — replaces agentTurn cron):"
 echo "    Runs daily at 08:00 — imports new leads from ~/prospects/YYYYMMDD/ CSVs into crm.md"

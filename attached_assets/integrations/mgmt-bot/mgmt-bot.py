@@ -667,12 +667,19 @@ def cmd_logs(token: str, chat_id: str) -> None:
 
 
 def cmd_garmin(token: str, chat_id: str) -> None:
-    script = Path(_cfg("OPENCLAW_GARMIN_SCRIPT",
-                        str(STATE_DIR / "integrations/garmin/poll-garmin.py")))
-    if not script.exists():
-        send(token, chat_id, f"❌ Garmin script not found: `{script}`")
+    cookie_script = STATE_DIR / "integrations/garmin/poll-garmin-cookie.py"
+    legacy_script  = STATE_DIR / "integrations/garmin/poll-garmin.py"
+    override = _cfg("OPENCLAW_GARMIN_SCRIPT", "")
+    if override:
+        script = Path(override)
+    elif cookie_script.exists():
+        script = cookie_script
+    elif legacy_script.exists():
+        script = legacy_script
+    else:
+        send(token, chat_id, "❌ Garmin script not found (neither cookie nor legacy poller present)")
         return
-    send(token, chat_id, "🏃 Triggering Garmin poller (this may take 30–60 seconds)…")
+    send(token, chat_id, f"🏃 Triggering Garmin poller (`{script.name}`) — may take 30–60 seconds…")
     r = subprocess.run(
         ["python3", str(script)],
         capture_output=True, text=True, timeout=120,
