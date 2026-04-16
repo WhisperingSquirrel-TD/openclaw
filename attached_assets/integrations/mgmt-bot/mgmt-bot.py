@@ -399,7 +399,7 @@ def _daily_reset_status() -> str:
         for line in reversed(lines):
             if not last_ts and line.startswith("["):
                 last_ts = line[1:20]  # timestamp portion
-            if "complete" in line.lower() or "error" in line.lower() or "switched" in line.lower() or "no change" in line.lower():
+            if any(k in line.lower() for k in ("complete", "error", "switched", "no change", "skipping write", "restarting gateway")):
                 summary = line.split("] ", 1)[-1] if "] " in line else line
                 break
         if not last_ts:

@@ -173,8 +173,10 @@ def main() -> None:
 
     current = _get_current_model(config)
     if current == CODEX_MODEL:
-        log(f"Already on {CODEX_MODEL} — no change needed")
+        log(f"Config already shows {CODEX_MODEL} — skipping write, but restarting gateway anyway")
+        log("(Gateway may be running a different model if a previous restart failed)")
         _chattr("+i", CONFIG_PATH)
+        _restart_gateway()
         return
 
     config = _set_model(config, CODEX_MODEL)
