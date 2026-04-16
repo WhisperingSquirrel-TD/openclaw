@@ -22,7 +22,6 @@ SETUP:
      and save a token to ~/.openclaw/integrations/google/gmail-token.json
   Requires: pip install google-auth google-auth-oauthlib google-api-python-client
 """
-import os
 import time
 import base64
 import email as email_lib
@@ -50,10 +49,101 @@ LAST_SEEN_FILE    = STATE_DIR / "workspace/memory/last-seen-emails-gmail.md"
 ALERT_FILE        = STATE_DIR / "workspace/memory/email-alert.md"
 LOG_FILE          = STATE_DIR / "workspace/memory/poll-gmail-log.txt"
 
-SCOPES             = ["https://www.googleapis.com/auth/gmail.readonly"]
-POLL_INTERVAL      = 180
-MAX_RESULTS        = 25
+SCOPES                = ["https://www.googleapis.com/auth/gmail.readonly"]
+POLL_INTERVAL_KNOWN   = 120   # faster when a known-contact email found (matches Microsoft poller)
+POLL_INTERVAL_GENERAL = 300   # standard interval
+MAX_RESULTS           = 25
 
+LOG_MAX_LINES = 1000
+LOG_TRIM_TO   = 800
+
+
+# ---------------------------------------------------------------------------
+# Logging (with rotation — max 1000 lines, trim to 800 on overflow)
+# ---------------------------------------------------------------------------
+
+def log(msg: str):
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] [gmail-poller] {msg}\n"
+    try:
+        existing = LOG_FILE.read_text().splitlines(keepends=True)
+    except FileNotFoundError:
+        existing = []
+    if len(existing) >= LOG_MAX_LINES:
+        existing = existing[-LOG_TRIM_TO:]
+    existing.append(line)
+    tmp = LOG_FILE.with_suffix(".tmp")
+    try:
+        tmp.write_text("".join(existing))
+        tmp.replace(LOG_FILE)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+    print(line, end="")
+
+
+# ---------------------------------------------------------------------------
+# Atomic file write helper
+# ---------------------------------------------------------------------------
+
+def write_atomic(path: Path, content: str):
+    """Write content via temp file + rename — safe if killed mid-write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(content)
+        tmp.replace(path)
+    except Exception as e:
+        log(f"ERROR: Could not write {path.name}: {e}")
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Auth — called each poll cycle so token refresh failures are caught cleanly
+# ---------------------------------------------------------------------------
+
+def get_service():
+    creds = None
+    if TOKEN_FILE.exists():
+        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+                TOKEN_FILE.write_text(creds.to_json())
+                log("Token refreshed successfully")
+            except Exception as e:
+                log(f"ERROR: Token refresh failed: {e} — will retry next cycle")
+                return None
+        else:
+            if not CREDENTIALS_FILE.exists():
+                log(f"ERROR: gmail-credentials.json not found at {CREDENTIALS_FILE}")
+                return None
+            try:
+                flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+                creds = flow.run_local_server(port=0)
+                TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+                TOKEN_FILE.write_text(creds.to_json())
+                log("OAuth consent complete — token saved")
+            except Exception as e:
+                log(f"ERROR: OAuth flow failed: {e}")
+                return None
+    try:
+        return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        log(f"ERROR: Failed to build Gmail service: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Known contacts
+# ---------------------------------------------------------------------------
 
 def load_known_contacts() -> list[str]:
     if not CONTACTS_FILE.exists():
@@ -62,34 +152,35 @@ def load_known_contacts() -> list[str]:
     return [l.strip().lower() for l in lines if l.strip() and not l.strip().startswith("#")]
 
 
-def log(msg: str):
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] {msg}\n"
-    with open(LOG_FILE, "a") as f:
-        f.write(line)
-    print(line, end="")
+# ---------------------------------------------------------------------------
+# Last-seen tracking
+# ---------------------------------------------------------------------------
+
+def load_last_seen() -> dict:
+    state = {}
+    if not LAST_SEEN_FILE.exists():
+        return state
+    for line in LAST_SEEN_FILE.read_text().splitlines():
+        if line.startswith("#") or "|" not in line:
+            continue
+        parts = line.split("|", 1)
+        if len(parts) == 2:
+            state[parts[0].strip()] = parts[1].strip()
+    return state
 
 
-def get_service():
-    creds = None
-    if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not CREDENTIALS_FILE.exists():
-                raise FileNotFoundError(
-                    f"Gmail credentials not found: {CREDENTIALS_FILE}\n"
-                    "Download from Google Cloud Console and place at that path."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-            creds = flow.run_local_server(port=0)
-        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        TOKEN_FILE.write_text(creds.to_json())
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+def save_last_seen(state: dict):
+    LAST_SEEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# Last Seen Emails — Gmail (Known Contacts)\n",
+             "# Format: contact-email | last-seen-date-header\n"]
+    for addr, ts in sorted(state.items()):
+        lines.append(f"{addr} | {ts}\n")
+    write_atomic(LAST_SEEN_FILE, "".join(lines))
 
+
+# ---------------------------------------------------------------------------
+# Message helpers
+# ---------------------------------------------------------------------------
 
 def parse_header(headers: list, name: str) -> str:
     for h in headers:
@@ -98,56 +189,44 @@ def parse_header(headers: list, name: str) -> str:
     return ""
 
 
-def fetch_messages(service, query: str, max_results: int = MAX_RESULTS, extra_headers: list = None) -> list:
-    result = service.users().messages().list(
-        userId="me", q=query, maxResults=max_results
-    ).execute()
-    msg_refs = result.get("messages", [])
-    headers_to_fetch = ["From", "Subject", "Date"] + (extra_headers or [])
-    messages = []
-    for ref in msg_refs:
-        msg = service.users().messages().get(
-            userId="me", id=ref["id"], format="metadata",
-            metadataHeaders=headers_to_fetch
-        ).execute()
-        msg["_snippet"] = msg.get("snippet", "")
-        messages.append(msg)
-    return messages
-
-
 def parse_from(from_header: str) -> tuple[str, str]:
     """Returns (display_name, email_address) from a From header."""
     if "<" in from_header and ">" in from_header:
         name = from_header[:from_header.index("<")].strip().strip('"')
-        addr = from_header[from_header.index("<") + 1:from_header.index(">")].strip().lower()
+        addr = from_header[from_header.index("<") + 1: from_header.index(">")].strip().lower()
     else:
         name = ""
         addr = from_header.strip().lower()
     return name, addr
 
 
-def load_last_seen() -> dict:
-    state = {}
-    if not LAST_SEEN_FILE.exists():
-        return state
-    for line in LAST_SEEN_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split("|", 1)
-        if len(parts) == 2:
-            state[parts[0].strip().lower()] = parts[1].strip()
-    return state
+def fetch_messages(service, query: str, max_results: int = MAX_RESULTS, extra_headers: list = None) -> list:
+    try:
+        result = service.users().messages().list(
+            userId="me", q=query, maxResults=max_results
+        ).execute()
+    except Exception as e:
+        log(f"ERROR: messages.list failed ({query}): {e}")
+        return []
+    msg_refs = result.get("messages", [])
+    headers_to_fetch = ["From", "Subject", "Date"] + (extra_headers or [])
+    messages = []
+    for ref in msg_refs:
+        try:
+            msg = service.users().messages().get(
+                userId="me", id=ref["id"], format="metadata",
+                metadataHeaders=headers_to_fetch
+            ).execute()
+            msg["_snippet"] = msg.get("snippet", "")
+            messages.append(msg)
+        except Exception as e:
+            log(f"WARNING: Could not fetch message {ref['id']}: {e}")
+    return messages
 
 
-def save_last_seen(state: dict):
-    LAST_SEEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["# Last Seen Emails — Gmail (Known Contacts)\n",
-             "# Format: contact-email | last-seen-date-header\n"]
-    for email, ts in sorted(state.items()):
-        lines.append(f"{email} | {ts}\n")
-    LAST_SEEN_FILE.write_text("".join(lines))
-
+# ---------------------------------------------------------------------------
+# Formatters
+# ---------------------------------------------------------------------------
 
 def format_trusted_entry(headers: list, snippet: str, label: str = "") -> str:
     from_h   = parse_header(headers, "From")
@@ -192,6 +271,10 @@ def format_external_entry(headers: list) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Alert
+# ---------------------------------------------------------------------------
+
 def write_alert(subject: str, from_addr: str, from_name: str, date_h: str, direction: str):
     ALERT_FILE.parent.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -204,6 +287,10 @@ def write_alert(subject: str, from_addr: str, from_name: str, date_h: str, direc
         )
     log(f"ALERT: New {direction} from {from_addr} — {subject}")
 
+
+# ---------------------------------------------------------------------------
+# Process messages
+# ---------------------------------------------------------------------------
 
 def process_messages(messages: list, last_seen: dict, known_contacts: list, direction: str = "INBOX") -> tuple:
     trusted_entries  = []
@@ -232,8 +319,11 @@ def process_messages(messages: list, last_seen: dict, known_contacts: list, dire
     return trusted_entries, external_entries, known_alert
 
 
+# ---------------------------------------------------------------------------
+# Markdown writers (atomic)
+# ---------------------------------------------------------------------------
+
 def rebuild_inbox_md(trusted_inbox: list, trusted_sent: list):
-    INBOX_MD.parent.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     content = (
         f"# Gmail — Trusted Inbox & Sent Mail\n"
@@ -248,11 +338,10 @@ def rebuild_inbox_md(trusted_inbox: list, trusted_sent: list):
         content += "\n## Sent Mail\n\n" + "".join(trusted_sent)
     else:
         content += "\n## Sent Mail\n\n_(empty)_\n\n"
-    INBOX_MD.write_text(content)
+    write_atomic(INBOX_MD, content)
 
 
 def rebuild_external_md(external_inbox: list):
-    EXTERNAL_MD.parent.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     content = (
         f"# Gmail — External / Unknown Senders\n"
@@ -265,27 +354,35 @@ def rebuild_external_md(external_inbox: list):
         content += "## Unknown Senders (inbox)\n\n" + "".join(external_inbox)
     else:
         content += "## Unknown Senders (inbox)\n\n_(none)_\n\n"
-    EXTERNAL_MD.write_text(content)
+    write_atomic(EXTERNAL_MD, content)
 
+
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
 
 def main():
     log("Gmail poller starting")
 
-    try:
-        service = get_service()
-    except Exception as e:
-        log(f"Auth error: {e}")
-        raise SystemExit(1)
-
     while True:
+        poll_interval = POLL_INTERVAL_GENERAL
         try:
+            # Re-acquire service each cycle — catches token expiry mid-run
+            service = get_service()
+            if service is None:
+                log("ERROR: Could not connect to Gmail — skipping this cycle")
+                time.sleep(POLL_INTERVAL_GENERAL)
+                continue
+
             known_contacts = load_known_contacts()
             last_seen      = load_last_seen()
 
             inbox_msgs = fetch_messages(service, "in:inbox", MAX_RESULTS)
             sent_msgs  = fetch_messages(service, "in:sent",  50, extra_headers=["To"])
 
-            trusted_inbox, external_inbox, _ = process_messages(inbox_msgs, last_seen, known_contacts, "INBOX")
+            trusted_inbox, external_inbox, known_alert = process_messages(
+                inbox_msgs, last_seen, known_contacts, "INBOX"
+            )
             # Sent items: show ALL (no known-contacts filter — outbound is safe)
             all_sent = [
                 format_sent_entry(m.get("payload", {}).get("headers", []), m.get("_snippet", ""))
@@ -301,10 +398,14 @@ def main():
                 f"external: {len(external_inbox)} inbox"
             )
 
-        except Exception as e:
-            log(f"Poll error: {e}")
+            # Speed up if a known-contact email was found (matches Microsoft poller behaviour)
+            if known_alert:
+                poll_interval = POLL_INTERVAL_KNOWN
 
-        time.sleep(POLL_INTERVAL)
+        except Exception as e:
+            log(f"ERROR: Unhandled exception in poll cycle: {e}")
+
+        time.sleep(poll_interval)
 
 
 if __name__ == "__main__":
