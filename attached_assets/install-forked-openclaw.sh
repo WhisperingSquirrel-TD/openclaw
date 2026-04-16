@@ -635,7 +635,8 @@ if [ -z "${SHAREPOINT_HOST:-}" ]; then
 else
     info "SHAREPOINT_HOST=$SHAREPOINT_HOST (SharePoint ready)"
 fi
-deploy_integration "$INTEGRATIONS_SRC/google/gmail_poll.py"        "$INTEGRATIONS_DST/google/gmail_poll.py"
+deploy_integration "$INTEGRATIONS_SRC/google/gmail_poll.py"              "$INTEGRATIONS_DST/google/gmail_poll.py"
+deploy_integration "$INTEGRATIONS_SRC/google/poll-calendar-google.py"    "$INTEGRATIONS_DST/google/poll-calendar-google.py"
 
 # ---------------------------------------------------------------------------
 # Tavily web search
@@ -1342,6 +1343,45 @@ if [ -f "$NEW_MS_TOKEN" ] || [ -f "$OLD_MS_TOKEN" ]; then
         warn "Calendar poller failed to start — check $CAL_LOG"
 else
     warn "Calendar poller enabled but not started — Microsoft token missing, run auth first"
+fi
+
+# Google Calendar poller — uses credentials.json + token.json (separate from Gmail)
+GCAL_POLLER="$HOME/.openclaw/integrations/google/poll-calendar-google.py"
+GCAL_LOG="$HOME/.openclaw/workspace/memory/poll-calendar-google-log.txt"
+GCAL_CREDS="$HOME/.openclaw/integrations/google/credentials.json"
+GCAL_TOKEN="$HOME/.openclaw/integrations/google/token.json"
+
+cat > "$SYSTEMD_USER_DIR/openclaw-calendar-google.service" << GCALSVC
+[Unit]
+Description=OpenClaw Google Calendar Poller
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=$PYTHON3_BIN $GCAL_POLLER
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:$GCAL_LOG
+StandardError=append:$GCAL_LOG
+
+[Install]
+WantedBy=default.target
+GCALSVC
+
+systemctl --user daemon-reload
+systemctl --user enable openclaw-calendar-google.service 2>/dev/null || true
+if [ -f "$GCAL_CREDS" ] && [ -f "$GCAL_TOKEN" ]; then
+    systemctl --user restart openclaw-calendar-google.service && \
+        info "Google Calendar poller running — writing GOOGLE_CALENDAR.md every 15 min" || \
+        warn "Google Calendar poller failed to start — check $GCAL_LOG"
+elif [ -f "$GCAL_CREDS" ]; then
+    warn "Google Calendar poller enabled but not started — run once manually to complete OAuth:"
+    warn "  python3 $GCAL_POLLER"
+else
+    info "Google Calendar poller not started (credentials.json not found)"
 fi
 
 # Step 12a: Set audit log append-only (tamper protection)

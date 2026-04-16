@@ -639,6 +639,7 @@ def cmd_logs(token: str, chat_id: str) -> None:
         STATE_DIR / "integrations/mgmt-bot/mgmt-bot.log",
         STATE_DIR / "workspace/memory/poll-garmin-log.txt",
         STATE_DIR / "workspace/memory/poll-calendar-log.txt",
+        STATE_DIR / "workspace/memory/poll-calendar-google-log.txt",
         STATE_DIR / "workspace/memory/poll-crm-log.txt",
         STATE_DIR / "workspace/memory/poll-gmail-log.txt",
     ]
