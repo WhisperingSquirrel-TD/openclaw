@@ -716,7 +716,7 @@ fi
 
 # ── Daily provider reset (04:00) ──────────────────────────────────────────────
 # Resets L1 to the Codex OAuth model at 4am each day — cheapest option first.
-# User can switch during the day via /openai, /anthropic, /codex.
+# User can switch during the day via /openai, /anthropic, /codex, /codexmini.
 RESET_SRC="$HOME/openclaw/attached_assets/integrations/provider-switch/daily-reset.py"
 RESET_DST="$HOME/.openclaw/integrations/provider-switch/daily-reset.py"
 RESET_LOG="$HOME/.openclaw/workspace/memory/daily-reset.log"
@@ -1530,6 +1530,8 @@ echo "      /logs      — recent errors across all poller logs"
 echo "      /disk      — disk space on the Pi"
 echo "      /openai    — switch to OpenAI model + restart gateway"
 echo "      /anthropic — switch to Anthropic model + restart gateway"
+echo "      /codex     — switch to OpenAI Codex gpt-5.4 (full) + restart gateway"
+echo "      /codexmini — switch to OpenAI Codex gpt-5.4-mini (cheaper/faster) + restart"
 echo "      /restart   — restart L1 gateway"
 echo "      /garmin    — manually trigger Garmin poller"
 echo "      /pull      — git pull latest from GitHub"
@@ -1541,6 +1543,8 @@ echo "      MGMT_BOT_TOKEN=<second bot token from BotFather>"
 echo "      MGMT_BOT_CHAT_ID=<your numeric Telegram ID from @userinfobot>"
 echo "      OPENCLAW_OPENAI_MODEL=openai/gpt-5-mini-2025-08-07"
 echo "      OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5"
+echo "      OPENCLAW_CODEX_MODEL=openai-codex/gpt-5.4           (optional, this is the default)"
+echo "      OPENCLAW_CODEX_MINI_MODEL=openai-codex/gpt-5.4-mini (optional, this is the default)"
 echo "      OPENCLAW_VAULT_PASSPHRASE=<already set if vault is in use>"
 echo ""
 echo "  SharePoint document management (assistant@ identity — write-only via L1):"
