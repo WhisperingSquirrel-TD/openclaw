@@ -36,7 +36,7 @@ except ImportError:
 STATE_DIR        = Path.home() / ".openclaw"
 CREDENTIALS_FILE = STATE_DIR / "integrations/google/credentials.json"
 TOKEN_FILE       = STATE_DIR / "integrations/google/token.json"
-CALENDAR_MD      = STATE_DIR / "workspace/memory/GOOGLE_CALENDAR.md"
+CALENDAR_MD      = STATE_DIR / "workspace/GOOGLE_CALENDAR.md"
 LOG_FILE         = STATE_DIR / "workspace/memory/poll-calendar-google-log.txt"
 
 SCOPES        = ["https://www.googleapis.com/auth/calendar.readonly"]
