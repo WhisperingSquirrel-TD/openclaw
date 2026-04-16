@@ -386,6 +386,29 @@ def _convert_docx_to_text(docx_path: Path) -> str:
 # Commands
 # ---------------------------------------------------------------------------
 
+def _daily_reset_status() -> str:
+    """Return a one-line summary of the last daily reset run."""
+    log_path = STATE_DIR / "workspace" / "memory" / "daily-reset.log"
+    if not log_path.exists():
+        return "⚠️ never run (no log found)"
+    try:
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+        # Find the last "complete" or "ERROR" line to summarise what happened
+        summary = ""
+        last_ts  = ""
+        for line in reversed(lines):
+            if not last_ts and line.startswith("["):
+                last_ts = line[1:20]  # timestamp portion
+            if "complete" in line.lower() or "error" in line.lower() or "switched" in line.lower() or "no change" in line.lower():
+                summary = line.split("] ", 1)[-1] if "] " in line else line
+                break
+        if not last_ts:
+            return "⚠️ log exists but unreadable"
+        return f"{last_ts} — {summary}" if summary else f"last ran {last_ts}"
+    except Exception as e:
+        return f"⚠️ could not read log: {e}"
+
+
 def cmd_status(token: str, chat_id: str) -> None:
     try:
         config  = _read_config()
@@ -401,6 +424,8 @@ def cmd_status(token: str, chat_id: str) -> None:
     vault_enc = (_vault_dir() / "SOUL.md.enc").exists()
     soul_src  = "🔐 encrypted vault" if vault_enc else "📄 plaintext SOUL.md"
 
+    reset_info = _daily_reset_status()
+
     send(token, chat_id,
          f"*OpenClaw Status*\n\n"
          f"🤖 Model: `{model}`\n"
@@ -408,7 +433,8 @@ def cmd_status(token: str, chat_id: str) -> None:
          f"🔁 Auto-start: {enabled}\n"
          f"🔌 Linger: {linger}\n"
          f"🧠 Soul: {soul_src}\n"
-         f"⏱ Uptime: {uptime}")
+         f"⏱ Uptime: {uptime}\n"
+         f"🔄 Daily reset: {reset_info}")
 
 
 def cmd_switch(token: str, chat_id: str, provider: str) -> None:
