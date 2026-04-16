@@ -567,6 +567,40 @@ def update_reports_log(report: dict, status: str = "sent") -> None:
         log(f"WARNING: Could not write {WORKSPACE_MD}: {e}")
 
 
+# ── Heartbeat — keep workspace file fresh even on quiet days ──────────────────
+
+def _touch_reports_log() -> None:
+    """Rewrite the header of STACKSTONE_REPORTS.md with the current timestamp
+    so L1 can always see when the pipeline last ran successfully, even when
+    there are no new reports to send."""
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        raw = WORKSPACE_MD.read_text(encoding="utf-8") if WORKSPACE_MD.exists() else ""
+    except Exception:
+        raw = ""
+
+    # Strip existing header lines; keep the body (previous entries)
+    body_lines = [l for l in raw.splitlines()
+                  if not l.startswith("# Stackstone Reports") and not l.startswith("_Last updated")]
+    body = "\n".join(body_lines).strip()
+
+    content = (
+        f"# Stackstone Reports — Sent Log\n"
+        f"_Last updated: {updated} | Retains {REPORTS_RETAIN_DAYS} days | Pipeline: OK_\n"
+    )
+    if body:
+        content += f"\n{body}\n"
+
+    try:
+        WORKSPACE_MD.parent.mkdir(parents=True, exist_ok=True)
+        tmp = WORKSPACE_MD.with_suffix(".tmp")
+        tmp.write_text(content.strip() + "\n", encoding="utf-8")
+        tmp.replace(WORKSPACE_MD)
+        log(f"Workspace heartbeat written: {WORKSPACE_MD}")
+    except Exception as e:
+        log(f"WARNING: Could not write heartbeat to {WORKSPACE_MD}: {e}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -599,6 +633,7 @@ def main() -> None:
 
     if not reports:
         log("No unsent reports.")
+        _touch_reports_log()
         return
 
     log(f"Found {len(reports)} unsent report(s). Refreshing Graph token...")

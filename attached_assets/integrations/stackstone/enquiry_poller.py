@@ -520,6 +520,46 @@ def update_enquiries_log(enquiry: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Heartbeat — keep workspace file fresh even on quiet days
+# ---------------------------------------------------------------------------
+
+def _touch_enquiries_log(state: dict) -> None:
+    """Rewrite the header of STACKSTONE_ENQUIRIES.md with the current
+    timestamp so L1 can always see when the pipeline last ran successfully,
+    even when there are no new enquiries. Creates the file if it doesn't
+    exist yet (so L1 never sees it as 'missing')."""
+    updated   = datetime.now().strftime("%Y-%m-%d %H:%M")
+    total     = state.get("total_alerted", 0)
+    last_seen = (state.get("last_enquiry_seen_at") or "none")[:16].replace("T", " ")
+
+    try:
+        raw = ENQUIRIES_MD.read_text(encoding="utf-8") if ENQUIRIES_MD.exists() else ""
+    except Exception:
+        raw = ""
+
+    body_lines = [l for l in raw.splitlines()
+                  if not l.startswith("# Stackstone Enquiries") and not l.startswith("_Last updated")]
+    body = "\n".join(body_lines).strip()
+
+    content = (
+        f"# Stackstone Enquiries — Inbound Leads Log\n"
+        f"_Last updated: {updated} | Retains {ENQUIRIES_RETAIN_DAYS} days | "
+        f"Pipeline: OK | Total alerted: {total} | Last enquiry: {last_seen}_\n"
+    )
+    if body:
+        content += f"\n{body}\n"
+
+    try:
+        ENQUIRIES_MD.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ENQUIRIES_MD.with_suffix(".tmp")
+        tmp.write_text(content.strip() + "\n", encoding="utf-8")
+        tmp.replace(ENQUIRIES_MD)
+        log(f"Workspace heartbeat written: {ENQUIRIES_MD}")
+    except Exception as e:
+        log(f"WARNING: Could not write heartbeat to {ENQUIRIES_MD}: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -609,6 +649,13 @@ def main() -> None:
     # Run staleness check regardless
     check_staleness(state)
     save_state(state)
+
+    # Always write/refresh the workspace file so L1 can see the pipeline is
+    # alive even on days with zero enquiries. update_enquiries_log already
+    # wrote the file for each new enquiry above — this is a no-op header
+    # refresh on quiet days and ensures the file always exists.
+    if new_count == 0:
+        _touch_enquiries_log(state)
 
     log(f"Poll complete — new alerts sent: {new_count}")
 
