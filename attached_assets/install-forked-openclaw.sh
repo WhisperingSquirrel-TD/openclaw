@@ -953,6 +953,52 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# YouTube channel poller
+# Polls configured YouTube channels for new videos every 30 minutes.
+# Downloads transcripts, generates AI summary, writes Markdown resource files.
+# Output: ~/.openclaw/workspace/reference/transcripts/YYYY-MM-DD - slug.md
+# Channels configured in: ~/.openclaw/integrations/youtube/channels.json
+# ---------------------------------------------------------------------------
+YT_POLL_SRC="$HOME/openclaw/attached_assets/integrations/youtube/channel_poller.py"
+YT_POLL_DST="$HOME/.openclaw/integrations/youtube/channel_poller.py"
+YT_POLL_LOG="$HOME/.openclaw/integrations/youtube/channel-poller.log"
+YT_CHAN_SRC="$HOME/openclaw/attached_assets/integrations/youtube/channels.json"
+YT_CHAN_DST="$HOME/.openclaw/integrations/youtube/channels.json"
+
+if [ -f "$YT_POLL_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/youtube"
+    mkdir -p "$HOME/.openclaw/workspace/reference/transcripts"
+    ln -sf "$YT_POLL_SRC" "$YT_POLL_DST"
+    info "YouTube channel poller linked: $YT_POLL_DST"
+
+    # Only link channels.json if it does not already exist on the Pi
+    # (never overwrite a user-configured channels list with the blank template)
+    if [ ! -f "$YT_CHAN_DST" ]; then
+        cp "$YT_CHAN_SRC" "$YT_CHAN_DST"
+        info "YouTube channels config created: $YT_CHAN_DST"
+    else
+        info "YouTube channels config already exists — not overwritten"
+    fi
+
+    # Cron: every 30 min, not at 06:xx or 07:xx
+    YT_CRON="8-59/30 0-5,8-23 * * * python3 $YT_POLL_DST >> $YT_POLL_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "youtube/channel_poller.py"; echo "$YT_CRON" ) | crontab -
+    info "YouTube channel poller cron installed: every 30 min (skips 06:xx-07:xx)"
+
+    # Ensure youtube-transcript-api is installed
+    if python3 -c "import youtube_transcript_api" 2>/dev/null; then
+        info "youtube-transcript-api: already installed"
+    else
+        info "Installing youtube-transcript-api..."
+        pip3 install --break-system-packages --quiet youtube-transcript-api 2>/dev/null && \
+            info "youtube-transcript-api installed" || \
+            warn "youtube-transcript-api install failed — install manually: pip3 install --break-system-packages youtube-transcript-api"
+    fi
+else
+    warn "YouTube channel poller not found at $YT_POLL_SRC — skipping"
+fi
+
+# ---------------------------------------------------------------------------
 # OpenClaw Management Bot
 # Separate Telegram bot that intercepts system commands BEFORE the LLM.
 # Works even when OpenAI is rate-limited or the gateway is completely down.

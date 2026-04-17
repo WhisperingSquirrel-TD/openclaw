@@ -19,6 +19,9 @@ COMMANDS
   /health       — run system health check now and show output
   /logs         — show recent errors across all poller logs
   /garmin       — manually trigger the Garmin poller
+  /yt-add       — add a YouTube channel to the transcript poller
+  /yt-list      — list configured YouTube channels
+  /yt-run       — trigger the YouTube channel poller now
   /disk         — disk space on the Pi
   /soul         — upload a new SOUL.md as a .docx file, re-encrypts and restarts
 
@@ -760,6 +763,116 @@ def cmd_garmin(token: str, chat_id: str) -> None:
         send(token, chat_id, f"❌ Garmin poller failed:\n```{tail}```")
 
 
+def _yt_channels_path() -> "Path":
+    return STATE_DIR / "integrations" / "youtube" / "channels.json"
+
+
+def _yt_load_channels() -> list:
+    p = _yt_channels_path()
+    if not p.exists():
+        return []
+    try:
+        raw = json.loads(p.read_text())
+        return [c for c in raw if "_comment" not in c and "_fields" not in c]
+    except Exception:
+        return []
+
+
+def _yt_save_channels(channels: list) -> None:
+    p = _yt_channels_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(channels, indent=2))
+    tmp.replace(p)
+
+
+def cmd_yt_add(token: str, chat_id: str, args: str) -> None:
+    """
+    Usage: /yt-add <channel_url_or_id> [label]
+    Examples:
+      /yt-add https://www.youtube.com/@mkbhd MKBHD
+      /yt-add UCBcRF18a7Qf58cCRy5xuWwQ "OpenClaw Dev Channel"
+      /yt-add https://www.youtube.com/@lex_fridman
+    """
+    parts = args.strip().split(None, 1)
+    if not parts:
+        send(token, chat_id,
+             "Usage: `/yt-add <channel_url_or_id> [label]`\n\n"
+             "Examples:\n"
+             "`/yt-add https://www.youtube.com/@mkbhd MKBHD`\n"
+             "`/yt-add UCBcRF18a7Qf58cCRy5xuWwQ`")
+        return
+
+    url_or_id = parts[0].strip()
+    label = parts[1].strip().strip('"').strip("'") if len(parts) > 1 else ""
+
+    # Detect whether it's a bare channel ID (UC...) or a URL
+    import re as _re
+    is_channel_id = bool(_re.match(r'^UC[\w-]{22}$', url_or_id))
+
+    if is_channel_id:
+        entry: dict = {"channel_id": url_or_id}
+    else:
+        entry = {"channel_url": url_or_id}
+
+    if label:
+        entry["label"] = label
+    entry["active"] = True
+
+    channels = _yt_load_channels()
+
+    # Check for duplicates
+    for existing in channels:
+        if existing.get("channel_id") == entry.get("channel_id") and entry.get("channel_id"):
+            send(token, chat_id, f"⚠️ Channel `{url_or_id}` is already in the list.")
+            return
+        if existing.get("channel_url") == entry.get("channel_url") and entry.get("channel_url"):
+            send(token, chat_id, f"⚠️ Channel `{url_or_id}` is already in the list.")
+            return
+
+    channels.append(entry)
+    _yt_save_channels(channels)
+
+    label_str = f" ({label})" if label else ""
+    send(token, chat_id,
+         f"✅ YouTube channel added{label_str}:\n`{url_or_id}`\n\n"
+         f"It will be polled within the next 30 minutes.")
+
+
+def cmd_yt_list(token: str, chat_id: str) -> None:
+    channels = _yt_load_channels()
+    if not channels:
+        send(token, chat_id,
+             "No channels configured yet.\n\n"
+             "Add one with: `/yt-add <url_or_id> [label]`")
+        return
+    lines = [f"*YouTube channels ({len(channels)}):*\n"]
+    for i, ch in enumerate(channels, 1):
+        ident = ch.get("channel_id") or ch.get("channel_url", "?")
+        label = ch.get("label", "")
+        active = "✅" if ch.get("active", True) else "⏸"
+        lines.append(f"{active} {i}. {label or ident}\n   `{ident}`")
+    send(token, chat_id, "\n".join(lines))
+
+
+def cmd_yt_run(token: str, chat_id: str) -> None:
+    poller = STATE_DIR / "integrations" / "youtube" / "channel_poller.py"
+    if not poller.exists():
+        send(token, chat_id, "❌ YouTube channel poller not found — run `/install` first.")
+        return
+    send(token, chat_id, "▶️ Running YouTube channel poller — may take a minute…")
+    r = subprocess.run(
+        ["python3", str(poller)],
+        capture_output=True, text=True, timeout=180,
+    )
+    output = (r.stdout + r.stderr).strip()
+    tail = "\n".join(output.splitlines()[-20:]) if output else "(no output)"
+    if r.returncode == 0:
+        send(token, chat_id, f"✅ YouTube poller complete:\n```{tail}```")
+    else:
+        send(token, chat_id, f"❌ YouTube poller failed:\n```{tail}```")
+
+
 def cmd_disk(token: str, chat_id: str) -> None:
     r = subprocess.run(["df", "-h", "/"], capture_output=True, text=True)
     lines = r.stdout.strip().splitlines()
@@ -1335,6 +1448,9 @@ def cmd_help(token: str, chat_id: str) -> None:
          "*Services*\n"
          "/restart — restart the L1 gateway\n"
          "/garmin — manually trigger the Garmin poller\n"
+         "/yt-add <url> [label] — add a YouTube channel to the transcript poller\n"
+         "/yt-list — list configured YouTube channels\n"
+         "/yt-run — trigger the YouTube channel poller now\n"
          "/pull — git pull latest from GitHub\n"
          "/install — git pull + run install script (sources .env automatically)\n"
          "/reboot — reboot Pi (refused if not safe)\n\n"
@@ -1381,6 +1497,9 @@ MENU_COMMANDS = [
     ("codexmini", "Switch to OpenAI Codex gpt-5.4-mini (cheaper/faster)"),
     # Integrations
     ("garmin",    "Manually trigger the Garmin poller"),
+    ("yt_add",    "Add a YouTube channel — /yt-add <url> [label]"),
+    ("yt_list",   "List configured YouTube channels"),
+    ("yt_run",    "Trigger the YouTube channel poller now"),
     ("sp_sync",   "Force SharePoint content mirror refresh"),
     # Dev workflow
     ("dev_run",    "Build + Vercel preview — specify project name"),
@@ -1784,6 +1903,10 @@ COMMANDS = {
     "/health":     cmd_health,
     "/logs":       cmd_logs,
     "/garmin":     cmd_garmin,
+    "/yt-list":    cmd_yt_list,
+    "/yt_list":    cmd_yt_list,
+    "/yt-run":     cmd_yt_run,
+    "/yt_run":     cmd_yt_run,
     "/disk":       cmd_disk,
     "/soul":       cmd_soul_start,
     "/sp-sync":    cmd_sp_sync,
@@ -1869,6 +1992,15 @@ def main() -> None:
             arg   = parts[1].strip() if len(parts) > 1 else ""
 
             # Commands that take an argument (accept both dash and underscore forms)
+            if cmd in ("/yt-add", "/yt_add"):
+                print(f"[mgmt-bot] Command: {cmd} {arg!r} from {chat_id}")
+                try:
+                    cmd_yt_add(token, chat_id, arg)
+                except Exception as e:
+                    print(f"[mgmt-bot] Handler error ({cmd}): {e}", file=sys.stderr)
+                    send(token, chat_id, f"❌ Error running `{cmd}`:\n```{e}```")
+                continue
+
             if cmd in ("/dev-run", "/dev_run", "/dev-test", "/dev_test"):
                 print(f"[mgmt-bot] Command: {cmd} {arg!r} from {chat_id}")
                 try:

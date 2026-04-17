@@ -362,9 +362,25 @@ Cache refreshes every **15 minutes** via cron. Non-`.md`/`.txt` files (docx, pdf
 | File | Purpose |
 |---|---|
 | `~/.openclaw/integrations/youtube/transcript.py` | YouTube transcript extractor — no API key needed |
+| `~/.openclaw/integrations/youtube/channel_poller.py` | Channel monitor — RSS polling, transcript fetch, AI summary, Markdown file writer |
+| `~/.openclaw/integrations/youtube/channels.json` | Channel list — edit directly or use `/yt-add` from mgmt-bot |
+| `~/.openclaw/integrations/youtube/channel-poller-state.json` | Seen-video state (auto-managed, do not edit) |
+| `~/.openclaw/integrations/youtube/channel-poller.log` | Poller log |
+| `~/.openclaw/workspace/reference/transcripts/` | Output directory — YYYY-MM-DD - slug.md per video |
 | `~/.openclaw/skills/youtube-transcript/SKILL.md` | L1 skill — usage patterns, URL formats, exit codes |
 
-Accepts YouTube URLs or bare video IDs. Returns plain text transcript (manual or auto-generated captions). Use `--timestamps` for timestamped output, `--lang XX` for specific language, `--list-langs` to see available languages. Exit code 1 means no captions available.
+**transcript.py:** Accepts YouTube URLs or bare video IDs. Returns plain text transcript (manual or auto-generated captions). Use `--timestamps` for timestamped output, `--lang XX` for specific language, `--list-langs` to see available languages. Exit code 1 means no captions available.
+
+**channel_poller.py:** Runs every 30 minutes via cron (skips 06:xx–07:xx slots). Polls each channel's RSS feed for new videos, pulls captions via youtube-transcript-api, generates AI summary + key takeaways via Anthropic API (or OpenAI fallback), writes formatted Markdown files to the transcripts directory, and sends a Telegram notification per new video. Uses a state file to avoid reprocessing. On first run looks back 3 days. Max 5 new videos per channel per run.
+
+**Adding channels:**
+- From Telegram: `/yt-add https://www.youtube.com/@channelname Label` (mgmt-bot)
+- Direct edit: `nano ~/.openclaw/integrations/youtube/channels.json`
+- Accepted formats: channel URL (`@handle`, `/c/name`, `/user/name`), or bare channel ID (`UC...`)
+- Manual test run: `python3 ~/.openclaw/integrations/youtube/channel_poller.py`
+- Single-video test: `python3 ~/.openclaw/integrations/youtube/channel_poller.py --video <url>`
+
+**AI summary:** Uses `ANTHROPIC_API_KEY` from `.env` first, falls back to `OPENAI_API_KEY`. If neither is present, raw transcript is saved without a summary. Model override: `OPENCLAW_AI_MODEL` env var. Transcript is truncated to 6000 chars for the prompt (cost control). Full raw transcript always saved.
 
 ### Web search (Tavily — native provider)
 Tavily is integrated as a **native `web_search` provider** in OpenClaw's built-in tool system. No exec or Python script needed — L1 calls `web_search` directly.

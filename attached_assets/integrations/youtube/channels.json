@@ -1,0 +1,6 @@
+[
+  {
+    "_comment": "Add YouTube channels to monitor. Remove this entry. Supported fields:",
+    "_fields": "channel_id (UC...) OR channel_url (@handle), label (friendly name), active (true/false)"
+  }
+]
