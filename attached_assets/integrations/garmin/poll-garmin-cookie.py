@@ -26,6 +26,7 @@ Outputs:
 import os
 import sys
 import json
+import time
 import argparse
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -914,6 +915,97 @@ def update_archive(entry_line: str, today_str: str):
         log(f"WARNING: Could not write archive: {e}")
 
 
+# ── Backfill ───────────────────────────────────────────────────────────────────
+
+def run_backfill(days: int, use_garth: bool, garth_api, cookies: dict, display_name: str):
+    """
+    Fetch up to `days` days of historical data and write to GARMIN_ARCHIVE.md.
+    Skips dates already present in the archive. Writes the file once at the end.
+    A 1-second pause between requests avoids rate-limiting.
+    """
+    import re
+    log(f"Backfill: starting — requesting {days} days of history")
+
+    raw = ARCHIVE_MD.read_text(encoding="utf-8") if ARCHIVE_MD.exists() else ""
+    date_pattern = re.compile(r"^## (\d{4}-\d{2}-\d{2})$", re.MULTILINE)
+    matches = list(date_pattern.finditer(raw))
+    sections: dict = {}
+    for i, m in enumerate(matches):
+        sec_date = m.group(1)
+        start    = m.end()
+        end      = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        sections[sec_date] = raw[start:end].strip()
+
+    today     = date.today()
+    fetched   = 0
+    skipped   = 0
+    failed    = 0
+
+    for offset in range(1, days + 1):
+        target = (today - timedelta(days=offset)).strftime("%Y-%m-%d")
+
+        if target in sections:
+            log(f"Backfill: {target} — already in archive, skipping")
+            skipped += 1
+            continue
+
+        log(f"Backfill: {target} — fetching...")
+        try:
+            if use_garth:
+                (stats_raw, wellness_raw, hr_raw,
+                 hrv_raw, sleep_raw, spo2_raw,
+                 body_bat, activity) = _fetch_all_garth(garth_api, target)
+            else:
+                stats_raw    = fetch_stats(cookies, display_name, target)
+                wellness_raw = fetch_wellness(cookies, display_name, target)
+                hr_raw       = fetch_resting_hr(cookies, display_name, target)
+                hrv_raw      = fetch_hrv(cookies, target)
+                sleep_raw    = fetch_sleep(cookies, display_name, target)
+                spo2_raw     = fetch_spo2(cookies, display_name, target)
+                body_bat     = fetch_body_battery(cookies, target)
+                activity     = fetch_last_activity(cookies)
+
+            stats = extract_stats(stats_raw, wellness_raw, hr_raw)
+            hrv   = extract_hrv(hrv_raw)
+            sleep = extract_sleep(sleep_raw)
+            spo2  = extract_spo2(spo2_raw)
+            entry = build_archive_entry(stats, hrv, sleep, spo2, body_bat, activity)
+
+            sections[target] = entry
+            fetched += 1
+            log(f"Backfill: {target} — OK: {entry[:80]}...")
+
+        except Exception as e:
+            log(f"Backfill: {target} — FAILED: {e}")
+            failed += 1
+
+        time.sleep(1)  # gentle rate-limit buffer between requests
+
+    # Write archive — no cutoff applied so all backfilled dates are preserved
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = [
+        "# Garmin Archive — Rolling History",
+        f"_Last updated: {updated} (backfill run — {fetched} new days added)_",
+        "",
+        "_One entry per day. HR = resting heart rate. BB = body battery high↑/low↓. "
+        "Sleep shown as duration (score/100)._",
+        "",
+    ]
+    for d in sorted(sections.keys(), reverse=True):
+        lines.append(f"## {d}")
+        lines.append(sections[d])
+        lines.append("")
+
+    try:
+        write_atomic(ARCHIVE_MD, "\n".join(lines))
+        log(
+            f"Backfill complete: {fetched} fetched, {skipped} already present, "
+            f"{failed} failed — {len(sections)} total entries → {ARCHIVE_MD}"
+        )
+    except Exception as e:
+        log(f"ERROR: Could not write archive after backfill: {e}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -923,6 +1015,10 @@ def main():
     parser.add_argument("--setup-garth", action="store_true",
                         help="First-time garth/credential auth (handles MFA interactively). "
                              "Run once from a terminal — tokens are cached for future cron runs.")
+    parser.add_argument("--backfill", type=int, metavar="DAYS", nargs="?", const=30,
+                        help="Fetch historical data and append to GARMIN_ARCHIVE.md. "
+                             "Default 30 days. Already-present dates are skipped. "
+                             "Example: --backfill 30")
     args = parser.parse_args()
 
     if args.setup:
@@ -974,6 +1070,17 @@ def main():
             log(f"ERROR: Could not verify Garmin session: {err}")
             log("FLAG TO TOM: Garmin session check failed. Add GARMIN_EMAIL + GARMIN_PASSWORD to .env, or run --setup.")
             sys.exit(1)
+
+    # ── Backfill mode ────────────────────────────────────────────────────────────
+    if args.backfill:
+        run_backfill(
+            days=args.backfill,
+            use_garth=use_garth,
+            garth_api=garth_api,
+            cookies=cookies if not use_garth else {},
+            display_name=display_name if not use_garth else "",
+        )
+        return
 
     # ── Fetch all data ────────────────────────────────────────────────────────────
     if use_garth:
