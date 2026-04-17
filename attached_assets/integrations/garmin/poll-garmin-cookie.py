@@ -636,74 +636,135 @@ def _fmt_int(val) -> str:
 
 # ── Stat extraction helpers ────────────────────────────────────────────────────
 
-def extract_stats(stats_raw: dict, wellness_raw, hr_raw: dict) -> dict:
+def _log_response_shape(label: str, data):
+    """Log enough of the response to diagnose field-mapping issues."""
+    if not data:
+        return
+    if isinstance(data, dict):
+        log(f"  [debug] {label} keys: {list(data.keys())[:8]}")
+    elif isinstance(data, list) and data:
+        first = data[0]
+        log(f"  [debug] {label} list[0] keys: {list(first.keys())[:8] if isinstance(first, dict) else type(first).__name__}")
+
+
+def extract_stats(stats_raw, wellness_raw, hr_raw) -> dict:
     """
-    The userstats endpoint returns a list of metric objects. Flatten them
-    into a simple key→value dict for the rest of the script.
-    Fallback to wellness chart data where userstats is empty.
+    Extract daily stats. Handles three response shapes returned by different
+    Garmin API path prefixes:
+
+    Shape A (/modern/proxy/ style):
+      {"allMetrics": {"metricsMap": {"WELLNESS_TOTAL_STEPS": [{"value": 8432}], ...}}}
+
+    Shape B (flat daily summary dict):
+      {"totalSteps": 8432, "totalKilocalories": 2100, "restingHeartRate": 58, ...}
+
+    Shape C (list of daily summaries):
+      [{"calendarDate": "2026-04-17", "totalSteps": 8432, ...}]
     """
     out = {}
 
-    # userstats returns {"allMetrics": {"metricsMap": {"WELLNESS_TOTAL_STEPS": [...], ...}}}
-    metrics_map = {}
-    if isinstance(stats_raw, dict):
-        metrics_map = (stats_raw.get("allMetrics", {}) or {}).get("metricsMap", {}) or {}
+    # Normalise list → first item
+    stats = stats_raw
+    if isinstance(stats, list) and stats:
+        stats = stats[0]
 
-    def _metric(key):
-        entries = metrics_map.get(key, [])
-        if isinstance(entries, list) and entries:
-            return entries[0].get("value")
-        return None
-
-    out["totalSteps"]               = _metric("WELLNESS_TOTAL_STEPS")
-    out["totalKilocalories"]        = _metric("WELLNESS_TOTAL_CALORIES")
-    out["activeKilocalories"]       = _metric("WELLNESS_ACTIVE_CALORIES")
-    out["moderateIntensityMinutes"] = _metric("WELLNESS_MODERATE_INTENSITY_MINUTES")
-    out["vigorousIntensityMinutes"] = _metric("WELLNESS_VIGOROUS_INTENSITY_MINUTES")
-    out["averageStressLevel"]       = _metric("WELLNESS_AVERAGE_STRESS")
-    out["restingHeartRate"]         = _metric("WELLNESS_RESTING_HEART_RATE")
+    if isinstance(stats, dict):
+        # Shape A — allMetrics.metricsMap (original /modern/proxy/ format)
+        metrics_map = (stats.get("allMetrics") or {}).get("metricsMap") or {}
+        if metrics_map:
+            def _metric(key):
+                entries = metrics_map.get(key, [])
+                if isinstance(entries, list) and entries:
+                    return entries[0].get("value")
+                return None
+            out["totalSteps"]               = _metric("WELLNESS_TOTAL_STEPS")
+            out["totalKilocalories"]        = _metric("WELLNESS_TOTAL_CALORIES")
+            out["activeKilocalories"]       = _metric("WELLNESS_ACTIVE_CALORIES")
+            out["moderateIntensityMinutes"] = _metric("WELLNESS_MODERATE_INTENSITY_MINUTES")
+            out["vigorousIntensityMinutes"] = _metric("WELLNESS_VIGOROUS_INTENSITY_MINUTES")
+            out["averageStressLevel"]       = _metric("WELLNESS_AVERAGE_STRESS")
+            out["restingHeartRate"]         = _metric("WELLNESS_RESTING_HEART_RATE")
+        else:
+            # Shape B — flat dict (dailySummary or userSummary wrapper)
+            summary = (
+                stats.get("dailySummary")
+                or stats.get("userDailySummary")
+                or stats.get("summary")
+                or stats
+            )
+            if isinstance(summary, dict):
+                out["totalSteps"]               = summary.get("totalSteps") or summary.get("steps")
+                out["totalKilocalories"]        = summary.get("totalKilocalories") or summary.get("activeKilocalories")
+                out["activeKilocalories"]       = summary.get("activeKilocalories")
+                out["moderateIntensityMinutes"] = summary.get("moderateIntensityMinutes")
+                out["vigorousIntensityMinutes"] = summary.get("vigorousIntensityMinutes")
+                out["averageStressLevel"]       = summary.get("averageStressLevel") or summary.get("avgStressLevel")
+                out["restingHeartRate"]         = summary.get("restingHeartRate") or summary.get("restingHR")
+            if all(v is None for v in out.values()):
+                _log_response_shape("stats (unrecognised shape)", stats)
 
     # Fallback resting HR from dailyHeartRate endpoint
-    if out["restingHeartRate"] is None and isinstance(hr_raw, dict):
-        out["restingHeartRate"] = hr_raw.get("restingHeartRate")
+    if not out.get("restingHeartRate") and isinstance(hr_raw, dict):
+        out["restingHeartRate"] = hr_raw.get("restingHeartRate") or hr_raw.get("restingHR")
 
-    # Fallback steps/calories from wellness chart if userstats empty
-    if out["totalSteps"] is None and isinstance(wellness_raw, list) and wellness_raw:
+    # Fallback steps from wellness chart (hourly list)
+    if not out.get("totalSteps") and isinstance(wellness_raw, list) and wellness_raw:
         total_steps = sum(
             (e.get("steps") or 0) for e in wellness_raw if isinstance(e, dict)
         )
         if total_steps:
             out["totalSteps"] = total_steps
 
+    # Fallback stress from wellness chart
+    if not out.get("averageStressLevel") and isinstance(wellness_raw, list) and wellness_raw:
+        stress_vals = [e.get("averageStressLevel") for e in wellness_raw
+                       if isinstance(e, dict) and e.get("averageStressLevel") not in (None, -1)]
+        if stress_vals:
+            out["averageStressLevel"] = int(sum(stress_vals) / len(stress_vals))
+
     return out
 
 
-def extract_hrv(hrv_raw: dict) -> dict:
+def extract_hrv(hrv_raw) -> dict:
     if not hrv_raw:
         return {}
-    summary = hrv_raw.get("hrvSummary") or hrv_raw
-    return {
+    # Handle list wrapper
+    raw = hrv_raw[0] if isinstance(hrv_raw, list) and hrv_raw else hrv_raw
+    if not isinstance(raw, dict):
+        return {}
+    summary = raw.get("hrvSummary") or raw
+    result = {
         "status":    summary.get("status") or summary.get("weeklyAvgStr"),
         "lastNight": summary.get("lastNight") or summary.get("lastNightAvg"),
         "weeklyAvg": summary.get("weeklyAvg") or summary.get("weekly5DayAvg"),
     }
+    if all(v is None for v in result.values()):
+        _log_response_shape("hrv (unrecognised shape)", raw)
+    return result
 
 
-def extract_sleep(sleep_raw: dict) -> dict:
+def extract_sleep(sleep_raw) -> dict:
     if not sleep_raw:
         return {}
-    dto = sleep_raw.get("dailySleepDTO") or sleep_raw
+    # Handle list wrapper
+    raw = sleep_raw[0] if isinstance(sleep_raw, list) and sleep_raw else sleep_raw
+    if not isinstance(raw, dict):
+        return {}
+    dto = raw.get("dailySleepDTO") or raw
     scores = dto.get("sleepScores") or {}
     overall = scores.get("overall") or {}
-    return {
-        "score":       overall.get("value"),
-        "sleepSecs":   dto.get("sleepTimeSeconds") or dto.get("sleepTimeTotalSeconds"),
+    result = {
+        "score":       overall.get("value") or dto.get("sleepScoreQuality"),
+        "sleepSecs":   dto.get("sleepTimeSeconds") or dto.get("sleepTimeTotalSeconds") or dto.get("totalSleepSeconds"),
         "deepSecs":    dto.get("deepSleepSeconds"),
         "remSecs":     dto.get("remSleepSeconds"),
         "lightSecs":   dto.get("lightSleepSeconds"),
         "awakeSecs":   dto.get("awakeSleepSeconds"),
         "sleepHR":     dto.get("sleepHeartRate") or dto.get("avgSleepHeartRate"),
     }
+    if all(v is None for v in result.values()):
+        _log_response_shape("sleep (unrecognised shape)", raw)
+    return result
 
 
 def extract_spo2(spo2_raw) -> str:
