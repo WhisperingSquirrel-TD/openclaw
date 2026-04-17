@@ -484,9 +484,9 @@ def get_display_name(cookies: dict) -> str:
         return override
 
     endpoints = [
-        "/modern/proxy/userprofile-service/userprofile/settings",
-        "/modern/proxy/userprofile-service/socialProfile/",
         "/proxy/userprofile-service/userprofile/settings",
+        "/proxy/userprofile-service/socialProfile/",
+        "/proxy/userprofile-service/userprofile/personal-information",
     ]
 
     last_error = ""
@@ -529,41 +529,41 @@ def get_display_name(cookies: dict) -> str:
 
 def fetch_stats(cookies: dict, display_name: str, today: str) -> dict:
     return _safe_get("stats",
-        f"/modern/proxy/userstats-service/statistics/daily/{display_name}",
+        f"/proxy/userstats-service/statistics/daily/{display_name}",
         cookies,
         {"fromDate": today, "untilDate": today, "metricId": "60,61,51,71,2,56,57"})
 
 
 def fetch_wellness(cookies: dict, display_name: str, today: str) -> dict:
     return _safe_get("wellness",
-        f"/modern/proxy/wellness-service/wellness/dailySummaryChart/{display_name}",
+        f"/proxy/wellness-service/wellness/dailySummaryChart/{display_name}",
         cookies,
         {"date": today})
 
 
 def fetch_hrv(cookies: dict, today: str) -> dict:
     return _safe_get("hrv",
-        f"/modern/proxy/hrv-service/hrv/{today}",
+        f"/proxy/hrv-service/hrv/{today}",
         cookies)
 
 
 def fetch_sleep(cookies: dict, display_name: str, today: str) -> dict:
     return _safe_get("sleep",
-        f"/modern/proxy/wellness-service/wellness/dailySleepData/{display_name}",
+        f"/proxy/wellness-service/wellness/dailySleepData/{display_name}",
         cookies,
         {"date": today, "nonSleepBufferMinutes": "60"})
 
 
 def fetch_spo2(cookies: dict, display_name: str, today: str) -> dict:
     return _safe_get("spo2",
-        f"/modern/proxy/wellness-service/wellness/dailySpo2/{display_name}",
+        f"/proxy/wellness-service/wellness/dailySpo2/{display_name}",
         cookies,
         {"calendarDate": today})
 
 
 def fetch_body_battery(cookies: dict, today: str):
     data = _safe_get("body_battery",
-        "/modern/proxy/wellness-service/wellness/bodyBattery/reports/daily",
+        "/proxy/wellness-service/wellness/bodyBattery/reports/daily",
         cookies,
         {"startDate": today, "endDate": today})
     if isinstance(data, list):
@@ -575,7 +575,7 @@ def fetch_body_battery(cookies: dict, today: str):
 
 def fetch_last_activity(cookies: dict) -> dict:
     data = _safe_get("activities",
-        "/modern/proxy/activitylist-service/activities/search/activities",
+        "/proxy/activitylist-service/activities/search/activities",
         cookies,
         {"limit": "1", "start": "0"})
     if isinstance(data, list) and data:
@@ -585,7 +585,7 @@ def fetch_last_activity(cookies: dict) -> dict:
 
 def fetch_resting_hr(cookies: dict, display_name: str, today: str) -> dict:
     return _safe_get("resting_hr",
-        f"/modern/proxy/wellness-service/wellness/dailyHeartRate/{display_name}",
+        f"/proxy/wellness-service/wellness/dailyHeartRate/{display_name}",
         cookies,
         {"date": today})
 
