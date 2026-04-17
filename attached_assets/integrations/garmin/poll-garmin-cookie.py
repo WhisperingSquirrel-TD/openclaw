@@ -193,7 +193,10 @@ def _get(path: str, cookies: dict, params: dict = None) -> dict:
 
 def _safe_get(label: str, path: str, cookies: dict, params: dict = None):
     try:
-        return _get(path, cookies, params)
+        result = _get(path, cookies, params)
+        if not result:
+            log(f"  [debug] {label}: server returned empty {type(result).__name__} (path={path.split('?')[0]})")
+        return result
     except RuntimeError as e:
         err = str(e)
         if "COOKIES_EXPIRED" in err:
@@ -638,13 +641,32 @@ def _fmt_int(val) -> str:
 
 def _log_response_shape(label: str, data):
     """Log enough of the response to diagnose field-mapping issues."""
-    if not data:
+    if data is None:
+        log(f"  [debug] {label}: None")
         return
     if isinstance(data, dict):
-        log(f"  [debug] {label} keys: {list(data.keys())[:8]}")
-    elif isinstance(data, list) and data:
-        first = data[0]
-        log(f"  [debug] {label} list[0] keys: {list(first.keys())[:8] if isinstance(first, dict) else type(first).__name__}")
+        if not data:
+            log(f"  [debug] {label}: empty dict {{}}")
+        else:
+            log(f"  [debug] {label} keys: {list(data.keys())[:10]}")
+            # Show one level deeper for the first key
+            for k, v in list(data.items())[:2]:
+                if isinstance(v, dict):
+                    log(f"  [debug]   .{k} keys: {list(v.keys())[:8]}")
+                elif isinstance(v, list) and v:
+                    log(f"  [debug]   .{k}[0]: {str(v[0])[:120]}")
+    elif isinstance(data, list):
+        if not data:
+            log(f"  [debug] {label}: empty list []")
+        else:
+            first = data[0]
+            if isinstance(first, dict):
+                log(f"  [debug] {label} list[{len(data)}] keys: {list(first.keys())[:10]}")
+                log(f"  [debug]   [0]: {str(first)[:200]}")
+            else:
+                log(f"  [debug] {label} list[{len(data)}][0]: {str(first)[:200]}")
+    else:
+        log(f"  [debug] {label}: {type(data).__name__} = {str(data)[:100]}")
 
 
 def extract_stats(stats_raw, wellness_raw, hr_raw) -> dict:
@@ -1001,6 +1023,7 @@ def run_backfill(days: int, use_garth: bool, garth_api, cookies: dict, display_n
     fetched   = 0
     skipped   = 0
     failed    = 0
+    _debug_dumped = False  # dump raw responses once to help diagnose shape issues
 
     for offset in range(1, days + 1):
         target = (today - timedelta(days=offset)).strftime("%Y-%m-%d")
@@ -1039,6 +1062,17 @@ def run_backfill(days: int, use_garth: bool, garth_api, cookies: dict, display_n
             sleep = extract_sleep(sleep_raw)
             spo2  = extract_spo2(spo2_raw)
             entry = build_archive_entry(stats, hrv, sleep, spo2, body_bat, activity)
+
+            # Dump raw response shapes the first time to diagnose field mapping
+            if not _debug_dumped:
+                _debug_dumped = True
+                log(f"  [debug] === raw response shapes for {target} ===")
+                _log_response_shape("stats_raw",   stats_raw)
+                _log_response_shape("wellness_raw", wellness_raw)
+                _log_response_shape("hr_raw",       hr_raw)
+                _log_response_shape("hrv_raw",      hrv_raw)
+                _log_response_shape("sleep_raw",    sleep_raw)
+                _log_response_shape("spo2_raw",     spo2_raw)
 
             sections[target] = entry
             fetched += 1
