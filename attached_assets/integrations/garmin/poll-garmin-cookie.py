@@ -219,18 +219,31 @@ def _safe_get(label: str, path: str, cookies: dict, params: dict = None):
 # Garth's `connectapi()` hits https://connectapi.garmin.com{path}, so the
 # paths are the same as the cookie paths but WITHOUT the /modern/proxy/ prefix.
 
-def _garth_auth():
+def _garth_mfa_prompt():
+    """MFA callback for garth — only works from an interactive terminal."""
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "Garmin MFA required but running as a service (no TTY). "
+            "Run setup manually: python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup-garth"
+        )
+    return input("Garmin MFA code: ").strip()
+
+
+def _garth_auth(interactive: bool = False):
     """
     Authenticate with Garmin using GARMIN_EMAIL + GARMIN_PASSWORD from .env.
     Returns a garminconnect.Garmin instance with an active session.
     Tokens are cached in ~/.garth/ and auto-refreshed by garth on future runs.
     Raises RuntimeError with a clear message on any failure.
+
+    interactive=True: called from --setup-garth (terminal, MFA prompt OK)
+    interactive=False: called from cron/service (MFA will raise, not hang)
     """
     try:
         from garminconnect import Garmin
     except ImportError:
         raise RuntimeError(
-            "garminconnect not installed — run: "
+            "garminconnect not installed. Run: "
             "pip3 install --break-system-packages garminconnect"
         )
 
@@ -242,23 +255,65 @@ def _garth_auth():
     garth_token_dir = Path.home() / ".garth"
     garth_token_dir.mkdir(parents=True, exist_ok=True)
 
-    api = Garmin(email, password, is_cn=False, prompt_mfa=None)
-
-    # Try to resume from cached tokens first (avoids triggering auth endpoints)
+    mfa_cb = _garth_mfa_prompt if interactive else None
     try:
-        api.login(str(garth_token_dir))
-        log(f"Garth: resumed session from cached tokens in {garth_token_dir}")
-    except Exception:
-        # Token cache stale or missing — do a full login
-        log("Garth: cached tokens absent or expired, logging in with credentials...")
+        api = Garmin(email=email, password=password, is_cn=False, prompt_mfa=mfa_cb)
+    except TypeError:
+        # Older garminconnect without prompt_mfa param
+        api = Garmin(email, password)
+
+    # Try token cache first (avoids triggering auth endpoints on every run)
+    token_file = garth_token_dir / "oauth2_token.json"
+    if token_file.exists() or (garth_token_dir / "token.json").exists():
         try:
-            api.login()
-            api.garth.dump(str(garth_token_dir))
-            log(f"Garth: login successful — tokens cached in {garth_token_dir}")
+            api.login(tokenstore=str(garth_token_dir))
+            log(f"Garth: resumed session from cached tokens in {garth_token_dir}")
+            return api
         except Exception as e:
-            raise RuntimeError(f"Garth login failed: {e}")
+            log(f"Garth: cached tokens invalid ({e}) — attempting fresh login")
+
+    # No valid cached tokens — need a fresh login
+    if not interactive and not sys.stdin.isatty():
+        raise RuntimeError(
+            "Garth tokens missing or expired and running as a service (no TTY). "
+            "Run first-time setup: python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup-garth"
+        )
+
+    log("Garth: logging in with email/password...")
+    try:
+        api.login()
+        try:
+            api.garth.dump(str(garth_token_dir))
+        except AttributeError:
+            pass  # older garminconnect versions may not have dump()
+        log(f"Garth: login successful — tokens cached in {garth_token_dir}")
+    except Exception as e:
+        raise RuntimeError(f"Garth login failed: {e}")
 
     return api
+
+
+def setup_garth():
+    """
+    Interactive first-time Garmin auth via garth/credentials.
+    Handles MFA prompt. Run once from a terminal; subsequent runs use cached tokens.
+    """
+    _load_dotenv()
+    print("\n=== Garmin Garth Setup ===")
+    print("Authenticating with GARMIN_EMAIL + GARMIN_PASSWORD from ~/.openclaw/.env")
+    print("If MFA is enabled you will be prompted for a code.\n")
+
+    try:
+        api = _garth_auth(interactive=True)
+        dn = _garth_display_name(api)
+        print(f"\nSUCCESS — logged in as: {dn}")
+        print(f"Tokens cached in: {Path.home() / '.garth'}/")
+        print("The daily cron at 09:00 will now use these tokens automatically.")
+        log(f"Garth setup complete. Display name: {dn}")
+    except Exception as e:
+        print(f"\nERROR: {e}")
+        print("Check GARMIN_EMAIL and GARMIN_PASSWORD in ~/.openclaw/.env")
+        sys.exit(1)
 
 
 def _garth_get(api, path: str, params: dict = None) -> dict:
@@ -859,11 +914,18 @@ def update_archive(entry_line: str, today_str: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--setup", action="store_true",
-                        help="Interactive cookie setup — paste values from browser")
+                        help="Interactive cookie setup — paste SESSIONID from browser devtools")
+    parser.add_argument("--setup-garth", action="store_true",
+                        help="First-time garth/credential auth (handles MFA interactively). "
+                             "Run once from a terminal — tokens are cached for future cron runs.")
     args = parser.parse_args()
 
     if args.setup:
         setup_cookies()
+        return
+
+    if args.setup_garth:
+        setup_garth()
         return
 
     _load_dotenv()  # loads GARMIN_EMAIL, GARMIN_PASSWORD, GARMIN_DISPLAY_NAME, etc.
@@ -879,11 +941,17 @@ def main():
 
     if garmin_email and garmin_password:
         try:
-            garth_api = _garth_auth()
+            garth_api = _garth_auth(interactive=False)
             use_garth = True
             log("Auth: using garth (email/password from .env) — self-healing, no manual cookie setup needed")
         except RuntimeError as e:
-            log(f"WARNING: Garth auth failed ({e}) — falling back to cookie mode")
+            log(f"WARNING: Garth auth failed ({e})")
+            if "setup-garth" in str(e) or "no TTY" in str(e) or "MFA" in str(e):
+                log("FLAG TO TOM: Run the one-time Garmin garth setup from a terminal:")
+                log("  python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup-garth")
+                log("  This handles MFA if needed and caches tokens for all future cron runs.")
+                sys.exit(1)
+            log("Falling back to cookie mode...")
 
     if not use_garth:
         log("Auth: using cookie mode (GARMIN_EMAIL/GARMIN_PASSWORD not in .env or garth auth failed)")

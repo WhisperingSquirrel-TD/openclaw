@@ -18,7 +18,9 @@ Requires:
 """
 
 import sys
+import os
 import time
+import argparse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -55,6 +57,7 @@ TOKEN_FILE = _GOOGLE_DIR / "token.json"
 SCOPES        = ["https://www.googleapis.com/auth/calendar.readonly"]
 POLL_INTERVAL = 900   # 15 minutes
 LOOK_AHEAD    = 14    # days
+AUTH_PORT     = 8765  # fixed port so SSH tunnelling works: ssh -L 8765:localhost:8765 pi@<ip>
 
 LOG_MAX_LINES = 1000
 LOG_TRIM_TO   = 800
@@ -91,16 +94,73 @@ def log(msg: str):
 # Auth
 # ---------------------------------------------------------------------------
 
+_PI_IP_HINT = os.environ.get("PI_IP", "<pi-ip>")
+
+
+def _auth_instructions():
+    """Print the exact commands needed to re-authorise on a headless Pi."""
+    log("FLAG TO TOM: Google Calendar needs re-authorisation.")
+    log("  Run this on the Pi (SSH in first):")
+    log(f"    python3 {__file__} --auth")
+    log(f"  That starts an OAuth server on port {AUTH_PORT}. In a SEPARATE terminal on your desktop:")
+    log(f"    ssh -L {AUTH_PORT}:localhost:{AUTH_PORT} pi@{_PI_IP_HINT}")
+    log(f"  Then open the URL the script prints in your desktop browser.")
+    log(f"  After authorising, the token is saved and the service resumes automatically.")
+
+
+def do_auth():
+    """
+    Interactive OAuth flow for headless Pi.
+    Starts a local server on AUTH_PORT so the user can tunnel in via SSH.
+    Call this via: python3 poll-calendar-google.py --auth
+    """
+    print(f"\n=== Google Calendar OAuth Setup ===")
+    print(f"This will start an OAuth server on port {AUTH_PORT}.")
+    print(f"")
+    print(f"If you are SSH'd into the Pi, open a SECOND terminal on your desktop and run:")
+    print(f"  ssh -L {AUTH_PORT}:localhost:{AUTH_PORT} pi@{_PI_IP_HINT}")
+    print(f"Then open the URL shown below in your desktop browser.")
+    print(f"")
+
+    if TOKEN_FILE.exists():
+        print(f"Deleting existing token: {TOKEN_FILE}")
+        TOKEN_FILE.unlink()
+
+    if not CREDENTIALS_FILE.exists():
+        print(f"ERROR: Credentials file not found.")
+        print(f"  Checked: {CREDENTIALS_FILE}")
+        print(f"  Checked: {_GOOGLE_DIR}/gmail-credentials.json")
+        print(f"  Download from Google Cloud Console → APIs & Services → Credentials")
+        sys.exit(1)
+
+    try:
+        flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+        creds = flow.run_local_server(
+            port=AUTH_PORT,
+            open_browser=False,
+            success_message="Authorisation complete — you can close this tab and the SSH tunnel.",
+        )
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TOKEN_FILE.write_text(creds.to_json())
+        print(f"\nSUCCESS — token saved to {TOKEN_FILE}")
+        print(f"Restart the service: systemctl --user restart openclaw-calendar-google.service")
+        log(f"OAuth complete via --auth flag. Token saved to {TOKEN_FILE}")
+    except Exception as e:
+        print(f"\nERROR: OAuth flow failed: {e}")
+        print(f"Make sure the SSH tunnel is open on port {AUTH_PORT} before running this.")
+        sys.exit(1)
+
+
 def get_service():
-    log(f"Using credentials file: {CREDENTIALS_FILE}")
-    log(f"Using token file:       {TOKEN_FILE}")
+    log(f"Using credentials: {CREDENTIALS_FILE.name}")
+    log(f"Using token:       {TOKEN_FILE}")
 
     creds = None
     if TOKEN_FILE.exists():
         try:
             creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
         except Exception as e:
-            log(f"WARNING: Could not read token file: {e} — will attempt re-auth")
+            log(f"WARNING: Could not read token file: {e} — treating as missing")
             creds = None
 
     if not creds or not creds.valid:
@@ -112,33 +172,33 @@ def get_service():
             except Exception as e:
                 log(f"ERROR: Token refresh failed: {e}")
                 if "invalid_grant" in str(e).lower():
-                    log("FLAG TO TOM: Google Calendar token revoked (invalid_grant).")
-                    log(f"  Delete {TOKEN_FILE} and re-run manually to re-authenticate:")
-                    log(f"  python3 {__file__}")
+                    TOKEN_FILE.unlink(missing_ok=True)
+                    log("Deleted stale token.json (invalid_grant — refresh token revoked by Google).")
+                _auth_instructions()
                 return None
         else:
+            # No usable token — need fresh auth. Only attempt in interactive mode.
             if not CREDENTIALS_FILE.exists():
-                log(f"ERROR: Google credentials file not found.")
-                log(f"  Checked: ~/.openclaw/integrations/google/credentials.json")
-                log(f"  Checked: ~/.openclaw/integrations/google/gmail-credentials.json")
-                log("  Download OAuth credentials from Google Cloud Console → APIs & Services → Credentials")
-                log("  Save as ~/.openclaw/integrations/google/credentials.json")
+                log("ERROR: Google credentials file not found.")
+                log(f"  Checked: {_GOOGLE_DIR}/credentials.json")
+                log(f"  Checked: {_GOOGLE_DIR}/gmail-credentials.json")
+                log("  Download from Google Cloud Console → APIs & Services → Credentials")
                 return None
+            # Running as a systemd service (no TTY) — can't do interactive OAuth
+            if not sys.stdin.isatty():
+                log("ERROR: token.json missing and running as a service (no TTY) — cannot prompt for auth.")
+                _auth_instructions()
+                return None
+            # Interactive fallback (should not normally reach here — use --auth flag)
             try:
-                log("Starting OAuth flow — attempting local server (needs browser access to Pi)")
-                log("If this hangs, run on a machine with a browser, then copy token.json to the Pi")
                 flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-                creds = flow.run_local_server(port=0)
+                creds = flow.run_local_server(port=AUTH_PORT, open_browser=False)
                 TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
                 TOKEN_FILE.write_text(creds.to_json())
-                log(f"OAuth consent complete — token saved to {TOKEN_FILE}")
+                log(f"OAuth complete — token saved to {TOKEN_FILE}")
             except Exception as e:
                 log(f"ERROR: OAuth flow failed: {e}")
-                log("FLAG TO TOM: Google Calendar OAuth could not complete automatically.")
-                log("  Run on a machine with a browser:")
-                log(f"    python3 {__file__}")
-                log("  Then copy the token.json file to the Pi:")
-                log(f"    scp ~/.openclaw/integrations/google/token.json pi@<pi-ip>:{TOKEN_FILE}")
+                _auth_instructions()
                 return None
 
     try:
@@ -301,6 +361,21 @@ def poll_once():
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Google Calendar poller for OpenClaw")
+    parser.add_argument(
+        "--auth",
+        action="store_true",
+        help=(
+            f"Run interactive OAuth setup on port {AUTH_PORT}. "
+            f"SSH-tunnel first: ssh -L {AUTH_PORT}:localhost:{AUTH_PORT} pi@<pi-ip>"
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.auth:
+        do_auth()
+        return
+
     log("Google Calendar poller started")
     while True:
         try:

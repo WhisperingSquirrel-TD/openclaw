@@ -719,15 +719,23 @@ elif [ -f "$GARMIN_COOKIE_DST" ]; then
     ( crontab -l 2>/dev/null; echo "$GARMIN_CRON" ) | crontab -
     info "Garmin poller cron installed: daily at 09:00"
 
-    # Check if credentials are available — if so, no manual setup needed
+    # Check if credentials are available — if so, need one-time --setup-garth run
     GARMIN_ENV="$HOME/.openclaw/.env"
+    GARTH_DIR="$HOME/.garth"
     if [ -f "$GARMIN_ENV" ] && grep -q "GARMIN_EMAIL" "$GARMIN_ENV" && grep -q "GARMIN_PASSWORD" "$GARMIN_ENV"; then
-        info "GARMIN_EMAIL + GARMIN_PASSWORD found in .env — poller will self-authenticate via garth."
-        info "  No manual --setup step needed. Tokens cached in ~/.garth/ after first run."
+        if [ -f "$GARTH_DIR/oauth2_token.json" ] || [ -f "$GARTH_DIR/token.json" ]; then
+            info "GARMIN_EMAIL + GARMIN_PASSWORD in .env + garth tokens cached — poller will self-authenticate."
+        else
+            warn "GARMIN_EMAIL + GARMIN_PASSWORD found in .env but garth tokens not yet created."
+            warn "  Run this ONCE from a terminal (handles MFA if needed):"
+            warn "    python3 $GARMIN_COOKIE_DST --setup-garth"
+            warn "  After that, the 09:00 cron runs automatically with no further action."
+        fi
     else
         warn "GARMIN_EMAIL or GARMIN_PASSWORD not found in ~/.openclaw/.env"
-        warn "  Recommended (self-healing, no cookie expiry): add both to ~/.openclaw/.env"
-        warn "  OR run the manual cookie setup: python3 $GARMIN_COOKIE_DST --setup"
+        warn "  Recommended (self-healing, no cookie expiry): add both to ~/.openclaw/.env, then run:"
+        warn "    python3 $GARMIN_COOKIE_DST --setup-garth"
+        warn "  OR use the legacy cookie setup: python3 $GARMIN_COOKIE_DST --setup"
     fi
 fi
 
