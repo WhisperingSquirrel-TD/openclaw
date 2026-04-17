@@ -115,8 +115,11 @@ def cookies_to_header(cookies: dict) -> str:
 def setup_cookies():
     print("\n=== Garmin Cookie Setup ===")
     print("1. Open connect.garmin.com in your browser and log in")
-    print("2. Press F12 → Application tab → Cookies → https://connect.garmin.com")
-    print("3. Paste the values below (press Enter to skip optional ones)\n")
+    print("2. Navigate to any page (e.g. the dashboard)")
+    print("3. Press F12 → Application tab → Storage → Cookies → https://connect.garmin.com")
+    print("4. Paste the values below\n")
+    print("NOTE: JWT_WEB is REQUIRED for health/activity data (Garmin API change ~2024).")
+    print("      SESSIONID alone only works for profile lookups.\n")
 
     cookies = {}
 
@@ -126,6 +129,13 @@ def setup_cookies():
         sys.exit(1)
     cookies["SESSIONID"] = sessionid
 
+    jwt = input("JWT_WEB (required for health data): ").strip()
+    if not jwt:
+        print("WARNING: JWT_WEB not provided — health/activity data endpoints will return empty.")
+        print("         Re-run --setup and paste JWT_WEB to fix this.\n")
+    else:
+        cookies["JWT_WEB"] = jwt
+
     session = input("session (optional but recommended): ").strip()
     if session:
         cookies["session"] = session
@@ -133,10 +143,6 @@ def setup_cookies():
     cflb = input("_cflb (optional): ").strip()
     if cflb:
         cookies["_cflb"] = cflb
-
-    jwt = input("JWT_WEB (optional): ").strip()
-    if jwt:
-        cookies["JWT_WEB"] = jwt
 
     cookies["_saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     cookies["_note"] = "Created by poll-garmin-cookie.py --setup"
@@ -168,11 +174,14 @@ def _get(path: str, cookies: dict, params: dict = None) -> dict:
     req.add_header("NK", "NT")
     req.add_header("X-app-ver", "4.61.2.0")
     req.add_header("Accept", "application/json, text/javascript, */*; q=0.01")
+    req.add_header("Accept-Language", "en-GB,en;q=0.9")
     req.add_header("User-Agent",
         "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    req.add_header("Origin", "https://connect.garmin.com")
     req.add_header("Referer", "https://connect.garmin.com/modern/")
     req.add_header("X-Requested-With", "XMLHttpRequest")
+    req.add_header("DI-Backend-Locale", "en-GB")
 
     try:
         with urllib_request.urlopen(req, timeout=20) as resp:
