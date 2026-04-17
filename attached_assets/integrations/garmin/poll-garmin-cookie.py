@@ -180,6 +180,10 @@ def _get(path: str, cookies: dict, params: dict = None) -> dict:
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     req.add_header("Referer", "https://connect.garmin.com/modern/")
     req.add_header("X-Requested-With", "XMLHttpRequest")
+    # Garmin /proxy/* endpoints require JWT_WEB as Bearer token in addition to cookies.
+    jwt_web = cookies.get("JWT_WEB", "").strip()
+    if jwt_web:
+        req.add_header("Authorization", f"Bearer {jwt_web}")
 
     try:
         with urllib_request.urlopen(req, timeout=20) as resp:
