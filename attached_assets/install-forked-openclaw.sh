@@ -686,32 +686,49 @@ GARMIN_LOG="$HOME/.openclaw/workspace/memory/poll-garmin-log.txt"
 
 mkdir -p "$HOME/.openclaw/integrations/garmin"
 
-# Deploy cookie-based poller (primary)
-if [ -f "$GARMIN_COOKIE_SRC" ]; then
-    ln -sf "$GARMIN_COOKIE_SRC" "$GARMIN_COOKIE_DST"
-    info "Garmin cookie-poller linked: $GARMIN_COOKIE_DST"
+# garminconnect + garth are now used by the poller for self-healing auth when
+# GARMIN_EMAIL + GARMIN_PASSWORD are in ~/.openclaw/.env.  Install if missing.
+if python3 -c "import garminconnect" 2>/dev/null; then
+    info "garminconnect: already installed"
 else
-    warn "Garmin cookie-poller not found at $GARMIN_COOKIE_SRC — skipping"
+    info "Installing garminconnect (used for self-healing Garmin auth)..."
+    pip3 install --break-system-packages --quiet garminconnect 2>/dev/null && \
+        info "garminconnect installed" || \
+        warn "garminconnect install failed — install manually: pip3 install --break-system-packages garminconnect"
 fi
 
-# Keep old garth-based poller as a fallback (no install needed if cookie poller is primary)
+# Deploy cookie-based poller (primary — now also supports garth/credential auth)
+if [ -f "$GARMIN_COOKIE_SRC" ]; then
+    ln -sf "$GARMIN_COOKIE_SRC" "$GARMIN_COOKIE_DST"
+    info "Garmin poller linked: $GARMIN_COOKIE_DST"
+else
+    warn "Garmin poller not found at $GARMIN_COOKIE_SRC — skipping"
+fi
+
+# Keep old garth-based poller as a fallback
 if [ -f "$GARMIN_OLD_SRC" ]; then
     ln -sf "$GARMIN_OLD_SRC" "$GARMIN_OLD_DST"
     info "Garmin legacy poller linked (fallback only): $GARMIN_OLD_DST"
 fi
 
-# Cron: add cookie-poller at 09:00 if not already present.
-# NOT 06:xx (CRM) and NOT 07:xx (another job).
-# If the old poll-garmin.py cron exists (active or commented), we leave it and
-# add the cookie-poller separately — both can coexist.
+# Cron: add poller at 09:00 if not already present
 if crontab -l 2>/dev/null | grep -qF "poll-garmin-cookie.py"; then
-    info "Garmin cookie-poller cron already present — leaving as-is."
+    info "Garmin poller cron already present — leaving as-is."
 elif [ -f "$GARMIN_COOKIE_DST" ]; then
     GARMIN_CRON="0 9 * * * python3 $GARMIN_COOKIE_DST >> $GARMIN_LOG 2>&1"
     ( crontab -l 2>/dev/null; echo "$GARMIN_CRON" ) | crontab -
-    info "Garmin cookie-poller cron installed: daily at 09:00"
-    warn "IMPORTANT: Run setup before the cron fires:"
-    warn "  python3 $GARMIN_COOKIE_DST --setup"
+    info "Garmin poller cron installed: daily at 09:00"
+
+    # Check if credentials are available — if so, no manual setup needed
+    GARMIN_ENV="$HOME/.openclaw/.env"
+    if [ -f "$GARMIN_ENV" ] && grep -q "GARMIN_EMAIL" "$GARMIN_ENV" && grep -q "GARMIN_PASSWORD" "$GARMIN_ENV"; then
+        info "GARMIN_EMAIL + GARMIN_PASSWORD found in .env — poller will self-authenticate via garth."
+        info "  No manual --setup step needed. Tokens cached in ~/.garth/ after first run."
+    else
+        warn "GARMIN_EMAIL or GARMIN_PASSWORD not found in ~/.openclaw/.env"
+        warn "  Recommended (self-healing, no cookie expiry): add both to ~/.openclaw/.env"
+        warn "  OR run the manual cookie setup: python3 $GARMIN_COOKIE_DST --setup"
+    fi
 fi
 
 # ── Daily provider reset (04:00) ──────────────────────────────────────────────

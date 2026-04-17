@@ -261,13 +261,20 @@ Lessons from applying upstream changes — follow this checklist every sync.
 ### Scheduling constraint — avoid 06:xx
 The CRM runs at 06:00 every morning and another job runs at 07:00. No background jobs should be scheduled in the 06:xx or 07:xx windows. All timed tasks should be scheduled at 08:00 or later. The Garmin poller is set to 09:00 for this reason. Enforce this for any new pollers or cron jobs added in future.
 
-### Garmin poller — cookie-based (no OAuth)
-The Garmin poller switched from garth/OAuth (`poll-garmin.py`) to a cookie-based approach (`poll-garmin-cookie.py`) after persistent 429 rate-limiting from Garmin's auth endpoints.
-- **Primary**: `~/.openclaw/integrations/garmin/poll-garmin-cookie.py` — uses browser session cookies, no OAuth
-- **Setup** (one-time, or when cookies expire ~7-14 days): log into connect.garmin.com in the Pi browser, then run `python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup` and paste SESSIONID from browser devtools (F12 → Application → Cookies)
-- **Cookie file**: `~/.openclaw/integrations/garmin/garmin-cookies.json`
-- **Legacy fallback**: `poll-garmin.py` (garth-based) kept on disk but not in cron
-- The mgmt-bot `/garmin` command auto-selects the cookie poller if present, legacy if not
+### Garmin poller — self-healing auth via credentials
+`poll-garmin-cookie.py` now supports two auth modes, tried in this order:
+
+1. **Garth/credential mode (preferred)** — reads `GARMIN_EMAIL` + `GARMIN_PASSWORD` from `~/.openclaw/.env`, authenticates via the `garminconnect` library (garth OAuth2). Tokens cached in `~/.garth/` and auto-refreshed every few weeks. **No manual cookie setup needed, never expires like cookies do.**
+2. **Cookie fallback** — reads browser session cookies from `garmin-cookies.json`. Used only if credentials are not in `.env` or garth auth fails. Cookies expire every 7–14 days requiring manual `--setup`.
+
+- **Primary script**: `~/.openclaw/integrations/garmin/poll-garmin-cookie.py`
+- **Credential setup** (one-time): add `GARMIN_EMAIL=your@email.com` and `GARMIN_PASSWORD=yourpassword` to `~/.openclaw/.env`. The install script checks for these and skips the cookie warning when found.
+- **Manual cookie setup** (fallback only): log into connect.garmin.com, run `python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup`, paste SESSIONID from devtools
+- **Cookie file** (cookie mode): `~/.openclaw/integrations/garmin/garmin-cookies.json`
+- **Garth token cache**: `~/.garth/` (auto-managed by the garth library)
+- **Legacy fallback**: `poll-garmin.py` (old garth-based poller) kept on disk but not in cron
+- The mgmt-bot `/garmin` command uses the cookie poller if present, legacy if not
+- If garth login fails with MFA, run the poller manually once from a terminal to complete MFA interactively — tokens are then cached and subsequent runs are non-interactive
 
 ### Background services (Pi)
 - Python pollers must run as **systemd user services**, not bare background processes. They will not survive a Pi reboot or openclaw restart otherwise. The install script creates `openclaw-email-microsoft` and `openclaw-email-gmail` services automatically.

@@ -209,6 +209,181 @@ def _safe_get(label: str, path: str, cookies: dict, params: dict = None):
         return {}
 
 
+# ── Garth-mode auth + HTTP (uses GARMIN_EMAIL / GARMIN_PASSWORD from .env) ──────
+#
+# When credentials are present the poller authenticates via the garminconnect
+# library (which wraps garth OAuth2).  Garth stores tokens in ~/.garth/ and
+# refreshes them automatically, so re-auth only happens once every few weeks —
+# completely avoiding the "cookie expired every 7 days" problem.
+#
+# Garth's `connectapi()` hits https://connectapi.garmin.com{path}, so the
+# paths are the same as the cookie paths but WITHOUT the /modern/proxy/ prefix.
+
+def _garth_auth():
+    """
+    Authenticate with Garmin using GARMIN_EMAIL + GARMIN_PASSWORD from .env.
+    Returns a garminconnect.Garmin instance with an active session.
+    Tokens are cached in ~/.garth/ and auto-refreshed by garth on future runs.
+    Raises RuntimeError with a clear message on any failure.
+    """
+    try:
+        from garminconnect import Garmin
+    except ImportError:
+        raise RuntimeError(
+            "garminconnect not installed — run: "
+            "pip3 install --break-system-packages garminconnect"
+        )
+
+    email    = os.environ.get("GARMIN_EMAIL", "").strip()
+    password = os.environ.get("GARMIN_PASSWORD", "").strip()
+    if not email or not password:
+        raise RuntimeError("GARMIN_EMAIL or GARMIN_PASSWORD missing from ~/.openclaw/.env")
+
+    garth_token_dir = Path.home() / ".garth"
+    garth_token_dir.mkdir(parents=True, exist_ok=True)
+
+    api = Garmin(email, password, is_cn=False, prompt_mfa=None)
+
+    # Try to resume from cached tokens first (avoids triggering auth endpoints)
+    try:
+        api.login(str(garth_token_dir))
+        log(f"Garth: resumed session from cached tokens in {garth_token_dir}")
+    except Exception:
+        # Token cache stale or missing — do a full login
+        log("Garth: cached tokens absent or expired, logging in with credentials...")
+        try:
+            api.login()
+            api.garth.dump(str(garth_token_dir))
+            log(f"Garth: login successful — tokens cached in {garth_token_dir}")
+        except Exception as e:
+            raise RuntimeError(f"Garth login failed: {e}")
+
+    return api
+
+
+def _garth_get(api, path: str, params: dict = None) -> dict:
+    """Make an authenticated GET to connectapi.garmin.com via garth."""
+    try:
+        kwargs = {"params": params} if params else {}
+        result = api.garth.connectapi(path, **kwargs)
+        return result if result else {}
+    except Exception as e:
+        err = str(e)
+        if "401" in err or "Unauthorized" in err.lower():
+            raise RuntimeError("COOKIES_EXPIRED")
+        if "429" in err:
+            raise RuntimeError("RATE_LIMITED")
+        raise RuntimeError(err)
+
+
+def _garth_safe_get(api, label: str, path: str, params: dict = None):
+    try:
+        return _garth_get(api, path, params)
+    except RuntimeError as e:
+        err = str(e)
+        if "COOKIES_EXPIRED" in err:
+            log(f"ERROR: Garth 401 on {label} — tokens may be revoked.")
+            log(f"  Delete ~/.garth/ and re-run to force a fresh login.")
+            sys.exit(1)
+        if "RATE_LIMITED" in err:
+            log(f"ERROR: Garmin rate-limited (429) on {label}. Wait and retry.")
+            sys.exit(1)
+        log(f"WARNING: {label} failed (garth): {err}")
+        return {}
+    except Exception as e:
+        log(f"WARNING: {label} failed (garth): {e}")
+        return {}
+
+
+def _garth_display_name(api) -> str:
+    """
+    Get displayName via garth.
+    Resolution order: env var override → garth.username → userprofile API.
+    """
+    override = os.environ.get("GARMIN_DISPLAY_NAME", "").strip()
+    if override:
+        log(f"Using GARMIN_DISPLAY_NAME override: {override}")
+        return override
+
+    # garth exposes the username after login
+    try:
+        dn = api.garth.username
+        if dn:
+            log(f"Garth: display name from garth.username = '{dn}'")
+            return dn
+    except Exception:
+        pass
+
+    # Fall back to the userprofile API (same endpoint, no /modern/proxy/ prefix)
+    try:
+        data = _garth_get(api, "/userprofile-service/userprofile/settings")
+        dn = (
+            (data.get("userData") or {}).get("displayName")
+            or data.get("displayName")
+            or data.get("userName")
+        )
+        if dn:
+            log(f"Garth: display name from userprofile API = '{dn}'")
+            return dn
+    except Exception as e:
+        log(f"WARNING: garth userprofile API failed: {e}")
+
+    raise RuntimeError(
+        "Could not resolve Garmin displayName in garth mode. "
+        "Set GARMIN_DISPLAY_NAME=YourUsername in ~/.openclaw/.env"
+    )
+
+
+def _fetch_all_garth(api, today: str):
+    """
+    Run all data fetches using garth (connectapi paths — no /modern/proxy/ prefix).
+    Returns the same tuple as the cookie-based fetch calls in main():
+        (stats_raw, wellness_raw, hr_raw, hrv_raw, sleep_raw, spo2_raw, body_bat, activity)
+    """
+    display_name = _garth_display_name(api)
+    log(f"Garth: fetching data for {today} (user={display_name})")
+
+    stats_raw = _garth_safe_get(api, "stats",
+        f"/userstats-service/statistics/daily/{display_name}",
+        {"fromDate": today, "untilDate": today, "metricId": "60,61,51,71,2,56,57"})
+
+    wellness_raw = _garth_safe_get(api, "wellness",
+        f"/wellness-service/wellness/dailySummaryChart/{display_name}",
+        {"date": today})
+
+    hr_raw = _garth_safe_get(api, "resting_hr",
+        f"/wellness-service/wellness/dailyHeartRate/{display_name}",
+        {"date": today})
+
+    hrv_raw = _garth_safe_get(api, "hrv",
+        f"/hrv-service/hrv/{today}")
+
+    sleep_raw = _garth_safe_get(api, "sleep",
+        f"/wellness-service/wellness/dailySleepData/{display_name}",
+        {"date": today, "nonSleepBufferMinutes": "60"})
+
+    spo2_raw = _garth_safe_get(api, "spo2",
+        f"/wellness-service/wellness/dailySpo2/{display_name}",
+        {"calendarDate": today})
+
+    bb_raw = _garth_safe_get(api, "body_battery",
+        "/wellness-service/wellness/bodyBattery/reports/daily",
+        {"startDate": today, "endDate": today})
+    if isinstance(bb_raw, list):
+        body_bat = bb_raw
+    elif isinstance(bb_raw, dict):
+        body_bat = bb_raw.get("bodyBatteryFeedbackList") or bb_raw.get("bodyBatteryList") or []
+    else:
+        body_bat = []
+
+    act_raw = _garth_safe_get(api, "activities",
+        "/activitylist-service/activities/search/activities",
+        {"limit": "1", "start": "0"})
+    activity = act_raw[0] if isinstance(act_raw, list) and act_raw else {}
+
+    return stats_raw, wellness_raw, hr_raw, hrv_raw, sleep_raw, spo2_raw, body_bat, activity
+
+
 # ── Data fetchers ──────────────────────────────────────────────────────────────
 
 def _load_dotenv() -> None:
@@ -691,34 +866,57 @@ def main():
         setup_cookies()
         return
 
-    _load_dotenv()  # loads GARMIN_DISPLAY_NAME and other vars from ~/.openclaw/.env
-    log("Garmin cookie-poller starting")
+    _load_dotenv()  # loads GARMIN_EMAIL, GARMIN_PASSWORD, GARMIN_DISPLAY_NAME, etc.
+    log("Garmin poller starting")
     today = date.today().strftime("%Y-%m-%d")
 
-    cookies = load_cookies()
+    # ── Auth strategy: credentials (garth) preferred, cookies as fallback ────────
+    garth_api = None
+    use_garth = False
 
-    try:
-        display_name = get_display_name(cookies)
-        log(f"Garmin: session active — display name: {display_name}")
-    except RuntimeError as e:
-        err = str(e)
-        if "COOKIES_EXPIRED" in err:
-            log("ERROR: Garmin cookies have expired.")
-            log("FLAG TO TOM: Log into connect.garmin.com and run: python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup")
+    garmin_email    = os.environ.get("GARMIN_EMAIL", "").strip()
+    garmin_password = os.environ.get("GARMIN_PASSWORD", "").strip()
+
+    if garmin_email and garmin_password:
+        try:
+            garth_api = _garth_auth()
+            use_garth = True
+            log("Auth: using garth (email/password from .env) — self-healing, no manual cookie setup needed")
+        except RuntimeError as e:
+            log(f"WARNING: Garth auth failed ({e}) — falling back to cookie mode")
+
+    if not use_garth:
+        log("Auth: using cookie mode (GARMIN_EMAIL/GARMIN_PASSWORD not in .env or garth auth failed)")
+        cookies = load_cookies()
+        try:
+            display_name = get_display_name(cookies)
+            log(f"Garmin: cookie session active — display name: {display_name}")
+        except RuntimeError as e:
+            err = str(e)
+            if "COOKIES_EXPIRED" in err:
+                log("ERROR: Garmin cookies have expired.")
+                log("FLAG TO TOM: Add GARMIN_EMAIL + GARMIN_PASSWORD to ~/.openclaw/.env for self-healing auth,")
+                log("  OR log into connect.garmin.com and run: python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup")
+                sys.exit(1)
+            log(f"ERROR: Could not verify Garmin session: {err}")
+            log("FLAG TO TOM: Garmin session check failed. Add GARMIN_EMAIL + GARMIN_PASSWORD to .env, or run --setup.")
             sys.exit(1)
-        log(f"ERROR: Could not verify Garmin session: {err}")
-        log("FLAG TO TOM: Garmin cookie-poller could not verify session. Run --setup.")
-        sys.exit(1)
 
-    log(f"Fetching data for {today}")
-    stats_raw   = fetch_stats(cookies, display_name, today)
-    wellness_raw = fetch_wellness(cookies, display_name, today)
-    hr_raw      = fetch_resting_hr(cookies, display_name, today)
-    hrv_raw     = fetch_hrv(cookies, today)
-    sleep_raw   = fetch_sleep(cookies, display_name, today)
-    spo2_raw    = fetch_spo2(cookies, display_name, today)
-    body_bat    = fetch_body_battery(cookies, today)
-    activity    = fetch_last_activity(cookies)
+    # ── Fetch all data ────────────────────────────────────────────────────────────
+    if use_garth:
+        (stats_raw, wellness_raw, hr_raw,
+         hrv_raw, sleep_raw, spo2_raw,
+         body_bat, activity) = _fetch_all_garth(garth_api, today)
+    else:
+        log(f"Fetching data for {today}")
+        stats_raw    = fetch_stats(cookies, display_name, today)
+        wellness_raw = fetch_wellness(cookies, display_name, today)
+        hr_raw       = fetch_resting_hr(cookies, display_name, today)
+        hrv_raw      = fetch_hrv(cookies, today)
+        sleep_raw    = fetch_sleep(cookies, display_name, today)
+        spo2_raw     = fetch_spo2(cookies, display_name, today)
+        body_bat     = fetch_body_battery(cookies, today)
+        activity     = fetch_last_activity(cookies)
 
     stats = extract_stats(stats_raw, wellness_raw, hr_raw)
     hrv   = extract_hrv(hrv_raw)
