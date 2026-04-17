@@ -178,17 +178,24 @@ def _get(path: str, cookies: dict, params: dict = None) -> dict:
     req.add_header("User-Agent",
         "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    req.add_header("Origin", "https://connect.garmin.com")
     req.add_header("Referer", "https://connect.garmin.com/modern/")
     req.add_header("X-Requested-With", "XMLHttpRequest")
-    req.add_header("DI-Backend-Locale", "en-GB")
 
     try:
         with urllib_request.urlopen(req, timeout=20) as resp:
-            body = resp.read().decode("utf-8")
+            status = resp.status
+            body = resp.read().decode("utf-8", errors="replace")
             if not body.strip():
+                log(f"  [debug] HTTP {status} empty body — {url.split('?')[0]}")
                 return {}
-            return json.loads(body)
+            try:
+                parsed = json.loads(body)
+                if not parsed:
+                    log(f"  [debug] HTTP {status} body={body[:150]!r} — {url.split('?')[0]}")
+                return parsed
+            except Exception:
+                log(f"  [debug] HTTP {status} non-JSON body={body[:150]!r} — {url.split('?')[0]}")
+                return {}
     except urllib_error.HTTPError as e:
         code = e.code
         if code == 401:
