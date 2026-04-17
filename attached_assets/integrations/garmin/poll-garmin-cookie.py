@@ -211,14 +211,85 @@ def _safe_get(label: str, path: str, cookies: dict, params: dict = None):
 
 # ── Data fetchers ──────────────────────────────────────────────────────────────
 
+def _load_dotenv() -> None:
+    env_file = OPENCLAW / ".env"
+    if not env_file.exists():
+        return
+    try:
+        for raw in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+    except Exception:
+        pass
+
+
 def get_display_name(cookies: dict) -> str:
-    data = _get("/modern/proxy/userprofile-service/userprofile/settings", cookies)
-    name = (data.get("userData", {}).get("displayName")
-            or data.get("displayName")
-            or data.get("userName"))
-    if not name:
-        raise RuntimeError("Could not find displayName in userprofile response")
-    return name
+    """
+    Resolve the Garmin displayName needed for per-user API calls.
+
+    Resolution order:
+    1. GARMIN_DISPLAY_NAME env var (fastest, manual override — set in ~/.openclaw/.env)
+    2. /modern/proxy/userprofile-service/userprofile/settings  (primary API)
+    3. /modern/proxy/userprofile-service/socialProfile/        (alternative endpoint)
+    4. /proxy/userprofile-service/userprofile/settings         (no /modern prefix fallback)
+
+    If all fail: raises RuntimeError with a clear flag message.
+
+    To set a manual override (avoids the API call entirely):
+        echo 'GARMIN_DISPLAY_NAME=YourGarminUsername' >> ~/.openclaw/.env
+    Find your username: log into connect.garmin.com, look at the profile URL.
+    """
+    # 1. Manual env var override — most reliable, skips the API call entirely
+    override = os.environ.get("GARMIN_DISPLAY_NAME", "").strip()
+    if override:
+        log(f"Using GARMIN_DISPLAY_NAME override: {override}")
+        return override
+
+    endpoints = [
+        "/modern/proxy/userprofile-service/userprofile/settings",
+        "/modern/proxy/userprofile-service/socialProfile/",
+        "/proxy/userprofile-service/userprofile/settings",
+    ]
+
+    last_error = ""
+    for ep in endpoints:
+        try:
+            data = _get(ep, cookies)
+            name = (
+                (data.get("userData") or {}).get("displayName")
+                or data.get("displayName")
+                or data.get("userName")
+                or data.get("screenName")
+                or (data.get("userProfile") or {}).get("displayName")
+            )
+            if name:
+                log(f"Resolved displayName='{name}' via {ep}")
+                return name
+            log(f"WARNING: {ep} returned data but no displayName field — trying next endpoint")
+        except RuntimeError as e:
+            err = str(e)
+            last_error = err
+            if "COOKIES_EXPIRED" in err or "RATE_LIMITED" in err:
+                raise  # propagate immediately — no point trying other endpoints
+            log(f"WARNING: {ep} failed ({err}) — trying next endpoint")
+        except Exception as e:
+            last_error = str(e)
+            log(f"WARNING: {ep} failed ({e}) — trying next endpoint")
+
+    raise RuntimeError(
+        f"Could not resolve Garmin displayName from any endpoint. "
+        f"Last error: {last_error}. "
+        f"To fix: set GARMIN_DISPLAY_NAME=YourUsername in ~/.openclaw/.env "
+        f"(find your username in the connect.garmin.com profile URL)"
+    )
 
 
 def fetch_stats(cookies: dict, display_name: str, today: str) -> dict:
@@ -620,6 +691,7 @@ def main():
         setup_cookies()
         return
 
+    _load_dotenv()  # loads GARMIN_DISPLAY_NAME and other vars from ~/.openclaw/.env
     log("Garmin cookie-poller starting")
     today = date.today().strftime("%Y-%m-%d")
 

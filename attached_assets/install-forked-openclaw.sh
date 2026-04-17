@@ -1392,10 +1392,34 @@ else
 fi
 
 # Google Calendar poller — uses credentials.json + token.json (separate from Gmail)
+# Required pip packages — install if missing (no harm in repeating)
 GCAL_POLLER="$HOME/.openclaw/integrations/google/poll-calendar-google.py"
 GCAL_LOG="$HOME/.openclaw/workspace/memory/poll-calendar-google-log.txt"
-GCAL_CREDS="$HOME/.openclaw/integrations/google/credentials.json"
 GCAL_TOKEN="$HOME/.openclaw/integrations/google/token.json"
+GCAL_GOOGLE_DIR="$HOME/.openclaw/integrations/google"
+
+# Credentials: accept either filename (the poller picks up whichever exists)
+if [ -f "$GCAL_GOOGLE_DIR/credentials.json" ]; then
+    GCAL_CREDS="$GCAL_GOOGLE_DIR/credentials.json"
+elif [ -f "$GCAL_GOOGLE_DIR/gmail-credentials.json" ]; then
+    GCAL_CREDS="$GCAL_GOOGLE_DIR/gmail-credentials.json"
+    info "Google Calendar: using gmail-credentials.json as credentials source"
+else
+    GCAL_CREDS=""
+fi
+
+# Install Google API libraries if missing — the poller will exit immediately
+# with ImportError without these, which looks like a mysterious failure
+if python3 -c "import googleapiclient" 2>/dev/null; then
+    info "Google API libraries: already installed"
+else
+    info "Installing Google API libraries..."
+    pip3 install --break-system-packages --quiet \
+        google-auth google-auth-oauthlib google-api-python-client 2>/dev/null && \
+        info "Google API libraries installed" || \
+        warn "Google API library install failed — install manually:"
+    warn "  pip3 install --break-system-packages google-auth google-auth-oauthlib google-api-python-client"
+fi
 
 cat > "$SYSTEMD_USER_DIR/openclaw-calendar-google.service" << GCALSVC
 [Unit]
@@ -1419,15 +1443,24 @@ GCALSVC
 
 systemctl --user daemon-reload
 systemctl --user enable openclaw-calendar-google.service 2>/dev/null || true
-if [ -f "$GCAL_CREDS" ] && [ -f "$GCAL_TOKEN" ]; then
+
+if [ -n "$GCAL_CREDS" ] && [ -f "$GCAL_TOKEN" ]; then
     systemctl --user restart openclaw-calendar-google.service && \
         info "Google Calendar poller running — writing GOOGLE_CALENDAR.md every 15 min" || \
         warn "Google Calendar poller failed to start — check $GCAL_LOG"
-elif [ -f "$GCAL_CREDS" ]; then
-    warn "Google Calendar poller enabled but not started — run once manually to complete OAuth:"
+elif [ -n "$GCAL_CREDS" ]; then
+    warn "Google Calendar: credentials found but token.json missing — OAuth not yet done."
+    warn "  The Calendar scope is SEPARATE from Gmail — even if Gmail works, calendar"
+    warn "  needs its own one-time authorization. Do this from the Pi's browser (or SSH):"
     warn "  python3 $GCAL_POLLER"
+    warn "  If the Pi has no browser: run that script on your desktop instead,"
+    warn "  then SCP the token.json to: $GCAL_TOKEN"
 else
-    info "Google Calendar poller not started (credentials.json not found)"
+    warn "Google Calendar: no credentials file found."
+    warn "  Checked: $GCAL_GOOGLE_DIR/credentials.json"
+    warn "  Checked: $GCAL_GOOGLE_DIR/gmail-credentials.json"
+    warn "  Download OAuth credentials from Google Cloud Console → APIs & Services → Credentials"
+    warn "  Save as: $GCAL_GOOGLE_DIR/credentials.json"
 fi
 
 # Step 12a: Set audit log append-only (tamper protection)

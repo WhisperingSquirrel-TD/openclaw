@@ -33,11 +33,24 @@ except ImportError:
         "Run: pip3 install --break-system-packages google-auth google-auth-oauthlib google-api-python-client"
     )
 
-STATE_DIR        = Path.home() / ".openclaw"
-CREDENTIALS_FILE = STATE_DIR / "integrations/google/credentials.json"
-TOKEN_FILE       = STATE_DIR / "integrations/google/token.json"
-CALENDAR_MD      = STATE_DIR / "workspace/GOOGLE_CALENDAR.md"
-LOG_FILE         = STATE_DIR / "workspace/memory/poll-calendar-google-log.txt"
+STATE_DIR   = Path.home() / ".openclaw"
+CALENDAR_MD = STATE_DIR / "workspace/GOOGLE_CALENDAR.md"
+LOG_FILE    = STATE_DIR / "workspace/memory/poll-calendar-google-log.txt"
+
+# Credentials: try the calendar-specific file first, fall back to the shared
+# gmail-credentials.json that the Gmail poller also uses — both use the same
+# OAuth app so a single credentials.json file covers both.
+_GOOGLE_DIR = STATE_DIR / "integrations/google"
+CREDENTIALS_FILE = next(
+    (p for p in [
+        _GOOGLE_DIR / "credentials.json",
+        _GOOGLE_DIR / "gmail-credentials.json",
+    ] if p.exists()),
+    _GOOGLE_DIR / "credentials.json",   # fallback (will error with clear message)
+)
+
+# Token: calendar uses its own token file (separate scope from Gmail)
+TOKEN_FILE = _GOOGLE_DIR / "token.json"
 
 SCOPES        = ["https://www.googleapis.com/auth/calendar.readonly"]
 POLL_INTERVAL = 900   # 15 minutes
@@ -79,9 +92,17 @@ def log(msg: str):
 # ---------------------------------------------------------------------------
 
 def get_service():
+    log(f"Using credentials file: {CREDENTIALS_FILE}")
+    log(f"Using token file:       {TOKEN_FILE}")
+
     creds = None
     if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        except Exception as e:
+            log(f"WARNING: Could not read token file: {e} — will attempt re-auth")
+            creds = None
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             try:
@@ -90,22 +111,36 @@ def get_service():
                 log("Token refreshed successfully")
             except Exception as e:
                 log(f"ERROR: Token refresh failed: {e}")
-                log("Re-run the script manually to re-authenticate")
+                if "invalid_grant" in str(e).lower():
+                    log("FLAG TO TOM: Google Calendar token revoked (invalid_grant).")
+                    log(f"  Delete {TOKEN_FILE} and re-run manually to re-authenticate:")
+                    log(f"  python3 {__file__}")
                 return None
         else:
             if not CREDENTIALS_FILE.exists():
-                log(f"ERROR: credentials.json not found at {CREDENTIALS_FILE}")
-                log("Download OAuth credentials from Google Cloud Console")
+                log(f"ERROR: Google credentials file not found.")
+                log(f"  Checked: ~/.openclaw/integrations/google/credentials.json")
+                log(f"  Checked: ~/.openclaw/integrations/google/gmail-credentials.json")
+                log("  Download OAuth credentials from Google Cloud Console → APIs & Services → Credentials")
+                log("  Save as ~/.openclaw/integrations/google/credentials.json")
                 return None
             try:
+                log("Starting OAuth flow — attempting local server (needs browser access to Pi)")
+                log("If this hangs, run on a machine with a browser, then copy token.json to the Pi")
                 flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
                 creds = flow.run_local_server(port=0)
                 TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
                 TOKEN_FILE.write_text(creds.to_json())
-                log("OAuth consent complete — token saved")
+                log(f"OAuth consent complete — token saved to {TOKEN_FILE}")
             except Exception as e:
                 log(f"ERROR: OAuth flow failed: {e}")
+                log("FLAG TO TOM: Google Calendar OAuth could not complete automatically.")
+                log("  Run on a machine with a browser:")
+                log(f"    python3 {__file__}")
+                log("  Then copy the token.json file to the Pi:")
+                log(f"    scp ~/.openclaw/integrations/google/token.json pi@<pi-ip>:{TOKEN_FILE}")
                 return None
+
     try:
         return build("calendar", "v3", credentials=creds, cache_discovery=False)
     except Exception as e:
