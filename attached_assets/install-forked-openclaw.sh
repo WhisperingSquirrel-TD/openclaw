@@ -1557,6 +1557,18 @@ fi
 
 # Step 12b: Restart L1 — l1-stop/l1-start first (Pi-native, works without DBUS),
 # then fall back to systemctl --user restart (works when DBUS env is available).
+#
+# Source .env so OPENCLAW_VAULT_PASSPHRASE is in the environment before gateway
+# startup — prevents interactive passphrase prompts during direct terminal runs.
+_DOT_ENV="$HOME/.openclaw/.env"
+if [ -f "$_DOT_ENV" ] && [ -z "${OPENCLAW_VAULT_PASSPHRASE:-}" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$_DOT_ENV" 2>/dev/null || true
+    set +a
+    info "Loaded ~/.openclaw/.env (vault passphrase available for gateway startup)"
+fi
+
 echo ""
 warn "Restarting L1..."
 if [ -f "$HOME/l1-stop.sh" ] && [ -f "$HOME/l1-start.sh" ]; then
