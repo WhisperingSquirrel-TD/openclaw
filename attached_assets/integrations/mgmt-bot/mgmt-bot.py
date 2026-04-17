@@ -592,13 +592,18 @@ def cmd_install(token: str, chat_id: str) -> None:
     #   2. sends the result back to Telegram via urllib (no curl escaping issues)
     # Launched with start_new_session=True so it becomes its own session leader
     # and is NOT killed when systemd stops/restarts the mgmt-bot service.
+    # Snapshot the vault passphrase NOW (from mgmt-bot's already-loaded env)
+    # so the wrapper can inject it explicitly — avoids any interactive prompt.
+    _vault_pass = _cfg("OPENCLAW_VAULT_PASSPHRASE", "")
+
     wrapper_path = Path("/tmp/openclaw-install-wrapper.py")
     wrapper_path.write_text(
         "#!/usr/bin/env python3\n"
-        "import subprocess, urllib.request, json, sys, time\n"
+        "import subprocess, urllib.request, json, sys, time, os\n"
         f"TOKEN   = {token!r}\n"
         f"CHAT_ID = {chat_id!r}\n"
         f"INSTALL = {str(install_sh)!r}\n"
+        f"VAULT_PASS = {_vault_pass!r}\n"
         "\n"
         "def tg(text):\n"
         "    try:\n"
@@ -611,8 +616,15 @@ def cmd_install(token: str, chat_id: str) -> None:
         "    except Exception as e:\n"
         "        print(f'tg send failed: {e}', file=sys.stderr)\n"
         "\n"
-        "import os, shutil as _shutil\n"
         "HOME = os.path.expanduser('~')\n"
+        "\n"
+        "# Build a clean env for the install: inherit current env and\n"
+        "# force OPENCLAW_VAULT_PASSPHRASE so nothing can prompt for it.\n"
+        "install_env = os.environ.copy()\n"
+        "if VAULT_PASS:\n"
+        "    install_env['OPENCLAW_VAULT_PASSPHRASE'] = VAULT_PASS\n"
+        "# Mark as non-interactive so the install script skips any TTY-gated prompts.\n"
+        "install_env['OPENCLAW_NONINTERACTIVE'] = '1'\n"
         "\n"
         "def svc_active(name):\n"
         "    r = subprocess.run(['systemctl', '--user', 'is-active', name],\n"
@@ -623,7 +635,9 @@ def cmd_install(token: str, chat_id: str) -> None:
         "    \"\"\"Try l1-start.sh first (Pi-native), then systemctl --user start.\"\"\"\n"
         "    l1_start = os.path.join(HOME, 'l1-start.sh')\n"
         "    if os.path.exists(l1_start):\n"
-        "        r = subprocess.run(['bash', l1_start], capture_output=True, text=True, timeout=30)\n"
+        "        r = subprocess.run(['bash', l1_start],\n"
+        "                           capture_output=True, text=True, timeout=30,\n"
+        "                           stdin=subprocess.DEVNULL, env=install_env)\n"
         "        if r.returncode == 0:\n"
         "            return True\n"
         "    # Fallback: systemctl --user start\n"
@@ -631,9 +645,10 @@ def cmd_install(token: str, chat_id: str) -> None:
         "                   capture_output=True, timeout=30)\n"
         "    return False\n"
         "\n"
-        "# Run the install script\n"
+        "# Run the install script with stdin=DEVNULL so it cannot block on any prompt.\n"
         "res = subprocess.run(['bash', INSTALL],\n"
-        "                     capture_output=True, text=True, timeout=900)\n"
+        "                     capture_output=True, text=True, timeout=900,\n"
+        "                     stdin=subprocess.DEVNULL, env=install_env)\n"
         "output = (res.stdout + res.stderr).strip()\n"
         "lines  = output.splitlines()\n"
         "tail   = '\\n'.join(lines[-40:])\n"

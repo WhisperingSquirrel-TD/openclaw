@@ -26,6 +26,22 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Non-interactive guard: when launched from mgmt-bot /install (or any other
+# headless caller), set OPENCLAW_NONINTERACTIVE=1 in the environment so every
+# child process knows stdin is unavailable.  Also redirect stdin to /dev/null
+# so any accidental `read` or passphrase prompt returns immediately rather
+# than hanging the install.
+# ─────────────────────────────────────────────────────────────────────────────
+if [ -n "${OPENCLAW_NONINTERACTIVE:-}" ]; then
+    info "Non-interactive mode — stdin redirected to /dev/null (no prompts possible)"
+    exec < /dev/null
+elif [ ! -t 0 ]; then
+    # stdin is already not a TTY (piped/redirected) — treat as non-interactive
+    export OPENCLAW_NONINTERACTIVE=1
+    info "Detected non-interactive stdin — setting OPENCLAW_NONINTERACTIVE=1"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SOUL vault check — SOUL is encrypted at rest; plaintext NEVER touches the
 # workspace.  We only verify the encrypted vault file exists and warn if not.
 # ─────────────────────────────────────────────────────────────────────────────
