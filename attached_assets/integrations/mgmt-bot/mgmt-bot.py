@@ -786,6 +786,81 @@ def _yt_save_channels(channels: list) -> None:
     tmp.replace(p)
 
 
+def _yt_strip_tracking(url: str) -> str:
+    """Remove YouTube share tracking params (?si=, &si=) from a URL."""
+    import urllib.parse as _urlparse
+    try:
+        parsed = _urlparse.urlparse(url)
+        qs = _urlparse.parse_qs(parsed.query, keep_blank_values=True)
+        # Remove tracking-only params that don't affect channel resolution
+        for param in ("si", "feature", "pp", "igsh"):
+            qs.pop(param, None)
+        clean_query = _urlparse.urlencode({k: v[0] for k, v in qs.items()})
+        return _urlparse.urlunparse(parsed._replace(query=clean_query))
+    except Exception:
+        return url
+
+
+def _yt_extract_handle(url: str) -> str:
+    """Return the @handle (without @) from a YouTube channel URL, or ''."""
+    import re as _re
+    m = _re.search(r'youtube\.com/@([\w.-]+)', url)
+    return m.group(1) if m else ""
+
+
+def _yt_resolve_channel_id(handle_or_url: str) -> str:
+    """
+    Attempt to resolve a YouTube @handle or channel URL to a UC... channel ID.
+    Fetches the channel page and extracts the channelId from page metadata.
+    Returns '' on failure.
+    """
+    import re as _re
+    import urllib.request as _req
+
+    # Build URL to fetch
+    handle = _yt_extract_handle(handle_or_url)
+    if handle:
+        fetch_url = f"https://www.youtube.com/@{handle}"
+    elif handle_or_url.startswith("http"):
+        fetch_url = handle_or_url.split("?")[0]  # strip query string for page fetch
+    else:
+        return ""
+
+    try:
+        request = _req.Request(
+            fetch_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        with _req.urlopen(request, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        print(f"[mgmt-bot] _yt_resolve_channel_id fetch failed: {e}", file=sys.stderr)
+        return ""
+
+    # Look for channelId in the page (YouTube embeds it in page metadata/JS)
+    patterns = [
+        r'"channelId"\s*:\s*"(UC[\w-]{22})"',
+        r'"externalChannelId"\s*:\s*"(UC[\w-]{22})"',
+        r'channel_id=UC([\w-]{22})',
+        r'"key"\s*:\s*"channelId"\s*,\s*"value"\s*:\s*"(UC[\w-]{22})"',
+    ]
+    for pat in patterns:
+        m = _re.search(pat, html)
+        if m:
+            cid = m.group(1)
+            # Normalise — some patterns already include UC prefix
+            if not cid.startswith("UC"):
+                cid = "UC" + cid
+            return cid
+    return ""
+
+
 def cmd_yt_add(token: str, chat_id: str, args: str) -> None:
     """
     Usage: /yt-add <channel_url_or_id> [label]
@@ -794,6 +869,8 @@ def cmd_yt_add(token: str, chat_id: str, args: str) -> None:
       /yt-add UCBcRF18a7Qf58cCRy5xuWwQ "OpenClaw Dev Channel"
       /yt-add https://www.youtube.com/@lex_fridman
     """
+    import re as _re
+
     parts = args.strip().split(None, 1)
     if not parts:
         send(token, chat_id,
@@ -803,16 +880,35 @@ def cmd_yt_add(token: str, chat_id: str, args: str) -> None:
              "`/yt-add UCBcRF18a7Qf58cCRy5xuWwQ`")
         return
 
-    url_or_id = parts[0].strip()
+    raw_input = parts[0].strip()
     label = parts[1].strip().strip('"').strip("'") if len(parts) > 1 else ""
 
-    # Detect whether it's a bare channel ID (UC...) or a URL
-    import re as _re
-    is_channel_id = bool(_re.match(r'^UC[\w-]{22}$', url_or_id))
+    # Strip YouTube share tracking params (?si=...) — these change every time
+    # you copy a link so they break duplicate detection and add noise
+    url_or_id = _yt_strip_tracking(raw_input)
 
-    if is_channel_id:
-        entry: dict = {"channel_id": url_or_id}
+    # Bare UC... channel ID — store directly
+    if _re.match(r'^UC[\w-]{22}$', url_or_id):
+        resolved_id = url_or_id
+        display = url_or_id
     else:
+        # @handle or full URL — resolve to a channel ID so the RSS feed works
+        # reliably. YouTube deprecated the ?user= RSS endpoint for new channels.
+        send(token, chat_id, "🔍 Resolving channel ID from URL — just a moment…")
+        resolved_id = _yt_resolve_channel_id(url_or_id)
+        display = url_or_id
+
+    if resolved_id:
+        entry: dict = {"channel_id": resolved_id}
+        # Keep the clean URL as a human-readable reference
+        if not _re.match(r'^UC[\w-]{22}$', url_or_id):
+            entry["channel_url"] = url_or_id
+    else:
+        # Could not resolve — store as URL and the poller will do best-effort
+        send(token, chat_id,
+             "⚠️ Could not auto-resolve channel ID from that URL.\n"
+             "The channel will be added but may not poll correctly.\n"
+             "For best results: open the channel in YouTube → About page → share icon → copy channel ID.")
         entry = {"channel_url": url_or_id}
 
     if label:
@@ -821,12 +917,14 @@ def cmd_yt_add(token: str, chat_id: str, args: str) -> None:
 
     channels = _yt_load_channels()
 
-    # Check for duplicates
+    # Duplicate check — compare by channel_id if we have one, else by URL
     for existing in channels:
-        if existing.get("channel_id") == entry.get("channel_id") and entry.get("channel_id"):
-            send(token, chat_id, f"⚠️ Channel `{url_or_id}` is already in the list.")
+        if resolved_id and existing.get("channel_id") == resolved_id:
+            send(token, chat_id,
+                 f"⚠️ That channel is already in the list "
+                 f"(ID: `{resolved_id}`, label: {existing.get('label', 'unlabelled')}).")
             return
-        if existing.get("channel_url") == entry.get("channel_url") and entry.get("channel_url"):
+        if not resolved_id and existing.get("channel_url") == url_or_id:
             send(token, chat_id, f"⚠️ Channel `{url_or_id}` is already in the list.")
             return
 
@@ -834,8 +932,9 @@ def cmd_yt_add(token: str, chat_id: str, args: str) -> None:
     _yt_save_channels(channels)
 
     label_str = f" ({label})" if label else ""
+    id_str = f"\nChannel ID: `{resolved_id}`" if resolved_id else ""
     send(token, chat_id,
-         f"✅ YouTube channel added{label_str}:\n`{url_or_id}`\n\n"
+         f"✅ YouTube channel added{label_str}:\n`{display}`{id_str}\n\n"
          f"It will be polled within the next 30 minutes.")
 
 

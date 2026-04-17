@@ -230,40 +230,95 @@ def load_channels() -> list[dict]:
     return active
 
 
+def _resolve_handle_to_channel_id(handle_or_url: str) -> str:
+    """
+    Fetch a YouTube @handle or channel page and extract the UC... channel ID.
+    YouTube embeds channelId in its page JSON — no API key needed.
+    Returns '' if resolution fails.
+    """
+    handle_m = re.search(r'youtube\.com/@([\w.-]+)', handle_or_url)
+    if handle_m:
+        fetch_url = f"https://www.youtube.com/@{handle_m.group(1)}"
+    elif handle_or_url.startswith("http"):
+        fetch_url = handle_or_url.split("?")[0]
+    else:
+        return ""
+
+    try:
+        req = urllib.request.Request(
+            fetch_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        log_err(f"Handle resolution fetch failed for {fetch_url}: {e}")
+        return ""
+
+    patterns = [
+        r'"channelId"\s*:\s*"(UC[\w-]{22})"',
+        r'"externalChannelId"\s*:\s*"(UC[\w-]{22})"',
+        r'"key"\s*:\s*"channelId"\s*,\s*"value"\s*:\s*"(UC[\w-]{22})"',
+        r'channel_id=(UC[\w-]{22})',
+    ]
+    for pat in patterns:
+        m = re.search(pat, html)
+        if m:
+            return m.group(1)
+    return ""
+
+
 def resolve_channel_id(ch: dict) -> str | None:
-    """Return the channel ID from a channel entry, resolving handles if needed."""
+    """
+    Return the channel ID for a channel entry.
+    For @handle URLs, fetches the channel page to extract the UC... ID.
+    Returns None only if we truly cannot determine the ID.
+    """
     if ch.get("channel_id"):
         return ch["channel_id"].strip()
 
     url = (ch.get("channel_url") or "").strip().rstrip("/")
-    # Direct channel ID in URL
+
+    # Direct UC... ID embedded in a /channel/ URL
     m = re.search(r'/channel/(UC[\w-]+)', url)
     if m:
         return m.group(1)
 
-    # For @handle, /c/name, /user/name — we use the RSS feed via URL directly
-    # YouTube provides feeds at: https://www.youtube.com/feeds/videos.xml?channel_id=...
-    # For handles, we need to resolve via the page. Use a simpler approach:
-    # store the URL and fetch RSS via the alternate handle endpoint.
-    return None  # signal to caller to use channel_url directly
+    # @handle — resolve by fetching the page
+    if "/@" in url or re.search(r'/(?:c|user)/', url):
+        resolved = _resolve_handle_to_channel_id(url)
+        if resolved:
+            log(f"  Resolved handle to channel_id: {resolved} (from {url})")
+            return resolved
+        log(f"  WARNING: Could not resolve channel_id for {url} — RSS may not work")
+
+    return None
 
 
 def rss_url_for_channel(ch: dict) -> str:
+    """
+    Return the YouTube RSS feed URL for a channel entry.
+    Always prefers the ?channel_id= form (most reliable).
+    Falls back to ?user= for legacy entries only.
+    """
     channel_id = resolve_channel_id(ch)
     if channel_id:
         return f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
-    # Handle @username, /c/name, /user/name style URLs
+    # Last-resort legacy fallback for old /user/ style channels
     url = (ch.get("channel_url") or "").strip().rstrip("/")
-    # Try to extract handle
-    m = re.search(r'/@([\w.-]+)', url)
+    m = re.search(r'/user/([\w.-]+)', url)
     if m:
-        return f"https://www.youtube.com/feeds/videos.xml?user={m.group(1)}"
-    m = re.search(r'/(?:c|user)/([\w.-]+)', url)
-    if m:
+        log(f"  WARNING: Using deprecated ?user= RSS endpoint for {url}")
         return f"https://www.youtube.com/feeds/videos.xml?user={m.group(1)}"
 
-    log_err(f"Cannot resolve RSS URL for channel: {ch}")
+    log_err(f"Cannot build RSS URL for channel: {ch}")
     return ""
 
 
