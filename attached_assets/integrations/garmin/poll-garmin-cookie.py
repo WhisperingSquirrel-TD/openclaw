@@ -497,13 +497,18 @@ def get_display_name(cookies: dict) -> str:
                 (data.get("userData") or {}).get("displayName")
                 or data.get("displayName")
                 or data.get("userName")
+                or data.get("username")
                 or data.get("screenName")
+                or data.get("loginName")
                 or (data.get("userProfile") or {}).get("displayName")
+                or (data.get("userProfile") or {}).get("userName")
+                or (data.get("userProfile") or {}).get("username")
             )
             if name:
                 log(f"Resolved displayName='{name}' via {ep}")
                 return name
             log(f"WARNING: {ep} returned data but no displayName field — trying next endpoint")
+            log(f"  Top-level keys returned: {list(data.keys())[:10]}")
         except RuntimeError as e:
             err = str(e)
             last_error = err
