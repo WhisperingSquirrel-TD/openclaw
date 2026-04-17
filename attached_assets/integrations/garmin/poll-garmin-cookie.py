@@ -303,6 +303,19 @@ def _garth_auth(interactive: bool = False):
             "Run first-time setup: python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup-garth"
         )
 
+    # Check 429 backoff — avoid hammering SSO if recently rate-limited
+    _backoff_file = Path.home() / ".openclaw" / "integrations" / "garmin" / ".garth_429_backoff"
+    if _backoff_file.exists() and not interactive:
+        try:
+            _age = time.time() - _backoff_file.stat().st_mtime
+            if _age < 4 * 3600:
+                raise RuntimeError(
+                    f"Garth: SSO rate-limited {int(_age/60)}m ago — skipping login for "
+                    f"{int((4*3600 - _age)/60)}m more. Delete {_backoff_file} to override."
+                )
+        except OSError:
+            pass
+
     log("Garth: logging in with email/password...")
     try:
         api.login()
@@ -310,8 +323,17 @@ def _garth_auth(interactive: bool = False):
             api.garth.dump(str(garth_token_dir))
         except AttributeError:
             pass  # older garminconnect versions may not have dump()
+        # Clear any stale backoff file on successful login
+        _backoff_file.unlink(missing_ok=True)
         log(f"Garth: login successful — tokens cached in {garth_token_dir}")
     except Exception as e:
+        err_str = str(e)
+        if "429" in err_str:
+            try:
+                _backoff_file.touch()
+            except OSError:
+                pass
+            raise RuntimeError(f"Garth login failed: SSO rate-limited (429) — will retry in 4h. {e}")
         raise RuntimeError(f"Garth login failed: {e}")
 
     return api
@@ -326,6 +348,10 @@ def setup_garth():
     print("\n=== Garmin Garth Setup ===")
     print("Authenticating with GARMIN_EMAIL + GARMIN_PASSWORD from ~/.openclaw/.env")
     print("If MFA is enabled you will be prompted for a code.\n")
+
+    # Clear any 429 backoff so the next scheduled run isn't blocked
+    _backoff = Path.home() / ".openclaw" / "integrations" / "garmin" / ".garth_429_backoff"
+    _backoff.unlink(missing_ok=True)
 
     try:
         api = _garth_auth(interactive=True)
