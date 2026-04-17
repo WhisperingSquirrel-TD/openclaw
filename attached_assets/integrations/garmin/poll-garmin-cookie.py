@@ -1006,9 +1006,17 @@ def run_backfill(days: int, use_garth: bool, garth_api, cookies: dict, display_n
         target = (today - timedelta(days=offset)).strftime("%Y-%m-%d")
 
         if target in sections:
-            log(f"Backfill: {target} — already in archive, skipping")
-            skipped += 1
-            continue
+            # Only skip if the existing entry contains at least one real value.
+            # Count ": n/a" occurrences — the archive format uses this for every
+            # empty field.  If 5 or more fields are n/a the entry is effectively
+            # blank (7 tracked fields total) and we should re-fetch it.
+            entry_text = sections[target]
+            na_count   = entry_text.count(": n/a")
+            if na_count < 5:
+                log(f"Backfill: {target} — already in archive with data, skipping")
+                skipped += 1
+                continue
+            log(f"Backfill: {target} — archive entry is all n/a, re-fetching")
 
         log(f"Backfill: {target} — fetching...")
         try:
