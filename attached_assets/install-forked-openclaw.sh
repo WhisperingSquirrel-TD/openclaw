@@ -1435,19 +1435,25 @@ else
     warn "Gateway service unit not found at $GATEWAY_SVC — skipping PATH patch"
 fi
 
-# Step 12b: Restart L1 — prefer the systemd gateway service; fall back to l1-start.sh
+# Step 12b: Restart L1 — l1-stop/l1-start first (Pi-native, works without DBUS),
+# then fall back to systemctl --user restart (works when DBUS env is available).
 echo ""
 warn "Restarting L1..."
-if systemctl --user is-enabled openclaw-gateway.service 2>/dev/null | grep -q "enabled\|static"; then
+if [ -f "$HOME/l1-stop.sh" ] && [ -f "$HOME/l1-start.sh" ]; then
+    bash "$HOME/l1-stop.sh" 2>/dev/null || true
+    sleep 2
+    bash "$HOME/l1-start.sh" && \
+        info "L1 restarted via l1-start.sh — new code is live" || \
+        warn "l1-start.sh returned non-zero — check gateway.log"
+elif systemctl --user is-enabled openclaw-gateway.service 2>/dev/null | grep -q "enabled\|static"; then
     systemctl --user restart openclaw-gateway.service && \
         info "openclaw-gateway.service restarted — new code is live" || \
         warn "Failed to restart openclaw-gateway.service"
 else
-    # Fallback: kill any stale node process then use the start script
     pkill -f "node.*openclaw" 2>/dev/null || true
     pkill -f "ts-node.*openclaw" 2>/dev/null || true
     sleep 2
-    ~/l1-start.sh
+    warn "No restart method available — start L1 manually"
 fi
 
 # Step 13: Update integrity hashes
