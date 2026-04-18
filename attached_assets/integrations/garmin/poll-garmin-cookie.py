@@ -114,35 +114,54 @@ def cookies_to_header(cookies: dict) -> str:
 
 def setup_cookies():
     print("\n=== Garmin Cookie Setup ===")
-    print("1. Open connect.garmin.com in your browser and log in")
-    print("2. Navigate to any page (e.g. the dashboard)")
-    print("3. Press F12 → Application tab → Storage → Cookies → https://connect.garmin.com")
-    print("4. Paste the values below\n")
-    print("NOTE: JWT_WEB is REQUIRED for health/activity data (Garmin API change ~2024).")
-    print("      SESSIONID alone only works for profile lookups.\n")
+    print("Paste the FULL cookie header from your browser — this captures everything at once.\n")
+    print("Steps:")
+    print("  1. Open connect.garmin.com and log in")
+    print("  2. Press F12 → Network tab → reload the page")
+    print("  3. Click any request to connect.garmin.com")
+    print("  4. In the Headers panel, find 'cookie:' under Request Headers")
+    print("  5. Right-click the cookie value → Copy value")
+    print("  6. Paste it below (it's a long single line starting with things like 'notice_behavior=...')\n")
 
-    cookies = {}
+    print("Paste cookie string (press Enter twice when done):")
+    lines = []
+    while True:
+        try:
+            line = input()
+        except EOFError:
+            break
+        if line == "" and lines:
+            break
+        lines.append(line)
+    raw = " ".join(lines).strip()
 
-    sessionid = input("SESSIONID (required): ").strip()
-    if not sessionid:
-        print("ERROR: SESSIONID is required.")
+    if not raw:
+        print("ERROR: No cookie string provided.")
         sys.exit(1)
-    cookies["SESSIONID"] = sessionid
 
-    jwt = input("JWT_WEB (required for health data): ").strip()
-    if not jwt:
-        print("WARNING: JWT_WEB not provided — health/activity data endpoints will return empty.")
-        print("         Re-run --setup and paste JWT_WEB to fix this.\n")
+    # Parse "key=value; key2=value2; ..." — handle values that contain '='
+    cookies = {}
+    for part in raw.split(";"):
+        part = part.strip()
+        if "=" not in part:
+            continue
+        k, _, v = part.partition("=")
+        k = k.strip()
+        v = v.strip()
+        if k and v:
+            cookies[k] = v
+
+    # Validate the minimum required cookies are present
+    missing = []
+    for required in ("SESSIONID", "JWT_WEB", "session"):
+        if required not in cookies:
+            missing.append(required)
+    if missing:
+        print(f"\nWARNING: These important cookies were not found in the paste: {', '.join(missing)}")
+        print("Make sure you copied the full cookie header from a connect.garmin.com request.")
+        print("Continuing anyway — some data endpoints may return empty.\n")
     else:
-        cookies["JWT_WEB"] = jwt
-
-    session = input("session (optional but recommended): ").strip()
-    if session:
-        cookies["session"] = session
-
-    cflb = input("_cflb (optional): ").strip()
-    if cflb:
-        cookies["_cflb"] = cflb
+        print(f"\nFound {len(cookies)} cookies including SESSIONID, JWT_WEB, session ✓")
 
     cookies["_saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     cookies["_note"] = "Created by poll-garmin-cookie.py --setup"
@@ -171,19 +190,18 @@ def _get(path: str, cookies: dict, params: dict = None) -> dict:
 
     req = urllib_request.Request(url)
     req.add_header("Cookie", cookies_to_header(cookies))
-    req.add_header("NK", "NT")
-    req.add_header("X-app-ver", "4.61.2.0")
-    req.add_header("Accept", "application/json, text/javascript, */*; q=0.01")
-    req.add_header("Accept-Language", "en-GB,en;q=0.9")
+    req.add_header("nk", "NT")
+    req.add_header("x-app-ver", "5.23.0.33b")
+    req.add_header("x-lang", "en-US")
+    req.add_header("Accept", "application/json, text/plain, */*")
+    req.add_header("Accept-Language", "en-GB,en;q=0.9,en-US;q=0.8")
     req.add_header("User-Agent",
-        "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36 Edg/146.0.0.0")
     req.add_header("Referer", "https://connect.garmin.com/modern/")
-    req.add_header("X-Requested-With", "XMLHttpRequest")
-    # Garmin /proxy/* endpoints require JWT_WEB as Bearer token in addition to cookies.
-    jwt_web = cookies.get("JWT_WEB", "").strip()
-    if jwt_web:
-        req.add_header("Authorization", f"Bearer {jwt_web}")
+    req.add_header("sec-fetch-dest", "empty")
+    req.add_header("sec-fetch-mode", "cors")
+    req.add_header("sec-fetch-site", "same-origin")
 
     try:
         with urllib_request.urlopen(req, timeout=20) as resp:
