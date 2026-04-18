@@ -104,24 +104,25 @@ def load_cookies() -> dict:
         sys.exit(1)
 
 
+_COOKIE_META_KEYS = {"_saved_at", "_note", "_connect_csrf_token"}
+
+
 def cookies_to_header(cookies: dict) -> str:
     parts = []
     for key, val in cookies.items():
-        if val and key not in ("_saved_at", "_note"):
+        if val and key not in _COOKIE_META_KEYS:
             parts.append(f"{key}={val}")
     return "; ".join(parts)
 
 
 def setup_cookies():
     print("\n=== Garmin Cookie Setup ===")
-    print("Paste the FULL cookie header from your browser — this captures everything at once.\n")
-    print("Steps:")
-    print("  1. Open connect.garmin.com and log in")
-    print("  2. Press F12 → Network tab → reload the page")
-    print("  3. Click any request to connect.garmin.com")
-    print("  4. In the Headers panel, find 'cookie:' under Request Headers")
-    print("  5. Right-click the cookie value → Copy value")
-    print("  6. Paste it below (it's a long single line starting with things like 'notice_behavior=...')\n")
+    print("You need two things from the same /gc-api/ request in DevTools:\n")
+    print("STEP 1 — Cookie header:")
+    print("  1. Open connect.garmin.com, log in, press F12 → Network tab")
+    print("  2. Filter by /gc-api/ and click any request")
+    print("  3. Headers → Request Headers → right-click 'cookie:' value → Copy value")
+    print("  4. Paste it below\n")
 
     print("Paste cookie string (press Enter twice when done):")
     lines = []
@@ -163,21 +164,41 @@ def setup_cookies():
     else:
         print(f"\nFound {len(cookies)} cookies including SESSIONID, JWT_WEB, session ✓")
 
+    print("\nSTEP 2 — Connect-Csrf-Token header:")
+    print("  In the same request headers, find 'Connect-Csrf-Token:'")
+    print("  Copy just its value (a short string) and paste it below.")
+    print("  (Press Enter with nothing to skip — but you will get 403 errors)\n")
+    print("Paste Connect-Csrf-Token value:")
+    try:
+        csrf_token = input().strip()
+    except EOFError:
+        csrf_token = ""
+
+    if csrf_token:
+        cookies["_connect_csrf_token"] = csrf_token
+        print(f"CSRF token saved ✓ ({csrf_token[:12]}...)")
+    else:
+        print("WARNING: No CSRF token — /gc-api/ requests will likely return 403.")
+
     cookies["_saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     cookies["_note"] = "Created by poll-garmin-cookie.py --setup"
 
     GARMIN_DIR.mkdir(parents=True, exist_ok=True)
     COOKIE_FILE.write_text(json.dumps(cookies, indent=2), encoding="utf-8")
     print(f"\nCookies saved to {COOKIE_FILE}")
-    print("Running a quick test fetch...")
+    print("Running a quick test fetch against /gc-api/...")
 
     try:
-        display_name = get_display_name(cookies)
-        print(f"SUCCESS — logged in as: {display_name}")
-        log(f"Cookie setup complete. Display name: {display_name}")
-    except Exception as e:
-        print(f"WARNING: Test fetch failed ({e}) — cookies may be incomplete or expired.")
-        log(f"WARNING: Cookie setup test failed: {e}")
+        _get("/gc-api/userprofile-service/userprofile/settings", cookies)
+        print(f"SUCCESS — gc-api validated ✓")
+        log(f"Cookie setup complete. CSRF token present: {bool(csrf_token)}")
+    except RuntimeError as e:
+        err = str(e)
+        if "COOKIES_EXPIRED" in err:
+            print("FAILED: cookies or CSRF token rejected (403/401).")
+            print("Make sure you copied BOTH values from the same /gc-api/ request.")
+        else:
+            print(f"WARNING: Test fetch error: {err}")
 
 
 # ── HTTP helpers ───────────────────────────────────────────────────────────────
@@ -202,6 +223,10 @@ def _get(path: str, cookies: dict, params: dict = None) -> dict:
     req.add_header("sec-fetch-dest", "empty")
     req.add_header("sec-fetch-mode", "cors")
     req.add_header("sec-fetch-site", "same-origin")
+    # CSRF token — required by /gc-api/ endpoints even for GET requests
+    csrf = cookies.get("_connect_csrf_token", "").strip()
+    if csrf:
+        req.add_header("Connect-Csrf-Token", csrf)
 
     try:
         with urllib_request.urlopen(req, timeout=20) as resp:
