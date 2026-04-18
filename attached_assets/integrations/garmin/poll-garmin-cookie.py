@@ -246,8 +246,10 @@ def _get(path: str, cookies: dict, params: dict = None) -> dict:
             body = output
             status = 0
 
-        if status in (401, 403):
+        if status == 401:
             raise RuntimeError("COOKIES_EXPIRED")
+        if status == 403:
+            raise RuntimeError("ENDPOINT_FORBIDDEN")
         if status == 429:
             raise RuntimeError("RATE_LIMITED")
         if status not in (0, 200):
@@ -282,9 +284,13 @@ def _safe_get(label: str, path: str, cookies: dict, params: dict = None):
     except RuntimeError as e:
         err = str(e)
         if "COOKIES_EXPIRED" in err:
-            log(f"ERROR: Garmin cookies have expired. Run --setup on the Pi to refresh them.")
+            log(f"ERROR: Garmin session rejected (401). Run --setup on the Pi to refresh cookies.")
             log("FLAG TO TOM: Garmin cookies expired — log into connect.garmin.com and run --setup.")
             sys.exit(1)
+        if "ENDPOINT_FORBIDDEN" in err:
+            # 403 on a data endpoint = wrong path or restricted resource — skip, don't exit
+            log(f"WARNING: {label} returned 403 (endpoint may be wrong or restricted) — skipping")
+            return {}
         if "RATE_LIMITED" in err:
             log("ERROR: Garmin rate-limited (429). Wait and try again later.")
             sys.exit(1)
@@ -1319,17 +1325,19 @@ def main():
             log("FLAG TO TOM: Garmin session check failed. Add GARMIN_EMAIL + GARMIN_PASSWORD to .env, or run --setup.")
             sys.exit(1)
         # Explicit cookie validation ping — get_display_name may short-circuit via env var
-        # so we always test a real /gc-api/ endpoint to catch expired cookies early.
+        # so we always test a real /gc-api/ data endpoint to confirm the session works.
+        today_str = date.today().strftime("%Y-%m-%d")
         log("Validating cookie against gc-api...")
         try:
-            _get("/gc-api/userprofile-service/userprofile/settings", cookies)
+            _get("/gc-api/sleep-service/sleep/dailySleepData",
+                 cookies, {"date": today_str, "nonSleepBufferMinutes": "60"})
             log("Cookie validation OK.")
         except RuntimeError as e:
             err = str(e)
-            if "COOKIES_EXPIRED" in err:
-                log("ERROR: Garmin cookies have expired (gc-api returned 401/403).")
-                log("FLAG TO TOM: Cookies are expired — log into connect.garmin.com, open Network tab,")
-                log("  copy all cookies from any /gc-api/ request, then run --setup on the Pi.")
+            if "COOKIES_EXPIRED" in err or "ENDPOINT_FORBIDDEN" in err:
+                log("ERROR: Garmin gc-api rejected the session (401/403).")
+                log("FLAG TO TOM: Cookies are rejected — log into connect.garmin.com, open Network tab,")
+                log("  copy cookies + Connect-Csrf-Token from any /gc-api/ request, then run --setup.")
                 sys.exit(1)
             # Non-fatal — proceed and let individual fetches report
             log(f"WARNING: Cookie validation ping failed ({err}) — proceeding anyway.")
