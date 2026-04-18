@@ -450,7 +450,7 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
 
     # Default values if env var not explicitly set
     model_defaults = {
-        "codex": "openai-codex/gpt-5.4",
+        "codex": "openai/gpt-5.4",
     }
     model = _cfg(model_key) or model_defaults.get(provider, "")
     if not model:
@@ -463,7 +463,7 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
     api_key_var = {
         "openai":    "OPENAI_API_KEY",
         "anthropic": None,  # gateway handles Anthropic auth internally
-        "codex":     None,  # uses OAuth
+        "codex":     "OPENAI_API_KEY",
     }.get(provider)
     if api_key_var:
         if not _cfg(api_key_var):
@@ -479,7 +479,7 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
     gateway_prefix = {
         "openai":    "openai",
         "anthropic": "anthropic",
-        "codex":     "openai-codex",
+        "codex":     "openai",
     }.get(provider, provider)
     if "/" not in model:
         model = f"{gateway_prefix}/{model}"
