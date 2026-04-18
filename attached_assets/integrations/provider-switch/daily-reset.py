@@ -17,6 +17,7 @@ Restart strategy (tried in order):
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -84,7 +85,16 @@ def _chattr(flag: str, path: Path) -> bool:
     return True
 
 
+def _sanitize_model(model: str) -> str:
+    """Strip shell export prefix/trailing punctuation — guards against old cmd_switch bug."""
+    cleaned = re.sub(r'^export\s+\S+=', '', model).rstrip(".")
+    if cleaned != model:
+        log(f"Sanitized corrupted model value: {model!r} -> {cleaned!r}")
+    return cleaned
+
+
 def _set_model(config: dict, model: str) -> dict:
+    model = _sanitize_model(model)
     try:
         config["agents"]["defaults"]["model"]["primary"] = model
     except (KeyError, TypeError):
@@ -95,7 +105,8 @@ def _set_model(config: dict, model: str) -> dict:
 
 def _get_current_model(config: dict) -> str:
     try:
-        return config["agents"]["defaults"]["model"]["primary"]
+        raw = config["agents"]["defaults"]["model"]["primary"]
+        return _sanitize_model(raw) if isinstance(raw, str) else ""
     except (KeyError, TypeError):
         return ""
 

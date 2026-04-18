@@ -577,9 +577,12 @@ else:
     memory.setdefault('backend', 'builtin')
 
 # ---------------------------------------------------------------------------
-# Model migration — replace any deprecated Anthropic model IDs with the
-# current one. Runs every install so pulling and re-running fixes it.
+# Model migration — runs every install so pulling and re-running fixes it.
+# 1. Strips corrupted "export VAR=value" model strings (caused by old cmd_switch bug)
+# 2. Replaces deprecated Anthropic model IDs with the current one
 # ---------------------------------------------------------------------------
+import re as _re
+
 DEPRECATED_MODELS = [
     'claude-3-5-sonnet-20241022',
     'claude-3-7-sonnet-20250219',
@@ -587,14 +590,23 @@ DEPRECATED_MODELS = [
 ]
 CURRENT_ANTHROPIC_MODEL = 'anthropic/claude-sonnet-4-5'
 
+def _clean_model_string(s):
+    """Strip shell export prefix and trailing punctuation from a model string."""
+    cleaned = _re.sub(r'^export\s+\S+=', '', s).rstrip('.')
+    if cleaned != s:
+        print(f'Corrupted model sanitized: {s!r} -> {cleaned!r}')
+    return cleaned
+
 def _replace_model_recursive(obj):
     if isinstance(obj, dict):
         return {k: _replace_model_recursive(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_replace_model_recursive(v) for v in obj]
-    if isinstance(obj, str) and obj in DEPRECATED_MODELS:
-        print(f'Model migrated: {obj} -> {CURRENT_ANTHROPIC_MODEL}')
-        return CURRENT_ANTHROPIC_MODEL
+    if isinstance(obj, str):
+        obj = _clean_model_string(obj)
+        if obj in DEPRECATED_MODELS:
+            print(f'Model migrated: {obj} -> {CURRENT_ANTHROPIC_MODEL}')
+            return CURRENT_ANTHROPIC_MODEL
     return obj
 
 c = _replace_model_recursive(c)
