@@ -32,10 +32,9 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 
 try:
-    import urllib.request as urllib_request
-    import urllib.error as urllib_error
+    import urllib.parse as urllib_parse
 except ImportError:
-    pass
+    import urllib as urllib_parse  # type: ignore
 
 OPENCLAW       = Path.home() / ".openclaw"
 GARMIN_DIR     = OPENCLAW / "integrations" / "garmin"
@@ -110,7 +109,7 @@ _COOKIE_META_KEYS = {"_saved_at", "_note", "_connect_csrf_token"}
 def cookies_to_header(cookies: dict) -> str:
     parts = []
     for key, val in cookies.items():
-        if val and key not in _COOKIE_META_KEYS:
+        if val is not None and key not in _COOKIE_META_KEYS:
             parts.append(f"{key}={val}")
     return "; ".join(parts)
 
@@ -204,52 +203,71 @@ def setup_cookies():
 # ── HTTP helpers ───────────────────────────────────────────────────────────────
 
 def _get(path: str, cookies: dict, params: dict = None) -> dict:
+    """HTTP GET via curl — curl's TLS fingerprint is browser-compatible unlike Python urllib."""
     url = BASE_URL + path
     if params:
-        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        qs = "&".join(f"{k}={urllib_parse.quote(str(v))}" for k, v in params.items())
         url = f"{url}?{qs}"
 
-    req = urllib_request.Request(url)
-    req.add_header("Cookie", cookies_to_header(cookies))
-    req.add_header("nk", "NT")
-    req.add_header("x-app-ver", "5.23.0.33b")
-    req.add_header("x-lang", "en-US")
-    req.add_header("Accept", "application/json, text/plain, */*")
-    req.add_header("Accept-Language", "en-GB,en;q=0.9,en-US;q=0.8")
-    req.add_header("User-Agent",
-        "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36 Edg/146.0.0.0")
-    req.add_header("Referer", "https://connect.garmin.com/modern/")
-    req.add_header("sec-fetch-dest", "empty")
-    req.add_header("sec-fetch-mode", "cors")
-    req.add_header("sec-fetch-site", "same-origin")
-    # CSRF token — required by /gc-api/ endpoints even for GET requests
     csrf = cookies.get("_connect_csrf_token", "").strip()
+
+    cmd = [
+        "curl", "--silent", "--compressed", "--max-time", "25",
+        "--write-out", "\n__STATUS__%{http_code}",
+        "-H", f"Cookie: {cookies_to_header(cookies)}",
+        "-H", "nk: NT",
+        "-H", "x-app-ver: 5.23.0.33b",
+        "-H", "x-lang: en-US",
+        "-H", "Accept: application/json, text/plain, */*",
+        "-H", "Accept-Language: en-GB,en;q=0.9,en-US;q=0.8",
+        "-H", ("User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+        "-H", "Referer: https://connect.garmin.com/modern/",
+        "-H", "sec-fetch-dest: empty",
+        "-H", "sec-fetch-mode: cors",
+        "-H", "sec-fetch-site: same-origin",
+        "-H", "sec-ch-ua: \"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\"",
+        "-H", "sec-ch-ua-mobile: ?0",
+        "-H", "sec-ch-ua-platform: \"macOS\"",
+    ]
     if csrf:
-        req.add_header("Connect-Csrf-Token", csrf)
+        cmd += ["-H", f"Connect-Csrf-Token: {csrf}"]
+    cmd.append(url)
 
     try:
-        with urllib_request.urlopen(req, timeout=20) as resp:
-            status = resp.status
-            body = resp.read().decode("utf-8", errors="replace")
-            if not body.strip():
-                log(f"  [debug] HTTP {status} empty body — {url.split('?')[0]}")
-                return {}
-            try:
-                parsed = json.loads(body)
-                if not parsed:
-                    log(f"  [debug] HTTP {status} body={body[:150]!r} — {url.split('?')[0]}")
-                return parsed
-            except Exception:
-                log(f"  [debug] HTTP {status} non-JSON body={body[:150]!r} — {url.split('?')[0]}")
-                return {}
-    except urllib_error.HTTPError as e:
-        code = e.code
-        if code in (401, 403):
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        output = r.stdout or ""
+        # Parse status code injected via --write-out
+        if "__STATUS__" in output:
+            body, _, status_str = output.rpartition("\n__STATUS__")
+            status = int(status_str.strip()) if status_str.strip().isdigit() else 0
+        else:
+            body = output
+            status = 0
+
+        if status in (401, 403):
             raise RuntimeError("COOKIES_EXPIRED")
-        if code == 429:
+        if status == 429:
             raise RuntimeError("RATE_LIMITED")
-        raise RuntimeError(f"HTTP {code}: {e.reason}")
+        if status not in (0, 200):
+            raise RuntimeError(f"HTTP {status}")
+
+        body = body.strip()
+        if not body:
+            log(f"  [debug] HTTP {status} empty body — {url.split('?')[0]}")
+            return {}
+        try:
+            parsed = json.loads(body)
+            if not parsed:
+                log(f"  [debug] HTTP {status} body={body[:150]!r} — {url.split('?')[0]}")
+            return parsed
+        except Exception:
+            log(f"  [debug] HTTP {status} non-JSON body={body[:150]!r} — {url.split('?')[0]}")
+            return {}
+    except RuntimeError:
+        raise
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Request timed out")
     except Exception as e:
         raise RuntimeError(str(e))
 
