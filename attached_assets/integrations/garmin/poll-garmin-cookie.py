@@ -872,13 +872,16 @@ def extract_stats(stats_raw, wellness_raw, hr_raw) -> dict:
     if not out.get("restingHeartRate") and isinstance(hr_raw, dict):
         out["restingHeartRate"] = hr_raw.get("restingHeartRate") or hr_raw.get("restingHR")
 
-    # Fallback steps from wellness chart (hourly list)
+    # Fallback steps from wellness chart (hourly list — values are cumulative totals,
+    # so take the max, not the sum)
     if not out.get("totalSteps") and isinstance(wellness_raw, list) and wellness_raw:
-        total_steps = sum(
-            (e.get("steps") or 0) for e in wellness_raw if isinstance(e, dict)
-        )
-        if total_steps:
-            out["totalSteps"] = total_steps
+        step_vals = [
+            e.get("steps") or e.get("totalSteps") or 0
+            for e in wellness_raw if isinstance(e, dict)
+        ]
+        peak = max(step_vals) if step_vals else 0
+        if peak:
+            out["totalSteps"] = peak
 
     # Fallback stress from wellness chart
     if not out.get("averageStressLevel") and isinstance(wellness_raw, list) and wellness_raw:
