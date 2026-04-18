@@ -220,7 +220,7 @@ def _get(path: str, cookies: dict, params: dict = None) -> dict:
                 return {}
     except urllib_error.HTTPError as e:
         code = e.code
-        if code == 401:
+        if code in (401, 403):
             raise RuntimeError("COOKIES_EXPIRED")
         if code == 429:
             raise RuntimeError("RATE_LIMITED")
@@ -1274,6 +1274,21 @@ def main():
             log(f"ERROR: Could not verify Garmin session: {err}")
             log("FLAG TO TOM: Garmin session check failed. Add GARMIN_EMAIL + GARMIN_PASSWORD to .env, or run --setup.")
             sys.exit(1)
+        # Explicit cookie validation ping — get_display_name may short-circuit via env var
+        # so we always test a real /gc-api/ endpoint to catch expired cookies early.
+        log("Validating cookie against gc-api...")
+        try:
+            _get("/gc-api/userprofile-service/userprofile/settings", cookies)
+            log("Cookie validation OK.")
+        except RuntimeError as e:
+            err = str(e)
+            if "COOKIES_EXPIRED" in err:
+                log("ERROR: Garmin cookies have expired (gc-api returned 401/403).")
+                log("FLAG TO TOM: Cookies are expired — log into connect.garmin.com, open Network tab,")
+                log("  copy all cookies from any /gc-api/ request, then run --setup on the Pi.")
+                sys.exit(1)
+            # Non-fatal — proceed and let individual fetches report
+            log(f"WARNING: Cookie validation ping failed ({err}) — proceeding anyway.")
 
     # ── Backfill mode ────────────────────────────────────────────────────────────
     if args.backfill:
