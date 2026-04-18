@@ -489,6 +489,12 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
     }.get(provider, provider)
     if "/" not in model:
         model = f"{gateway_prefix}/{model}"
+
+    # Sanitize — strip any accidental shell-export prefix and trailing punctuation
+    # e.g. "export openclaw_codex_mini_model=openai-codex/gpt-5.3-codex." → correct value
+    import re as _re
+    model = _re.sub(r'^export\s+\S+=', '', model).rstrip(".")
+
     try:
         config  = _read_config()
         current = _get_current_model(config)
