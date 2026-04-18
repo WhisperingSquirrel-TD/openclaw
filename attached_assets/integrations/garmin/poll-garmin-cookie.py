@@ -630,7 +630,14 @@ def fetch_spo2(cookies: dict, display_name: str, today: str) -> dict:
 
 
 def fetch_body_battery(cookies: dict, today: str):
+    # Primary: messagingToday gives delta + context for today
     data = _safe_get("body_battery",
+        "/gc-api/wellness-service/wellness/bodyBattery/messagingToday",
+        cookies)
+    if data and isinstance(data, dict) and "deltaValue" in data:
+        return data
+    # Fallback: reports/daily may give charged/drained values
+    data = _safe_get("body_battery_daily",
         "/gc-api/wellness-service/wellness/bodyBattery/reports/daily",
         cookies,
         {"startDate": today, "endDate": today})
@@ -638,7 +645,13 @@ def fetch_body_battery(cookies: dict, today: str):
         return data
     if isinstance(data, dict):
         return data.get("bodyBatteryFeedbackList") or data.get("bodyBatteryList") or []
-    return []
+    return {}
+
+
+def fetch_stress(cookies: dict, today: str) -> dict:
+    return _safe_get("stress",
+        f"/gc-api/wellness-service/wellness/dailyStress/{today}",
+        cookies)
 
 
 def fetch_last_activity(cookies: dict) -> dict:
@@ -869,8 +882,21 @@ def extract_spo2(spo2_raw) -> str:
 
 
 def parse_body_battery(data) -> tuple:
+    """Return (high, low) body battery strings, or ("n/a", "n/a")."""
     if not data:
         return "n/a", "n/a"
+    # New format: messagingToday dict with deltaValue
+    if isinstance(data, dict):
+        delta = data.get("deltaValue")
+        charged = data.get("charged") or data.get("chargedValue")
+        drained = data.get("drained") or data.get("drainedValue")
+        if charged is not None and drained is not None:
+            return str(int(charged)), str(int(drained))
+        if delta is not None:
+            sign = "+" if int(delta) >= 0 else ""
+            return f"{sign}{int(delta)} (delta)", "n/a"
+        return "n/a", "n/a"
+    # Legacy list format
     values = []
     try:
         for entry in data:
@@ -907,6 +933,8 @@ def build_markdown(stats: dict, hrv: dict, sleep: dict,
     active_cals = _fmt_int(stats.get("activeKilocalories"))
     avg_stress  = _safe(stats.get("averageStressLevel"))
     avg_stress  = f"{avg_stress}/100" if avg_stress != "n/a" else "n/a"
+    max_stress  = _safe(stats.get("maxStressLevel"))
+    max_stress  = f"{max_stress}/100" if max_stress != "n/a" else "n/a"
     active_mins = "n/a"
     try:
         m = int(stats.get("moderateIntensityMinutes") or 0)
@@ -963,6 +991,7 @@ def build_markdown(stats: dict, hrv: dict, sleep: dict,
         "",
         "## Stress & Energy",
         f"- **Average stress**: {avg_stress}",
+        f"- **Peak stress**: {max_stress}",
         f"- **Body battery high**: {bb_high}",
         f"- **Body battery low**: {bb_low}",
         "",
@@ -1107,6 +1136,7 @@ def run_backfill(days: int, use_garth: bool, garth_api, cookies: dict, display_n
 
         log(f"Backfill: {target} — fetching...")
         try:
+            stress_raw = {}
             if use_garth:
                 (stats_raw, wellness_raw, hr_raw,
                  hrv_raw, sleep_raw, spo2_raw,
@@ -1119,9 +1149,16 @@ def run_backfill(days: int, use_garth: bool, garth_api, cookies: dict, display_n
                 sleep_raw    = fetch_sleep(cookies, display_name, target)
                 spo2_raw     = fetch_spo2(cookies, display_name, target)
                 body_bat     = fetch_body_battery(cookies, target)
+                stress_raw   = fetch_stress(cookies, target)
                 activity     = fetch_last_activity(cookies)
 
             stats = extract_stats(stats_raw, wellness_raw, hr_raw)
+            # Override stress from dedicated endpoint if available
+            if isinstance(stress_raw, dict):
+                if stress_raw.get("avgStressLevel") not in (None, -1):
+                    stats["averageStressLevel"] = int(stress_raw["avgStressLevel"])
+                if stress_raw.get("maxStressLevel") not in (None, -1):
+                    stats["maxStressLevel"] = int(stress_raw["maxStressLevel"])
             hrv   = extract_hrv(hrv_raw)
             sleep = extract_sleep(sleep_raw)
             spo2  = extract_spo2(spo2_raw)
@@ -1250,6 +1287,7 @@ def main():
         return
 
     # ── Fetch all data ────────────────────────────────────────────────────────────
+    stress_raw = {}
     if use_garth:
         (stats_raw, wellness_raw, hr_raw,
          hrv_raw, sleep_raw, spo2_raw,
@@ -1263,9 +1301,16 @@ def main():
         sleep_raw    = fetch_sleep(cookies, display_name, today)
         spo2_raw     = fetch_spo2(cookies, display_name, today)
         body_bat     = fetch_body_battery(cookies, today)
+        stress_raw   = fetch_stress(cookies, today)
         activity     = fetch_last_activity(cookies)
 
     stats = extract_stats(stats_raw, wellness_raw, hr_raw)
+    # Override stress from dedicated endpoint if available
+    if isinstance(stress_raw, dict):
+        if stress_raw.get("avgStressLevel") not in (None, -1):
+            stats["averageStressLevel"] = int(stress_raw["avgStressLevel"])
+        if stress_raw.get("maxStressLevel") not in (None, -1):
+            stats["maxStressLevel"] = int(stress_raw["maxStressLevel"])
     hrv   = extract_hrv(hrv_raw)
     sleep = extract_sleep(sleep_raw)
     spo2  = extract_spo2(spo2_raw)
