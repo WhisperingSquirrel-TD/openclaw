@@ -980,10 +980,13 @@ def cmd_yt_run(token: str, chat_id: str) -> None:
     if not poller.exists():
         send(token, chat_id, "❌ YouTube channel poller not found — run `/install` first.")
         return
-    send(token, chat_id, "▶️ Running YouTube channel poller — may take a minute…")
+    send(token, chat_id,
+         "▶️ Running YouTube channel poller (sync mode — summaries generated immediately)…")
+    # --sync: process videos synchronously so Telegram notifications arrive
+    # within this run rather than waiting for the next cron batch cycle.
     r = subprocess.run(
-        ["python3", str(poller)],
-        capture_output=True, text=True, timeout=180,
+        ["python3", str(poller), "--sync"],
+        capture_output=True, text=True, timeout=300,
     )
     output = (r.stdout + r.stderr).strip()
     tail = "\n".join(output.splitlines()[-20:]) if output else "(no output)"
