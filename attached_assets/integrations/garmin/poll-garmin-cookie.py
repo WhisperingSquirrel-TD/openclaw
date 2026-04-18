@@ -646,10 +646,19 @@ def get_display_name(cookies: dict) -> str:
 
 
 def fetch_stats(cookies: dict, display_name: str, today: str) -> dict:
-    return _safe_get("stats",
-        "/gc-api/userstats-service/statistics/daily",
-        cookies,
-        {"fromDate": today, "untilDate": today, "metricId": "60,61,51,71,2,56,57"})
+    # Try flat daily summary first (confirmed shape B in extract_stats)
+    data = _safe_get("stats",
+        f"/gc-api/wellness-service/wellness/dailySummary/{today}",
+        cookies)
+    if data:
+        return data
+    # Fallback: userSummary endpoint
+    data = _safe_get("stats_user",
+        f"/gc-api/usersummary-service/usersummary/daily/{today}",
+        cookies)
+    if data:
+        return data
+    return {}
 
 
 def fetch_wellness(cookies: dict, display_name: str, today: str) -> dict:
@@ -673,7 +682,14 @@ def fetch_sleep(cookies: dict, display_name: str, today: str) -> dict:
 
 
 def fetch_spo2(cookies: dict, display_name: str, today: str) -> dict:
-    return _safe_get("spo2",
+    # Try date-in-path first
+    data = _safe_get("spo2",
+        f"/gc-api/wellness-service/wellness/dailySpo2/{today}",
+        cookies)
+    if data:
+        return data
+    # Fallback: query param variant
+    return _safe_get("spo2_param",
         "/gc-api/wellness-service/wellness/dailySpo2",
         cookies,
         {"calendarDate": today})
