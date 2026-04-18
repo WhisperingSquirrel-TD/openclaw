@@ -756,8 +756,8 @@ elif [ -f "$GARMIN_COOKIE_DST" ]; then
 fi
 
 # ── Daily provider reset (04:00) ──────────────────────────────────────────────
-# Resets L1 to openai-codex/gpt-5.4-mini at 4am each day — cheapest option first.
-# User can switch during the day via /openai, /anthropic, /codex, /codexmini.
+# Resets L1 to the configured default model at 4am each day.
+# User can switch during the day via /openai, /anthropic, /codex.
 RESET_SRC="$HOME/openclaw/attached_assets/integrations/provider-switch/daily-reset.py"
 RESET_DST="$HOME/.openclaw/integrations/provider-switch/daily-reset.py"
 RESET_LOG="$HOME/.openclaw/workspace/memory/daily-reset.log"
@@ -767,7 +767,7 @@ if [ -f "$RESET_SRC" ]; then
     ln -sf "$RESET_SRC" "$RESET_DST"
     RESET_CRON="0 4 * * * $PYTHON3_BIN $RESET_DST >> $RESET_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "daily-reset.py"; echo "$RESET_CRON" ) | crontab -
-    info "Daily provider reset cron installed: 04:00 daily → ${OPENCLAW_CODEX_MODEL:-openai-codex/gpt-5.4-mini}"
+    info "Daily provider reset cron installed: 04:00 daily → ${OPENCLAW_CODEX_MODEL:-openai-codex/gpt-5.4}"
 else
     warn "daily-reset.py not found at $RESET_SRC — skipping"
 fi
@@ -1669,7 +1669,6 @@ echo "      /disk      — disk space on the Pi"
 echo "      /openai    — switch to OpenAI model + restart gateway"
 echo "      /anthropic — switch to Anthropic model + restart gateway"
 echo "      /codex     — switch to OpenAI Codex gpt-5.4 (full) + restart gateway"
-echo "      /codexmini — switch to OpenAI Codex gpt-5.4-mini (cheaper/faster) + restart"
 echo "      /restart   — restart L1 gateway"
 echo "      /garmin    — manually trigger Garmin poller"
 echo "      /pull      — git pull latest from GitHub"
@@ -1682,7 +1681,6 @@ echo "      MGMT_BOT_CHAT_ID=<your numeric Telegram ID from @userinfobot>"
 echo "      OPENCLAW_OPENAI_MODEL=openai/gpt-5-mini-2025-08-07"
 echo "      OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5"
 echo "      OPENCLAW_CODEX_MODEL=openai-codex/gpt-5.4           (optional, this is the default)"
-echo "      OPENCLAW_CODEX_MINI_MODEL=openai-codex/gpt-5.4-mini (optional, this is the default)"
 echo "      OPENCLAW_VAULT_PASSPHRASE=<already set if vault is in use>"
 echo ""
 echo "  SharePoint document management (assistant@ identity — write-only via L1):"

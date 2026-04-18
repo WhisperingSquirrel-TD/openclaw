@@ -12,7 +12,6 @@ COMMANDS
   /openai       — switch to OpenAI API model and restart gateway
   /anthropic    — switch to Anthropic API model and restart gateway
   /codex        — switch to OpenAI Codex gpt-5.4 (full) and restart gateway
-  /codexmini    — switch to OpenAI Codex gpt-5.4-mini (cheaper/faster) and restart gateway
   /restart      — restart the L1 gateway service
   /pull         — git pull latest from GitHub (does NOT reinstall)
   /reboot       — reboot the Pi (refused if auto-start safety check fails)
@@ -39,7 +38,6 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
   OPENCLAW_OPENAI_MODEL     Model ID for OpenAI API, e.g. openai/gpt-5-mini-2025-08-07
   OPENCLAW_ANTHROPIC_MODEL  Model ID for Anthropic API, e.g. anthropic/claude-sonnet-4-5
   OPENCLAW_CODEX_MODEL      Model ID for /codex command, e.g. openai-codex/gpt-5.4
-  OPENCLAW_CODEX_MINI_MODEL Model ID for /codexmini command, e.g. openai-codex/gpt-5.4-mini
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
 OPTIONAL ENV VARS
@@ -448,13 +446,11 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
         "openai":     "OPENCLAW_OPENAI_MODEL",
         "anthropic":  "OPENCLAW_ANTHROPIC_MODEL",
         "codex":      "OPENCLAW_CODEX_MODEL",
-        "codexmini":  "OPENCLAW_CODEX_MINI_MODEL",
     }.get(provider, "OPENCLAW_OPENAI_MODEL")
 
     # Default values if env var not explicitly set
     model_defaults = {
-        "codexmini": "openai-codex/gpt-5.4-mini",
-        "codex":     "openai-codex/gpt-5.4",
+        "codex": "openai-codex/gpt-5.4",
     }
     model = _cfg(model_key) or model_defaults.get(provider, "")
     if not model:
@@ -468,7 +464,6 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
         "openai":    "OPENAI_API_KEY",
         "anthropic": None,  # gateway handles Anthropic auth internally
         "codex":     None,  # uses OAuth
-        "codexmini": None,  # uses OAuth
     }.get(provider)
     if api_key_var:
         if not _cfg(api_key_var):
@@ -485,7 +480,6 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
         "openai":    "openai",
         "anthropic": "anthropic",
         "codex":     "openai-codex",
-        "codexmini": "openai-codex",
     }.get(provider, provider)
     if "/" not in model:
         model = f"{gateway_prefix}/{model}"
@@ -1557,8 +1551,7 @@ def cmd_help(token: str, chat_id: str) -> None:
          "*Provider*\n"
          "/anthropic — switch to Anthropic API + restart gateway\n"
          "/openai — switch to OpenAI API + restart gateway\n"
-         "/codex — switch to OpenAI Codex gpt-5.4 (full) + restart gateway\n"
-         "/codexmini — switch to OpenAI Codex gpt-5.4-mini (cheaper/faster) + restart\n\n"
+         "/codex — switch to OpenAI Codex gpt-5.4 (full) + restart gateway\n\n"
          "*Services*\n"
          "/restart — restart the L1 gateway\n"
          "/garmin — manually trigger the Garmin poller\n"
@@ -1608,7 +1601,6 @@ MENU_COMMANDS = [
     ("openai",    "Switch to OpenAI API model"),
     ("anthropic", "Switch to Anthropic API model"),
     ("codex",     "Switch to OpenAI Codex gpt-5.4 (full)"),
-    ("codexmini", "Switch to OpenAI Codex gpt-5.4-mini (cheaper/faster)"),
     # Integrations
     ("garmin",    "Manually trigger the Garmin poller"),
     ("yt_add",    "Add a YouTube channel — /yt-add <url> [label]"),
@@ -2009,7 +2001,6 @@ COMMANDS = {
     "/openai":     lambda t, c: cmd_switch(t, c, "openai"),
     "/anthropic":  lambda t, c: cmd_switch(t, c, "anthropic"),
     "/codex":      lambda t, c: cmd_switch(t, c, "codex"),
-    "/codexmini":  lambda t, c: cmd_switch(t, c, "codexmini"),
     "/restart":    cmd_restart,
     "/reboot":     cmd_reboot,
     "/pull":       cmd_pull,
