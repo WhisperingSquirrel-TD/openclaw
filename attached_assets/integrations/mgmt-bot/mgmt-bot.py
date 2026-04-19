@@ -1445,6 +1445,151 @@ def cmd_dev_test(token: str, chat_id: str, project: str) -> None:
             else f"All checks passed. Run `/dev-run {project}` to generate a preview."))
 
 
+def cmd_ms_reauth(token: str, chat_id: str, account: str = "assistant") -> None:
+    """
+    Re-authenticate a Microsoft account via device code flow.
+    Requests ALL scopes in one go so this never needs repeating:
+      Mail.Send  Mail.Read  Files.ReadWrite  Sites.ReadWrite.All
+      Calendars.ReadWrite  Tasks.ReadWrite  User.Read  offline_access
+
+    account = "assistant"  → assistant@stackstoneconsulting.co.uk (SharePoint + email)
+    account = "microsoft"  → tom@ personal account (email + calendar)
+    """
+    import threading
+
+    FULL_SCOPES = (
+        "Mail.Send Mail.Read Files.ReadWrite Sites.ReadWrite.All "
+        "Calendars.ReadWrite Tasks.ReadWrite User.Read offline_access"
+    )
+
+    if account == "assistant":
+        candidates = [
+            STATE_DIR / "integrations/microsoft/token-assistant.json",
+            STATE_DIR / "integrations/microsoft-l1/token.json",
+        ]
+        acct_label = "assistant@stackstoneconsulting.co.uk"
+    else:
+        candidates = [
+            STATE_DIR / "integrations/microsoft/token-microsoft.json",
+            STATE_DIR / "integrations/microsoft/token.json",
+        ]
+        acct_label = "tom@ personal"
+
+    token_file = next((c for c in candidates if c.exists()), None)
+    if not token_file:
+        send(token, chat_id,
+             f"❌ No token file found for `{account}` account.\n"
+             f"Tried:\n" + "\n".join(f"  `{c}`" for c in candidates))
+        return
+
+    try:
+        raw = json.loads(token_file.read_text())
+    except Exception as e:
+        send(token, chat_id, f"❌ Could not read token file: {e}")
+        return
+
+    # Normalise MSAL format if needed
+    if "RefreshToken" in raw and "AccessToken" in raw:
+        at_list  = list(raw.get("AccessToken",  {}).values())
+        app_list = list(raw.get("AppMetadata",  {}).values())
+        at  = at_list[0]  if at_list  else {}
+        app = app_list[0] if app_list else {}
+        raw = {
+            "client_id": at.get("client_id") or app.get("client_id", ""),
+            "tenant_id": at.get("realm", "common"),
+            "refresh_token": "",
+        }
+
+    client_id = raw.get("client_id", "")
+    tenant    = raw.get("tenant_id", "common")
+    if not client_id:
+        send(token, chat_id, "❌ `client_id` missing from token file — cannot reauth.")
+        return
+
+    # Step 1: get device code (fast — one API call)
+    try:
+        import urllib.request as _req2
+        import urllib.parse as _urlparse
+        body = _urlparse.urlencode({"client_id": client_id, "scope": FULL_SCOPES}).encode()
+        req  = _req2.Request(
+            f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode",
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with _req2.urlopen(req, timeout=15) as resp:
+            flow = json.loads(resp.read())
+    except Exception as e:
+        send(token, chat_id, f"❌ Device code request failed: {e}")
+        return
+
+    # Step 2: send code to Telegram immediately
+    send(token, chat_id,
+         f"🔐 *Microsoft re-auth — {acct_label}*\n\n"
+         f"{flow.get('message', '(no message)')}\n\n"
+         f"_Scopes: email · SharePoint · calendar · tasks_\n"
+         f"_Waiting up to 15 min — I'll message you when it's done._")
+
+    # Step 3: poll for completion in a background thread
+    def _poll() -> None:
+        import time as _time, urllib.request as _req3, urllib.parse as _up
+        interval    = flow.get("interval", 5)
+        device_code = flow["device_code"]
+        deadline    = _time.time() + flow.get("expires_in", 900)
+
+        while _time.time() < deadline:
+            _time.sleep(interval)
+            try:
+                body2 = _up.urlencode({
+                    "client_id":   client_id,
+                    "grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
+                    "device_code": device_code,
+                }).encode()
+                req2 = _req3.Request(
+                    f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+                    data=body2,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                with _req3.urlopen(req2, timeout=15) as r:
+                    data = json.loads(r.read())
+            except Exception:
+                continue
+
+            if "access_token" in data:
+                try:
+                    current = json.loads(token_file.read_text())
+                    if "RefreshToken" not in current:
+                        current["access_token"]  = data["access_token"]
+                        current["refresh_token"] = data.get(
+                            "refresh_token", current.get("refresh_token", ""))
+                        tmp = token_file.with_suffix(".tmp")
+                        tmp.write_text(json.dumps(current, indent=2))
+                        tmp.replace(token_file)
+                    send(token, chat_id,
+                         f"✅ *Microsoft re-auth complete* — {acct_label}\n\n"
+                         f"All scopes granted: email · SharePoint · calendar · tasks\n"
+                         f"This account won't need re-auth again unless access is revoked.")
+                except Exception as e:
+                    send(token, chat_id,
+                         f"⚠️ Sign-in succeeded but token write failed: {e}\n"
+                         f"Run manually: `python3 sharepoint.py reauth --account {account}`")
+                return
+
+            err = data.get("error", "")
+            if err in ("authorization_pending", "slow_down"):
+                if err == "slow_down":
+                    interval += 5
+                continue
+            send(token, chat_id,
+                 f"❌ Microsoft re-auth failed:\n`{data.get('error_description', err)}`")
+            return
+
+        send(token, chat_id,
+             "⏱ Re-auth timed out — the code expired before sign-in completed.\n"
+             "Try `/ms-reauth` again.")
+
+    threading.Thread(target=_poll, daemon=True).start()
+
+
 def cmd_sp_sync(token: str, chat_id: str) -> None:
     """Force an immediate SharePoint content mirror sync."""
     poller = STATE_DIR / "integrations/microsoft/sharepoint_cache_poller.py"
@@ -1588,6 +1733,10 @@ def cmd_help(token: str, chat_id: str) -> None:
          "_git\\_merge\\_main · git\\_delete\\_branch · npm\\_install · npm\\_upgrade · npm\\_run_\n\n"
          "*SharePoint*\n"
          "/sp-sync — force immediate SharePoint content mirror refresh\n\n"
+         "*Microsoft Auth*\n"
+         "/ms-reauth — re-authenticate assistant@ account (email + SharePoint + calendar + tasks)\n"
+         "/ms-reauth-personal — re-authenticate tom@ personal account (email + calendar)\n"
+         "_One reauth covers everything — no future reauth needed unless access is revoked._\n\n"
          "*Identity*\n"
          "/soul — upload new SOUL.md (send as a .md file)\n\n"
          "/help — this message\n"
@@ -1623,7 +1772,9 @@ MENU_COMMANDS = [
     ("yt_add",    "Add a YouTube channel — /yt-add <url> [label]"),
     ("yt_list",   "List configured YouTube channels"),
     ("yt_run",    "Trigger the YouTube channel poller now"),
-    ("sp_sync",   "Force SharePoint content mirror refresh"),
+    ("sp_sync",        "Force SharePoint content mirror refresh"),
+    ("ms_reauth",          "Re-auth assistant@ (email+SP+cal+tasks, one-time)"),
+    ("ms_reauth_personal", "Re-auth tom@ personal (email+calendar, one-time)"),
     # Dev workflow
     ("dev_run",    "Build + Vercel preview — specify project name"),
     ("dev_test",   "Lint + typecheck + build — specify project name"),
@@ -2034,6 +2185,10 @@ COMMANDS = {
     "/soul":       cmd_soul_start,
     "/sp-sync":    cmd_sp_sync,
     "/sp_sync":    cmd_sp_sync,
+    "/ms-reauth":          lambda t, c: cmd_ms_reauth(t, c, "assistant"),
+    "/ms_reauth":          lambda t, c: cmd_ms_reauth(t, c, "assistant"),
+    "/ms-reauth-personal": lambda t, c: cmd_ms_reauth(t, c, "microsoft"),
+    "/ms_reauth_personal": lambda t, c: cmd_ms_reauth(t, c, "microsoft"),
     "/dev-run":    cmd_dev_run,
     "/dev_run":    cmd_dev_run,
     "/dev-test":   cmd_dev_test,

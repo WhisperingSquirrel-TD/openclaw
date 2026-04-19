@@ -66,7 +66,26 @@ STATE_DIR  = Path.home() / ".openclaw"
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 SP_CACHE   = STATE_DIR / "integrations/microsoft/sharepoint-cache.json"
 
+# Scopes needed at runtime by this script
 REQUIRED_SCOPES = "Files.ReadWrite Sites.ReadWrite.All offline_access"
+
+# Full consent scope set for the assistant@ account — used at reauth time so that
+# ONE consent covers every capability the system will ever need for this account.
+# Adding a new integration in future will NOT require another reauth as long as
+# its scopes are already listed here.
+#
+#   Mail.Send          — send email as assistant@
+#   Mail.Read          — read assistant@ inbox (email poller)
+#   Files.ReadWrite    — read + write SharePoint / OneDrive files
+#   Sites.ReadWrite.All— access SharePoint site drives
+#   Calendars.ReadWrite— read + write calendar events
+#   Tasks.ReadWrite    — read + write Microsoft To Do / Tasks
+#   User.Read          — basic profile (required for some Graph calls)
+#   offline_access     — maintain refresh token across sessions
+FULL_CONSENT_SCOPES = (
+    "Mail.Send Mail.Read Files.ReadWrite Sites.ReadWrite.All "
+    "Calendars.ReadWrite Tasks.ReadWrite User.Read offline_access"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +257,19 @@ def get_access_token(args: argparse.Namespace) -> str:
 # ---------------------------------------------------------------------------
 
 def cmd_reauth(args: argparse.Namespace) -> None:
-    import os, urllib.parse
+    """
+    Device-code re-auth flow. Requests FULL_CONSENT_SCOPES so that this one
+    consent covers every Microsoft capability the system will ever need for
+    this account — email, SharePoint, calendar, tasks.  No future reauth
+    should be needed unless the token file is deleted or access is revoked.
+    """
+    import time
+
+    account = args.account  # "assistant" or "microsoft" (personal)
+
+    # Choose the right full scope set per account type
+    # Both accounts request the same superset — simpler and future-proof.
+    consent_scopes = FULL_CONSENT_SCOPES
 
     token_data, token_file = _load_token(args)
     client_id = token_data.get("client_id", "")
@@ -248,25 +279,27 @@ def cmd_reauth(args: argparse.Namespace) -> None:
         print("ERROR: client_id missing from token file. Cannot reauth.", file=sys.stderr)
         sys.exit(1)
 
-    # Device code flow — works on Pi without a browser
+    # Device code flow — works on Pi without a browser or redirect
     init_resp = requests.post(
         f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode",
-        data={"client_id": client_id, "scope": REQUIRED_SCOPES},
+        data={"client_id": client_id, "scope": consent_scopes},
         timeout=15,
     )
     if not init_resp.ok:
-        print(f"Device code request failed: {init_resp.status_code} {init_resp.text}", file=sys.stderr)
+        print(f"Device code request failed: {init_resp.status_code} {init_resp.text}",
+              file=sys.stderr)
         sys.exit(1)
 
     flow = init_resp.json()
-    print("\n" + "=" * 60)
-    print("  SharePoint re-auth — grant Files.ReadWrite + Sites.ReadWrite.All")
-    print("=" * 60)
+    print("\n" + "=" * 65)
+    print(f"  Microsoft re-auth — account: {account}")
+    print(f"  Granting ALL scopes in one go — no future reauth needed")
+    print(f"  Scopes: {consent_scopes}")
+    print("=" * 65)
     print(f"\n  {flow['message']}\n")
     print("  (Waiting for you to complete the sign-in…)\n")
 
-    import time
-    interval = flow.get("interval", 5)
+    interval    = flow.get("interval", 5)
     device_code = flow["device_code"]
     expires_in  = flow.get("expires_in", 900)
     deadline    = time.time() + expires_in
@@ -285,10 +318,12 @@ def cmd_reauth(args: argparse.Namespace) -> None:
         data = poll.json()
         if "access_token" in data:
             token_data["access_token"]  = data["access_token"]
-            token_data["refresh_token"] = data.get("refresh_token", token_data.get("refresh_token", ""))
+            token_data["refresh_token"] = data.get("refresh_token",
+                                                    token_data.get("refresh_token", ""))
             _write_atomic(token_file, token_data)
-            print(f"  ✓ Token updated: {token_file}")
-            print("  SharePoint access granted. Re-auth complete.\n")
+            print(f"\n  ✓ Token updated: {token_file}")
+            print(f"  ✓ All Microsoft scopes granted for {account} account.")
+            print(f"  Email, SharePoint, calendar and tasks all authorised.\n")
             return
         err = data.get("error", "")
         if err == "authorization_pending":

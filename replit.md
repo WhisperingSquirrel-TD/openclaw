@@ -338,6 +338,39 @@ The CRM runs at 06:00 every morning and another job runs at 07:00. No background
 - `loginctl enable-linger $USER` is required so user services start at boot without a login session. The install script applies this.
 - If a service shows `inactive (dead)` after install, check whether credentials/token files exist — the services are intentionally not started until auth is complete.
 
+### Microsoft OAuth — unified scope strategy (IMPORTANT)
+
+**Why reauth keeps happening and how to stop it:**  Microsoft's device-code consent is scope-bound at the time of first sign-in. If a token was originally created with `Mail.Send offline_access`, subsequent refresh requests for `Files.ReadWrite` are silently ignored — the token looks valid but 403s on SharePoint. Every new capability added to the system would historically trigger a new reauth.
+
+**The fix — one reauth per account, all scopes at once:**
+
+- `sharepoint.py`'s `cmd_reauth` now requests `FULL_CONSENT_SCOPES` (not just `REQUIRED_SCOPES`):
+  ```
+  Mail.Send  Mail.Read  Files.ReadWrite  Sites.ReadWrite.All
+  Calendars.ReadWrite  Tasks.ReadWrite  User.Read  offline_access
+  ```
+- This superset covers email, SharePoint, calendar and tasks permanently for that account.
+- Once consented, any future token refresh requesting a *subset* of these scopes will succeed — no new consent needed.
+- **No further reauth is required** unless the token file is deleted or the user revokes API access in Entra/Azure.
+
+**How to trigger reauth from Telegram (no SSH needed):**
+
+- `/ms-reauth` — re-auth `assistant@stackstoneconsulting.co.uk` (email + SharePoint + calendar + tasks)
+- `/ms-reauth-personal` — re-auth `tom@` personal account (email + calendar)
+
+The bot displays the Microsoft device-code URL and code in Telegram. Sign in on any device. The bot sends a "complete" message when the token is updated. The whole thing runs in the background — the bot stays responsive throughout.
+
+**Token file locations:**
+
+- `assistant@`: `~/.openclaw/integrations/microsoft/token-assistant.json` or `~/.openclaw/integrations/microsoft-l1/token.json`
+- `tom@ personal`: `~/.openclaw/integrations/microsoft/token-microsoft.json`
+
+**`REQUIRED_SCOPES` vs `FULL_CONSENT_SCOPES` in sharepoint.py:**
+
+- `REQUIRED_SCOPES` = what the script requests on token refresh (minimal set, avoids surprising scope grants)
+- `FULL_CONSENT_SCOPES` = what `cmd_reauth` requests at initial consent time (complete superset)
+- Microsoft grants from the consented superset — so refresh with `REQUIRED_SCOPES` works fine as long as `FULL_CONSENT_SCOPES` was used at reauth time.
+
 ### Microsoft OAuth token format
 
 - The Microsoft auth library (MSAL) stores tokens in PascalCase format: `AccessToken`, `RefreshToken`, `AppMetadata`. Our poller expects a flat format: `access_token`, `refresh_token`, `tenant_id`, `client_id`.
