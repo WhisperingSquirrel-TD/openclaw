@@ -1321,11 +1321,9 @@ def main():
         except RuntimeError as e:
             log(f"WARNING: Garth auth failed ({e})")
             if "setup-garth" in str(e) or "no TTY" in str(e) or "MFA" in str(e):
-                log("FLAG TO TOM: Run the one-time Garmin garth setup from a terminal:")
-                log("  python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup-garth")
-                log("  This handles MFA if needed and caches tokens for all future cron runs.")
-                sys.exit(1)
-            log("Falling back to cookie mode...")
+                log("Garth tokens not cached / expired — falling back to cookie mode.")
+            else:
+                log("Falling back to cookie mode...")
 
     if not use_garth:
         log("Auth: using cookie mode (GARMIN_EMAIL/GARMIN_PASSWORD not in .env or garth auth failed)")
