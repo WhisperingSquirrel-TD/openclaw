@@ -1715,21 +1715,24 @@ def cmd_sp_housekeep(token: str, chat_id: str, args_str: str = "") -> None:
         return
 
     # Parse optional args from message
-    tokens  = args_str.lower().split() if args_str else []
-    mode    = "dry-run" if "dry-run" in tokens or "dry_run" in tokens else "execute"
-    scope   = "all"
+    # Normalise for flag detection
+    args_lower = args_str.lower() if args_str else ""
+    mode  = "dry-run" if "dry-run" in args_lower or "dry_run" in args_lower else "execute"
+    scope = "all"
 
-    for t in tokens:
-        if t == "accounts":
-            scope = "accounts"
-        elif t == "opportunities":
-            scope = "opportunities"
-        elif t.startswith("entity:"):
-            # Re-read from original args_str to preserve casing
-            for part in args_str.split():
-                if part.lower().startswith("entity:"):
-                    scope = part
-                    break
+    # entity:<name> can contain spaces — must be parsed from the original string
+    # Match "entity:" and consume everything after it, stopping at known flags
+    import re as _re
+    entity_match = _re.search(
+        r'(?i)entity:\s*(.+?)(?:\s+(?:dry-run|dry_run|accounts|opportunities)\b|$)',
+        args_str.strip(),
+    )
+    if entity_match:
+        scope = "entity:" + entity_match.group(1).strip()
+    elif "accounts" in args_lower:
+        scope = "accounts"
+    elif "opportunities" in args_lower:
+        scope = "opportunities"
 
     action_label = "Proposing changes (dry-run)" if mode == "dry-run" else "Running housekeeping sweep"
     send(token, chat_id,

@@ -332,6 +332,14 @@ OUTPUT_CONTRACT = """
 
 You must respond with **valid JSON only** — no prose, no markdown fences, nothing else.
 
+IMPORTANT — SharePoint write model:
+The underlying system supports create, update, and append only.
+There is no true rename or delete capability.
+If a file needs to be at a canonical path, use action "recreate":
+  - "path" = the new canonical destination path
+  - "from_path" = the original file (it will NOT be deleted; it will be surfaced as ambiguous for manual review)
+Never assume a file has been removed. Surface the original in ambiguous if it should be cleaned up.
+
 Output schema:
 {
   "entity": "<name>",
@@ -339,10 +347,10 @@ Output schema:
   "assessment": "<one sentence summary of current state>",
   "safe_changes": [
     {
-      "action": "create|update|rename",
-      "path": "<full SP path from drive root>",
-      "content": "<full file content — required for create/update>",
-      "from_path": "<original path — only for rename>",
+      "action": "create|recreate|update|append",
+      "path": "<full SP path — destination>",
+      "content": "<full file content — required for all actions>",
+      "from_path": "<original path — required for recreate only>",
       "reason": "<brief reason>"
     }
   ],
@@ -644,26 +652,35 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
         if not path:
             continue
 
-        if action == "rename":
-            # Rename = delete old + create new (queue doesn't support rename directly)
-            # We create the new file; old file is ambiguous — surface as note
+        if action == "recreate":
+            # SharePoint has no rename/delete. We create the new canonical file.
+            # The original (from_path) is NOT touched — it is surfaced in ambiguous
+            # so Tom/L1 can manually remove it when ready.
             from_path = change.get("from_path", "")
             content   = change.get("content", "")
             if not content:
                 decision["ambiguous"].append({
-                    "file": from_path,
-                    "reason": "Rename requested but no content provided — skipped",
+                    "file": from_path or path,
+                    "reason": "Recreate requested but no content provided — skipped",
                 })
                 continue
+            if from_path:
+                decision["ambiguous"].append({
+                    "file": from_path,
+                    "reason": f"Original file — new canonical version created at {path}. Safe to delete manually.",
+                })
             entry_id = f"sp-hk-{entity['name'][:8].replace(' ', '')}-{len(queue)+1}-{int(time.time())}"
             entry = {
-                "id":           entry_id,
-                "operation":    "create",
-                "path":         path,
-                "content":      content,
-                "requested_at": run_ts,
+                "id":            entry_id,
+                "operation":     "create",
+                "path":          path,
+                "content":       content,
+                "requested_at":  run_ts,
                 "_housekeeping": True,
-                "_reason":      change.get("reason", ""),
+                "_action":       "recreate",
+                "_from_path":    from_path,
+                "_reason":       change.get("reason", ""),
+                "_verified":     False,
             }
             queue.append(entry)
             submitted.append(entry)
@@ -674,20 +691,22 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
                 continue
             entry_id = f"sp-hk-{entity['name'][:8].replace(' ', '')}-{len(queue)+1}-{int(time.time())}"
             entry = {
-                "id":           entry_id,
-                "operation":    action,
-                "path":         path,
-                "content":      content,
-                "requested_at": run_ts,
+                "id":            entry_id,
+                "operation":     action,
+                "path":          path,
+                "content":       content,
+                "requested_at":  run_ts,
                 "_housekeeping": True,
-                "_reason":      change.get("reason", ""),
+                "_reason":       change.get("reason", ""),
+                "_verified":     False,
             }
             queue.append(entry)
             submitted.append(entry)
 
     if submitted:
         _write_queue(queue)
-        log(f"  Queued {len(submitted)} write(s) for {entity['name']}")
+        log(f"  Queued {len(submitted)} write(s) for {entity['name']} "
+            f"(pending verification — check SHAREPOINT_RESULT.md)")
 
     return submitted
 
@@ -710,15 +729,23 @@ def _write_report(results: list[dict], mode: str) -> Path:
     cm_missing     = sum(1 for r in results if r.get("current_md_status") == "missing")
 
     header = "HOUSEKEEPING PROPOSAL" if mode == "dry-run" else "HOUSEKEEPING REPORT"
+    verify_note = (
+        "\n> ⚠️ **Writes are queued, not yet verified.**  "
+        "Check `SHAREPOINT_RESULT.md` to confirm each write completed successfully.  "
+        "No entity is considered complete until its queued writes are verified.\n"
+        if mode == "execute" else ""
+    )
     lines = [
         f"# SharePoint {header}",
         f"_Run: {run_ts} — Mode: {mode}_",
-        "",
+        verify_note,
         "## Summary",
         f"| | |",
         f"|---|---|",
         f"| Entities reviewed | {total_entities} |",
-        f"| Safe changes {'proposed' if mode == 'dry-run' else 'queued'} | {total_safe if mode == 'dry-run' else total_queued} |",
+        (f"| Safe changes proposed | {total_safe} |"
+         if mode == "dry-run"
+         else f"| Writes queued (pending verification) | {total_queued} |"),
         f"| Current.md needs update | {cm_updates} |",
         f"| Current.md missing | {cm_missing} |",
         f"| Needs Tom/L1 judgement | {total_ambig} |",
@@ -762,9 +789,9 @@ def _write_report(results: list[dict], mode: str) -> Path:
                 lines.append(f"- `{ch.get('action', '?')}` {ch.get('path', '')} — {ch.get('reason', '')}")
 
         elif mode == "execute" and r.get("queued"):
-            lines.append("\n**Queued writes:**")
+            lines.append("\n**Writes queued (pending verification — check SHAREPOINT_RESULT.md):**")
             for q in r["queued"]:
-                lines.append(f"- `{q.get('operation', '?')}` {q.get('path', '')} (id: {q.get('id', '')})")
+                lines.append(f"- `{q.get('operation', '?')}` {q.get('path', '')} (id: `{q.get('id', '')}`)")
 
         if r.get("current_md_status") in ("needs_update", "missing"):
             lines.append(f"\n⚠️ Current.md: {r['current_md_status']}")
@@ -812,10 +839,10 @@ def _telegram_summary(results: list[dict], mode: str, scope: str) -> str:
     if mode == "dry-run":
         action_line = f"_{proposed} change(s) proposed_"
     else:
-        action_line = f"_{queued} write(s) queued to SharePoint_"
+        action_line = f"_{queued} write(s) queued — pending verification (check SHAREPOINT\\_RESULT.md)_"
 
     lines = [
-        f"{icon} *SharePoint Housekeeping {'Proposal' if mode == 'dry-run' else 'Complete'}*",
+        f"{icon} *SharePoint Housekeeping {'Proposal' if mode == 'dry-run' else 'Queued'}*",
         f"Scope: `{scope}` · Mode: `{mode}`",
         "",
         f"• {total} entities reviewed",
@@ -957,6 +984,62 @@ def process_sync(entities: list[dict], mode: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Degraded-state check
+# ---------------------------------------------------------------------------
+
+MANIFEST_MAX_AGE_HOURS = 26  # slightly more than nightly cron interval
+TOKEN_FILE = STATE_DIR / "integrations/microsoft/token-assistant.json"
+
+
+def _check_degraded_state() -> list[str]:
+    """
+    Check for conditions that should block a sweep entirely.
+    Returns a list of problem strings. Empty list = system looks healthy.
+
+    Checks:
+    1. Manifest exists and is recent
+    2. Queue file is writable (write path open)
+    3. Assistant token file exists (auth available)
+    """
+    problems = []
+
+    # 1. Manifest freshness
+    if not MANIFEST.exists():
+        problems.append("SharePoint manifest missing — run /sp-sync first")
+    else:
+        try:
+            manifest = json.loads(MANIFEST.read_text())
+            synced_at = manifest.get("synced_at", "")
+            if synced_at:
+                synced_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
+                age_hours = (datetime.now(timezone.utc) - synced_dt).total_seconds() / 3600
+                if age_hours > MANIFEST_MAX_AGE_HOURS:
+                    problems.append(
+                        f"SharePoint manifest is stale ({age_hours:.1f}h old, limit {MANIFEST_MAX_AGE_HOURS}h) "
+                        f"— run /sp-sync to refresh"
+                    )
+        except Exception as e:
+            problems.append(f"Could not read manifest timestamp: {e}")
+
+    # 2. Queue file writability
+    try:
+        QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        test_path = QUEUE_FILE.parent / ".sp-hk-write-test"
+        test_path.write_text("ok")
+        test_path.unlink()
+    except Exception as e:
+        problems.append(f"Queue write path is not writable: {e}")
+
+    # 3. Token file existence
+    if not TOKEN_FILE.exists():
+        problems.append(
+            f"Assistant token file not found at {TOKEN_FILE} — run /ms-reauth"
+        )
+
+    return problems
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -980,13 +1063,20 @@ def main() -> None:
 
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
-        log_err("ANTHROPIC_API_KEY not set in .env — cannot run housekeeping sweep")
+        msg = "ANTHROPIC_API_KEY not set in .env — cannot run housekeeping sweep"
+        log_err(msg)
+        _send_telegram(f"❌ *SharePoint Housekeeping blocked*\n{msg}")
         sys.exit(1)
 
-    if not MANIFEST.exists():
-        log_err(
-            "SharePoint manifest not found — cache hasn't been populated yet.\n"
-            "Run /sp-sync in Telegram first, then retry."
+    # ── Degraded-state check — bail entirely rather than partial noisy attempt ─
+    problems = _check_degraded_state()
+    if problems:
+        problem_lines = "\n".join(f"• {p}" for p in problems)
+        log_err(f"Housekeeping blocked — degraded state detected:\n{problem_lines}")
+        _send_telegram(
+            f"❌ *SharePoint Housekeeping blocked — degraded state*\n\n"
+            f"{problem_lines}\n\n"
+            f"_Resolve the above and retry._"
         )
         sys.exit(1)
 
