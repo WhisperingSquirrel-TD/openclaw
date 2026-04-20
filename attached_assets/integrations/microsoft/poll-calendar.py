@@ -6,9 +6,11 @@ Microsoft Graph API calendar poller for OpenClaw.
 - Polls every 15 minutes
 
 Usage:
-  poll-calendar.py                   # uses default token-microsoft.json
+  poll-calendar.py                          # uses token-assistant.json (default)
+  poll-calendar.py --account microsoft      # uses token-microsoft.json (personal)
   poll-calendar.py --token-file /path/to/token.json
 """
+import argparse
 import json
 import sys
 import time
@@ -17,10 +19,50 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 STATE_DIR   = Path.home() / ".openclaw"
-TOKEN_FILE  = STATE_DIR / "integrations/microsoft/token-microsoft.json"
 CALENDAR_MD = STATE_DIR / "workspace/OUTLOOK_CALENDAR.md"
 LOG_FILE    = STATE_DIR / "workspace/memory/poll-calendar-log.txt"
 GRAPH_BASE  = "https://graph.microsoft.com/v1.0"
+
+# TOKEN_FILE is resolved at startup from --account / --token-file args (see main())
+TOKEN_FILE: Path = None  # type: ignore[assignment]
+
+
+def _resolve_token_file(account: str, explicit: str | None) -> Path:
+    """Return the token file path for the given account slug.
+
+    Resolution order (mirrors send.py / create-event.py):
+      1. --token-file explicit path
+      2. token-{account}.json in any microsoft* subdir
+      3. token-assistant.json  (canonical assistant@ path)
+      4. token-microsoft.json  (canonical personal path)
+      5. token.json
+    """
+    if explicit:
+        p = Path(explicit)
+        if not p.exists():
+            raise FileNotFoundError(f"Explicit token file not found: {p}")
+        return p
+
+    ms_dirs = sorted(STATE_DIR.glob("integrations/microsoft*"))
+    candidates: list[Path] = []
+    for d in ms_dirs:
+        candidates.append(d / f"token-{account}.json")
+    for d in ms_dirs:
+        candidates.append(d / "token-assistant.json")
+    for d in ms_dirs:
+        candidates.append(d / "token-microsoft.json")
+    for d in ms_dirs:
+        candidates.append(d / "token.json")
+
+    for c in candidates:
+        if c.exists():
+            return c
+
+    raise FileNotFoundError(
+        f"No token file found for account '{account}'. Tried:\n"
+        + "\n".join(f"  {c}" for c in dict.fromkeys(candidates))  # deduplicated
+        + "\nRun: python3 sharepoint.py reauth   (or /ms-reauth in Telegram)"
+    )
 
 POLL_INTERVAL = 900   # 15 minutes
 LOOK_AHEAD    = 14    # days
@@ -121,7 +163,7 @@ def load_token() -> dict:
         raise FileNotFoundError(
             f"Token file not found: {TOKEN_FILE}\n"
             "Run the Microsoft auth flow first:\n"
-            "  python3 ~/.openclaw/integrations/microsoft/auth.py --account microsoft"
+            "  python3 sharepoint.py reauth   (or /ms-reauth in Telegram)"
         )
     data = _load_json_resilient(TOKEN_FILE)
     if "RefreshToken" in data and "AccessToken" in data:
@@ -314,18 +356,25 @@ def _trim_log_on_startup() -> None:
 
 
 def main() -> None:
-    if not TOKEN_FILE.exists():
-        print(
-            f"Token file not found: {TOKEN_FILE}\n"
-            "Run the Microsoft auth flow first:\n"
-            "  python3 ~/.openclaw/integrations/microsoft/auth.py --account microsoft",
-            file=sys.stderr,
-        )
+    global TOKEN_FILE
+
+    p = argparse.ArgumentParser(description="OpenClaw Microsoft calendar poller")
+    p.add_argument("--account",    default="assistant",
+                   help="Account slug used to locate the token file "
+                        "(default: assistant → token-assistant.json)")
+    p.add_argument("--token-file", default=None,
+                   help="Explicit path to OAuth token JSON (overrides --account lookup)")
+    args = p.parse_args()
+
+    try:
+        TOKEN_FILE = _resolve_token_file(args.account, args.token_file)
+    except FileNotFoundError as e:
+        print(str(e), file=sys.stderr)
         sys.exit(1)
 
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     _trim_log_on_startup()
-    log(f"Calendar poller starting — token: {TOKEN_FILE}, output: {CALENDAR_MD}")
+    log(f"Calendar poller starting — account: {args.account}, token: {TOKEN_FILE}, output: {CALENDAR_MD}")
 
     while True:
         try:

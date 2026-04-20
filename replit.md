@@ -360,10 +360,14 @@ The CRM runs at 06:00 every morning and another job runs at 07:00. No background
 
 The bot displays the Microsoft device-code URL and code in Telegram. Sign in on any device. The bot sends a "complete" message when the token is updated. The whole thing runs in the background — the bot stays responsive throughout.
 
-**Token file locations:**
+**Token file locations — canonical paths:**
 
-- `assistant@`: `~/.openclaw/integrations/microsoft/token-assistant.json` or `~/.openclaw/integrations/microsoft-l1/token.json`
-- `tom@ personal`: `~/.openclaw/integrations/microsoft/token-microsoft.json`
+| Account | Canonical token file | Used by |
+|---|---|---|
+| `assistant@stackstoneconsulting.co.uk` | `~/.openclaw/integrations/microsoft/token-assistant.json` | SharePoint (all), send.py, poll.py `--account assistant`, **poll-calendar.py (default)** |
+| `tom@ personal` | `~/.openclaw/integrations/microsoft/token-microsoft.json` | poll.py `--account microsoft`, poll-calendar.py `--account microsoft` |
+
+One `/ms-reauth` in Telegram updates `token-assistant.json` and all three services (email, calendar, SharePoint) benefit immediately — no service restarts needed.
 
 **`REQUIRED_SCOPES` vs `FULL_CONSENT_SCOPES` in sharepoint.py:**
 
