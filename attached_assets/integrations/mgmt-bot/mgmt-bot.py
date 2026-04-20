@@ -1695,6 +1695,88 @@ def cmd_sp_sync(token: str, chat_id: str) -> None:
              f"_{e}_\n\n```{tail}```")
 
 
+def cmd_sp_housekeep(token: str, chat_id: str, args_str: str = "") -> None:
+    """
+    Trigger the SharePoint CRM housekeeping sweep.
+
+    Usage:
+      /sp-housekeep                     — full execute sweep, sync mode
+      /sp-housekeep dry-run             — propose changes only, no writes
+      /sp-housekeep accounts            — execute, accounts only
+      /sp-housekeep opportunities       — execute, opportunities only
+      /sp-housekeep entity:Harken Health — execute, one entity only
+      /sp-housekeep dry-run entity:Croyde Medical — dry-run, one entity
+    """
+    hk_script = STATE_DIR / "integrations/microsoft/sharepoint_housekeeping.py"
+    if not hk_script.exists():
+        send(token, chat_id,
+             f"❌ Housekeeping script not found at `{hk_script}`.\n"
+             f"Run `/install` to deploy it.")
+        return
+
+    # Parse optional args from message
+    tokens  = args_str.lower().split() if args_str else []
+    mode    = "dry-run" if "dry-run" in tokens or "dry_run" in tokens else "execute"
+    scope   = "all"
+
+    for t in tokens:
+        if t == "accounts":
+            scope = "accounts"
+        elif t == "opportunities":
+            scope = "opportunities"
+        elif t.startswith("entity:"):
+            # Re-read from original args_str to preserve casing
+            for part in args_str.split():
+                if part.lower().startswith("entity:"):
+                    scope = part
+                    break
+
+    action_label = "Proposing changes (dry-run)" if mode == "dry-run" else "Running housekeeping sweep"
+    send(token, chat_id,
+         f"🧹 *SharePoint Housekeeping*\n"
+         f"Mode: `{mode}` · Scope: `{scope}`\n\n"
+         f"_{action_label} — using --sync for immediate results…_")
+
+    cmd = ["python3", str(hk_script),
+           "--mode",  mode,
+           "--scope", scope,
+           "--sync"]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True, text=True, timeout=600,
+        )
+    except subprocess.TimeoutExpired:
+        send(token, chat_id, "⏱ Housekeeping timed out after 10 minutes.")
+        return
+    except Exception as e:
+        send(token, chat_id, f"❌ Housekeeping failed unexpectedly:\n```{e}```")
+        return
+
+    if result.returncode != 0:
+        tail = "\n".join((result.stdout + result.stderr).strip().splitlines()[-20:])
+        send(token, chat_id,
+             f"❌ *Housekeeping failed* (exit {result.returncode}):\n```{tail}```")
+        return
+
+    # Read the output report/proposal file for a compact summary
+    report_file = (STATE_DIR / "workspace" / "HOUSEKEEPING_PROPOSAL.md"
+                   if mode == "dry-run"
+                   else STATE_DIR / "workspace" / "HOUSEKEEPING_REPORT.md")
+    try:
+        report_lines = report_file.read_text().splitlines()
+        # Send summary section (first ~25 lines = header + summary table)
+        summary_block = "\n".join(report_lines[:25])
+        send(token, chat_id,
+             f"✅ *SharePoint Housekeeping {'Proposal' if mode == 'dry-run' else 'Complete'}*\n\n"
+             f"```\n{summary_block}\n```\n\n"
+             f"Full report: `{report_file.name}`")
+    except Exception:
+        tail = "\n".join((result.stdout + result.stderr).strip().splitlines()[-15:])
+        send(token, chat_id, f"✅ Housekeeping complete.\n```{tail}```")
+
+
 def cmd_cancel(token: str, chat_id: str) -> None:
     SOUL_PENDING_FLAG.unlink(missing_ok=True)
     send(token, chat_id, "↩️ Cancelled.")
@@ -1732,7 +1814,10 @@ def cmd_help(token: str, chat_id: str) -> None:
          "_Supported ops: git\\_clone · git\\_pull · git\\_branch · git\\_commit\\_push_\n"
          "_git\\_merge\\_main · git\\_delete\\_branch · npm\\_install · npm\\_upgrade · npm\\_run_\n\n"
          "*SharePoint*\n"
-         "/sp-sync — force immediate SharePoint content mirror refresh\n\n"
+         "/sp-sync — force immediate SharePoint content mirror refresh\n"
+         "/sp-housekeep — CRM housekeeping sweep (entity-by-entity normalisation)\n"
+         "  Options: dry-run · accounts · opportunities · entity:<name>\n"
+         "  Example: /sp-housekeep dry-run entity:Harken Health\n\n"
          "*Microsoft Auth*\n"
          "/ms-reauth — re-authenticate assistant@ account (email + SharePoint + calendar + tasks)\n"
          "/ms-reauth-personal — re-authenticate tom@ personal account (email + calendar)\n"
@@ -1773,6 +1858,7 @@ MENU_COMMANDS = [
     ("yt_list",   "List configured YouTube channels"),
     ("yt_run",    "Trigger the YouTube channel poller now"),
     ("sp_sync",        "Force SharePoint content mirror refresh"),
+    ("sp_housekeep",   "CRM housekeeping sweep — dry-run|accounts|entity:<name>"),
     ("ms_reauth",          "Re-auth assistant@ (email+SP+cal+tasks, one-time)"),
     ("ms_reauth_personal", "Re-auth tom@ personal (email+calendar, one-time)"),
     # Dev workflow
@@ -2286,6 +2372,15 @@ def main() -> None:
                         cmd_dev_run(token, chat_id, arg)
                     else:
                         cmd_dev_test(token, chat_id, arg)
+                except Exception as e:
+                    print(f"[mgmt-bot] Handler error ({cmd}): {e}", file=sys.stderr)
+                    send(token, chat_id, f"❌ Error running `{cmd}`:\n```{e}```")
+                continue
+
+            if cmd in ("/sp-housekeep", "/sp_housekeep"):
+                print(f"[mgmt-bot] Command: {cmd} {arg!r} from {chat_id}")
+                try:
+                    cmd_sp_housekeep(token, chat_id, arg)
                 except Exception as e:
                     print(f"[mgmt-bot] Handler error ({cmd}): {e}", file=sys.stderr)
                     send(token, chat_id, f"❌ Error running `{cmd}`:\n```{e}```")

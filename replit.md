@@ -388,6 +388,48 @@ One `/ms-reauth` in Telegram updates `token-assistant.json` and all three servic
 - Credential file naming: the install script expects `gmail-credentials.json` and `gmail-token.json`. Older setups may have `credentials.json` / `token.json` — copy and rename if needed.
 - The Google Tasks integration (for WhatsApp watch actions) uses a separate token at `~/.openclaw/oauth/google/tasks-token.json` — different from Gmail.
 
+### SharePoint CRM housekeeping
+
+**Script**: `attached_assets/integrations/microsoft/sharepoint_housekeeping.py`
+**Deployed to**: `~/.openclaw/integrations/microsoft/sharepoint_housekeeping.py` (symlink via install script)
+
+Entity-by-entity CRM normalisation using the Anthropic batch API (50% cost saving). Follows the same two-phase cron model as the YouTube channel poller.
+
+**Two-phase cron model:**
+- First nightly run: discovers entities, builds one Anthropic batch request per entity, submits batch, saves state
+- Second nightly run: collects batch results, executes safe writes via `sharepoint-queue.json`, writes report to Telegram
+
+**Decision classes (mirrors the crm-sharepoint skill):**
+- `safe` — auto-executed in execute mode (renaming to canonical date format, creating missing Current.md, updating stale Current.md)
+- `ambiguous` — never auto-written; surfaced in report for Tom/L1 judgement
+- `blocked` — reported only; no write attempted
+
+**Arguments:**
+- `--mode execute|dry-run` (default: execute)
+- `--scope all|accounts|opportunities|entity:<name>` (default: all; accounts processed before opportunities)
+- `--sync` — skip batch API, process entities immediately (used by `/sp-housekeep` Telegram command)
+
+**Output files:**
+- Execute mode → `~/.openclaw/workspace/HOUSEKEEPING_REPORT.md`
+- Dry-run mode → `~/.openclaw/workspace/HOUSEKEEPING_PROPOSAL.md`
+- Both modes → Telegram notification with summary on completion
+
+**Cron schedule**: nightly at 02:00 (`0 2 * * *`) — execute mode, all scope
+**Telegram command**: `/sp-housekeep [dry-run] [accounts|opportunities|entity:<name>]`
+  - `/sp-housekeep` — full sweep, execute, sync
+  - `/sp-housekeep dry-run` — propose only, no writes
+  - `/sp-housekeep accounts` — execute, accounts only
+  - `/sp-housekeep entity:Harken Health` — execute, one entity
+
+**State file**: `~/.openclaw/integrations/microsoft/sp-housekeeping-state.json` (tracks pending batch IDs)
+
+**Important constraints:**
+- Never processes file-by-file; the unit of work is one entity (one Account or Opportunity folder)
+- Writes are grouped per entity and verified before moving on
+- Ambiguous items (unclear dates, possible duplicates, cross-entity files) are always surfaced, never force-organised
+- If system state is degraded (stale manifest, blocked writes), prefers reporting blocked over partial noisy attempts
+- Requires `ANTHROPIC_API_KEY` in `.env`
+
 ### TOTP behaviour
 
 - The TOTP wait window is **2 minutes** from when the code is requested. Once a valid code is accepted, the approval window is **5 minutes** by default. L1's SOUL.md should reflect this so it doesn't misinform the user about timing.

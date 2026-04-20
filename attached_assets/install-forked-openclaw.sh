@@ -963,6 +963,28 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# SharePoint housekeeping sweep
+# Anthropic-batched entity-by-entity CRM normalisation.
+# Nightly cron submits batch; next run collects results and executes writes.
+# ---------------------------------------------------------------------------
+SP_HK_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_housekeeping.py"
+SP_HK_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_housekeeping.py"
+SP_HK_LOG="$HOME/.openclaw/integrations/microsoft/sp-housekeeping.log"
+
+if [ -f "$SP_HK_SRC" ]; then
+    mkdir -p "$HOME/.openclaw/integrations/microsoft"
+    ln -sf "$SP_HK_SRC" "$SP_HK_DST"
+    info "SharePoint housekeeping script linked: $SP_HK_DST"
+
+    # Nightly at 02:00 — submit batch (or collect results on second run)
+    SP_HK_CRON="0 2 * * * python3 $SP_HK_DST --mode execute --scope all >> $SP_HK_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "sharepoint_housekeeping.py"; echo "$SP_HK_CRON" ) | crontab -
+    info "SharePoint housekeeping cron installed: nightly 02:00 — execute mode, all entities"
+else
+    warn "SharePoint housekeeping script not found at $SP_HK_SRC — skipping"
+fi
+
+# ---------------------------------------------------------------------------
 # Stackstone networking report poller
 # Polls /api/integration/reports every 5 minutes and sends unsent reports
 # as branded emails via MS Graph. No tunnel or endpoint needed on the Pi.
