@@ -320,36 +320,17 @@ def _read_entity_content(entity: dict) -> dict:
 # Prompt building
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are reviewing a SharePoint CRM entity as part of a structured housekeeping sweep.
+# The organisational rules live entirely in the skill file so L1 can update
+# them without touching this code. Only the JSON output schema is defined here
+# because that is a mechanical parsing contract, not a policy decision.
+SKILL_FILE = STATE_DIR / "skills/crm-sharepoint/SKILL.md"
 
-## Organisation rules (follow these exactly)
+OUTPUT_CONTRACT = """
+---
 
-**Canonical entity structure:**
-- One folder per entity: /Accounts/<Company>/ or /Opportunities/<Company>/
-- <Company> - Current.md = latest truth / working summary / current understanding (retrieval anchor)
-- YYYY-MM-DD - <Type> - <Description>.md = dated historical artifacts
+## Output contract for this run (follow exactly)
 
-**Naming conventions:**
-- Current.md filename must be exactly: <Company> - Current.md
-- Dated artifacts must be: YYYY-MM-DD - <Type> - <Description>.md
-- Examples: 2026-04-07 - Communication Update - Stuart Work Scope.md
-           2026-03-19 - Opportunity Assessment Report - Collington Winter.md
-- Special case: Independent advisers under umbrella brands use Person+Network format
-  e.g. Andy Barrett - SJP (not just company name)
-
-**Decision rules:**
-- NEVER treat old dated files as equally current to Current.md
-- NEVER destructively clean up — preserve document accuracy over tidiness
-- NEVER force ambiguous organisation — surface for judgement instead
-- Safe to auto-execute: renaming a file to canonical date format when date is unambiguous,
-  creating a missing Current.md with content already present in the entity,
-  updating an obviously stale Current.md
-- Ambiguous (surface for judgement): files that could belong to multiple entities,
-  content that seems duplicated, unclear dates, files that may have been intentionally named differently
-- Blocked: anything requiring content you cannot see (uncached/unextracted binaries),
-  write failures, stale index
-
-**Your output must be valid JSON only — no prose, no markdown fences.**
+You must respond with **valid JSON only** — no prose, no markdown fences, nothing else.
 
 Output schema:
 {
@@ -375,7 +356,40 @@ Output schema:
 }
 
 If there is nothing to do, return empty arrays for safe_changes, ambiguous, blocked.
-Only include safe_changes you are confident about. When in doubt, put in ambiguous."""
+Only include safe_changes you are confident about. When in doubt, put in ambiguous.
+"""
+
+_MINIMAL_FALLBACK = """You are reviewing a SharePoint CRM entity as part of a structured housekeeping sweep.
+
+WARNING: The crm-sharepoint skill file was not found at ~/.openclaw/skills/crm-sharepoint/SKILL.md.
+Operating with minimal fallback rules only. Run /install to deploy the skill.
+
+Core rules (minimal fallback):
+- Folder per entity under /Accounts/ or /Opportunities/
+- <Company> - Current.md is the retrieval anchor (latest truth)
+- Dated files use YYYY-MM-DD - <Type> - <Description>.md format
+- Never destructively reorganise — surface ambiguous items for judgement
+- Never auto-write anything you are not certain about
+"""
+
+
+def _load_system_prompt() -> str:
+    """
+    Read the crm-sharepoint skill file and append the output contract.
+    If the skill file is not found, use a minimal fallback with a clear warning.
+    The skill file is the single source of truth for all organisational rules —
+    update it and the next housekeeping run automatically picks up the changes.
+    """
+    if SKILL_FILE.exists():
+        skill_content = SKILL_FILE.read_text()
+        return skill_content + OUTPUT_CONTRACT
+    else:
+        log(
+            f"WARNING: Skill file not found at {SKILL_FILE}. "
+            "Run /install to deploy the crm-sharepoint skill. "
+            "Using minimal fallback rules."
+        )
+        return _MINIMAL_FALLBACK + OUTPUT_CONTRACT
 
 
 def _build_entity_prompt(entity: dict, content: dict) -> str:
@@ -448,7 +462,7 @@ def _call_anthropic_sync(user_prompt: str) -> str:
     body = json.dumps({
         "model":      ANTHROPIC_MODEL,
         "max_tokens": 2048,
-        "system":     SYSTEM_PROMPT,
+        "system":     _load_system_prompt(),
         "messages":   [{"role": "user", "content": user_prompt}],
     }).encode()
 
@@ -473,13 +487,14 @@ def submit_anthropic_batch(requests: list[dict]) -> str | None:
         log_err("ANTHROPIC_API_KEY not set — cannot submit batch")
         return None
 
+    system_prompt = _load_system_prompt()  # load once — same skill applies to all entities in this batch
     batch_requests = [
         {
             "custom_id": item["custom_id"],
             "params": {
                 "model":      ANTHROPIC_MODEL,
                 "max_tokens": 2048,
-                "system":     SYSTEM_PROMPT,
+                "system":     system_prompt,
                 "messages":   [{"role": "user", "content": item["prompt"]}],
             },
         }
