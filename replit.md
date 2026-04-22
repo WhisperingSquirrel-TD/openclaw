@@ -679,6 +679,12 @@ python3 -c "import json; json.load(open('/home/tomdean88/.openclaw/openclaw.json
 # 4. What model is L1 using?
 python3 -c "import json; cfg=json.load(open('/home/tomdean88/.openclaw/openclaw.json')); print(cfg.get('agents',{}).get('defaults',{}).get('model',{}))"
 
+# ⚠️  NEVER set agent model like this — introduces legacy key that crashes gateway:
+#   cfg.setdefault('agent', {})['model'] = 'openai/gpt-5.4'   ← WRONG (old schema)
+#
+# ALWAYS use this form:
+#   cfg.setdefault('agents',{}).setdefault('defaults',{}).setdefault('model',{})['primary'] = 'openai/gpt-5.4'
+
 # 5. Check for rate limit / compaction error
 grep -i "usage limit\|compaction\|summarization failed" ~/.openclaw/gateway.log | tail -5
 
