@@ -185,7 +185,24 @@ def run_pipeline(
         return 2
 
     # ── Step 3: Synthesize ────────────────────────────────────────────────────
-    synth_args = []
+    # Pass the explicit ranked-file path from state so synthesize.py never
+    # picks up a stale prior-week file via the "latest by date" heuristic.
+    state_now = load_state()
+    ranked_file_path = state_now.get("rank", {}).get("ranked_file", "")
+    if not ranked_file_path or not Path(ranked_file_path).exists():
+        today_ranked = BRIEFING_DIR / "ranked" / f"{datetime.now().strftime('%Y-%m-%d')}.json"
+        if today_ranked.exists():
+            ranked_file_path = str(today_ranked)
+        else:
+            log_err("No ranked file found after rank step — cannot synthesize")
+            state = load_state()
+            state["pipeline_status"] = "partial_failure"
+            state["pipeline_error"] = "ranked file missing after rank step"
+            state["pipeline_end"] = datetime.now(timezone.utc).isoformat()
+            save_state(state)
+            return 2
+
+    synth_args = ["--ranked-file", ranked_file_path]
     if no_telegram:
         synth_args.append("--no-telegram")
     if no_tavily:

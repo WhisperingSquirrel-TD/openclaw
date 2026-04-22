@@ -547,10 +547,25 @@ def rank(raw_file: Path | None, top_n: int) -> dict:
         source_label = "aggregated-since-last-briefing"
 
     if not items:
-        log("No raw items to rank")
+        log("No raw items to rank — writing empty ranked file for deterministic handoff")
+        today = datetime.now().strftime("%Y-%m-%d")
+        RANKED_DIR.mkdir(parents=True, exist_ok=True)
+        ranked_file = RANKED_DIR / f"{today}.json"
+        empty_output = {
+            "quiet_week": True,
+            "shortlist": [],
+            "watch_items": [],
+            "all_scored": [],
+            "generated_at": run_start,
+            "source_raw": source_label,
+            "policy_version": "1.0",
+        }
+        _write_json(ranked_file, empty_output)
+        log(f"Empty ranked file written: {ranked_file}")
         return {
             "run_start": run_start,
             "raw_file": source_label,
+            "ranked_file": str(ranked_file),
             "items_loaded": 0,
             "items_shortlisted": 0,
             "quiet_week": True,
@@ -577,7 +592,7 @@ def rank(raw_file: Path | None, top_n: int) -> dict:
             "shortlist": [],
             "watch_items": [],
             "generated_at": run_start,
-            "source_raw": str(raw_file),
+            "source_raw": source_label,
         }
         _write_json(ranked_file, result_data)
         return {
@@ -601,7 +616,7 @@ def rank(raw_file: Path | None, top_n: int) -> dict:
     output = {
         **shortlist_result,
         "generated_at": run_start,
-        "source_raw": str(raw_file),
+        "source_raw": source_label,
         "policy_version": "1.0",
     }
     _write_json(ranked_file, output)
