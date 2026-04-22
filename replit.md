@@ -770,8 +770,8 @@ After the next `bash ~/install-forked-openclaw.sh` these five will be applied au
 | Item | Status | Pi commands |
 |------|--------|-------------|
 | Desktop taskbar (LXPanel) | Unresolved — terminal and file-manager buttons disappeared after reboot | `lxpanelctl restart` to reload panel; if buttons still missing: right-click panel → Add/Remove Panel Items → add Application Launch Bar → add lxterminal and pcmanfm |
-| Ollama gemma4:e2b | Download was interrupted at 22% | `systemctl --user start ollama` then `ollama pull gemma4:e2b` (the model is ~6GB; runs in background) |
-| Discord "28 commands missing descriptions" 400 | Defensive guard added in source (see above) but root cause unconfirmed — needs log check | `grep -i "400\|missing.*desc\|description" ~/.openclaw/gateway.log \| tail -30` to see the exact Discord error; the guard will suppress it on next reinstall |
+| Ollama local LLM | **RESOLVED 2026-04-22** — `llama3.2:3b` (2GB) pulled and verified working; `ollama/llama3.2:3b` added to `agents.defaults.model.fallbacks` in `openclaw.json`; Ollama running as systemd service (`sudo systemctl enable/start ollama`). Tested: responds correctly at ~2 tok/s CPU-only. gemma4:e2b removed (7.2GB exceeded 6.1GB available RAM). | No further action needed |
+| Discord "28 commands missing descriptions" 400 | **Root cause confirmed 2026-04-22** — workspace skill commands with empty SKILL.md descriptions registered as Discord slash commands with empty description field. Defensive `sanitizeDiscordDescription()` guard added to source — will suppress on next `git pull && bash ~/install-forked-openclaw.sh`. Recent errors (12:49, 13:10) are separate network issue (`EAI_AGAIN` DNS, self-resolving). | Run reinstall to apply guard |
 | `apply_patch`/`cron` alsoAllow warnings | Baked into OpenClaw's `coding` profile — not our config | Cannot fix without a plugin override; warnings are cosmetic |
 
 ---
