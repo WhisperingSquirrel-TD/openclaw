@@ -299,20 +299,18 @@ def fetch_feed(source: dict) -> tuple[list[dict], str | None]:
         return [], f"fetch failed for '{name}' ({url})"
 
     try:
-        # Try JSON Feed first if the URL suggests JSON content or the
-        # response body starts with a JSON object (handles *.json endpoints).
+        # Try JSON Feed 1.x first — handles *.json endpoints before RSS/XML.
         json_items = _parse_json_feed(raw)
         if json_items is not None:
-            return json_items, None
-
-        if HAS_FEEDPARSER:
+            items = json_items
+        elif HAS_FEEDPARSER:
             items = _parse_with_feedparser(raw, url)
         else:
             items = _parse_with_stdlib(raw, url)
     except Exception as e:
         return [], f"parse error for '{name}': {e}"
 
-    # Enrich each item with source metadata
+    # Enrich each item with source metadata (all parsers go through this path)
     for item in items:
         item["source_name"] = name
         item["source_url"] = url
