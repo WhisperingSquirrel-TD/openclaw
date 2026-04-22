@@ -650,11 +650,21 @@ def main() -> dict:
 
     state = load_state()
     state["synthesize"] = summary
-    state["last_successful_run"] = datetime.now(timezone.utc).isoformat()
-    state["last_briefing_date"] = datetime.now().strftime("%Y-%m-%d")
+
+    # Only advance last_briefing_date / last_successful_run when synthesis
+    # actually produced a valid briefing file (no error key, non-empty path).
+    briefing_file = summary.get("briefing_file", "")
+    has_error = "error" in summary
+    if briefing_file and briefing_file != "unknown" and not has_error:
+        state["last_successful_run"] = datetime.now(timezone.utc).isoformat()
+        state["last_briefing_date"] = datetime.now().strftime("%Y-%m-%d")
+
     save_state(state)
 
-    log(f"Synthesis complete: {summary.get('briefing_file', 'unknown')}")
+    if has_error:
+        log_err(f"Synthesis error: {summary['error']}")
+    else:
+        log(f"Synthesis complete: {briefing_file}")
     return summary
 
 

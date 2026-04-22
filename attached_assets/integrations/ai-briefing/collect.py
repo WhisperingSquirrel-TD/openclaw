@@ -294,25 +294,38 @@ def fetch_feed(source: dict) -> tuple[list[dict], str | None]:
 
 def _parse_date(date_str: str) -> datetime | None:
     """Best-effort parse of various date formats to a UTC datetime."""
-    if not date_str:
+    if not date_str or not isinstance(date_str, str):
         return None
 
-    # ISO 8601
-    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"):
-        try:
-            dt = datetime.strptime(date_str[:25], fmt[:len(fmt)])
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except ValueError:
-            continue
+    s = date_str.strip()
 
-    # RFC 2822 (RSS pubDate)
+    # RFC 2822 — most common RSS/Atom pubDate format
     try:
         from email.utils import parsedate_to_datetime
-        return parsedate_to_datetime(date_str).astimezone(timezone.utc)
+        return parsedate_to_datetime(s).astimezone(timezone.utc)
     except Exception:
         pass
+
+    # ISO 8601: normalise Z suffix and strip sub-second precision to 6 digits
+    iso = s.replace("Z", "+00:00").replace("z", "+00:00")
+    # Trim fractional seconds to 6 digits max (Python's fromisoformat limit)
+    import re as _re
+    iso = _re.sub(r"(\.\d{7,})", lambda m: m.group(0)[:7], iso)
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        pass
+
+    # Explicit strptime fallback for date-only strings (e.g. "2025-01-15")
+    for fmt in ("%Y-%m-%d", "%d %b %Y", "%d %B %Y"):
+        try:
+            dt = datetime.strptime(s[:20], fmt)
+            return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
 
     return None
 
