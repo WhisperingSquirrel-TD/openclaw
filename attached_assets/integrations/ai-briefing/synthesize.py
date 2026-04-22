@@ -463,13 +463,14 @@ def update_included(shortlist: list[dict]) -> None:
 # Telegram notification
 # ---------------------------------------------------------------------------
 
-def send_telegram_ready(dated_file: Path, items_included: int, quiet_week: bool) -> None:
+def send_telegram_ready(dated_file: Path, items_included: int, quiet_week: bool) -> bool:
+    """Send Telegram ready-notification. Returns True if message was delivered."""
     token = _cfg("TELEGRAM_BOT_TOKEN")
     chat_id = _cfg("TELEGRAM_CHAT_ID")
 
     if not token or not chat_id:
         log("No Telegram credentials — skipping notification")
-        return
+        return False
 
     today = datetime.now().strftime("%Y-%m-%d")
     if quiet_week:
@@ -493,8 +494,10 @@ def send_telegram_ready(dated_file: Path, items_included: int, quiet_week: bool)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             log("Telegram ready-notification sent")
+            return True
     except Exception as e:
         log_err(f"Telegram notification failed (non-fatal): {e}")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -595,9 +598,10 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
     if rendered:
         update_included(rendered)
 
-    # Send notification (optional, non-blocking)
+    # Send notification (optional, non-blocking); capture actual delivery result.
+    notification_sent = False
     if send_notification:
-        send_telegram_ready(dated_file, items_included, quiet_week)
+        notification_sent = send_telegram_ready(dated_file, items_included, quiet_week)
 
     summary = {
         "run_start": run_start,
@@ -609,7 +613,8 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
         "fallback_used": fallback_used,
         "tavily_used": tavily_enriched_count > 0,
         "tavily_enriched_count": tavily_enriched_count,
-        "notification_sent": send_notification,
+        "notification_sent": notification_sent,
+        "notification_requested": send_notification,
     }
 
     return summary

@@ -157,19 +157,27 @@ def run_pipeline(
         collect_state = state.get("collect", {})
         collect_error = collect_state.get("error", "")
 
-        fatal = collect_error in ("all sources failed", "no sources loaded")
+        # Fail closed when collect crashed before persisting state (no error key),
+        # or when a config-fatal error is recorded.  Only transient partial
+        # failures (some sources returned data) may safely continue.
+        sources_ok = collect_state.get("sources_ok", -1)
+        config_fatal = collect_error in ("all sources failed", "no sources loaded")
+        state_missing = not collect_state or sources_ok < 0
+        fatal = config_fatal or state_missing
 
         state["pipeline_status"] = "failed"
-        state["pipeline_error"] = f"collect failed: {collect_error or 'unknown'}"
+        state["pipeline_error"] = f"collect failed: {collect_error or 'no state saved'}"
         state["pipeline_end"] = datetime.now(timezone.utc).isoformat()
         save_state(state)
 
         if fatal:
-            log_err(f"Collection failed ({collect_error}). Aborting pipeline — "
-                    f"no new data to rank or synthesize.")
+            reason = collect_error or "collect crashed before saving state"
+            log_err(f"Collection failed ({reason}). Aborting pipeline — "
+                    f"cannot safely rank or synthesize without verified data.")
             return 1
         else:
-            log_err("Collection step error. Attempting to continue with existing raw data.")
+            log_err("Collection partial failure — some sources succeeded. "
+                    "Continuing with existing raw data.")
 
     # ── Step 2: Rank ──────────────────────────────────────────────────────────
     rank_ok, rank_out = run_step(
