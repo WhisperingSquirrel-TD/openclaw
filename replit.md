@@ -556,6 +556,13 @@ _Single-video mode (`--video <url>` — always synchronous):_
 
 **AI summary:** Uses `ANTHROPIC_API_KEY` from `.env` (batch API in cron, sync in `/yt-run`), falls back to `OPENAI_API_KEY` (always sync — OpenAI has no batch API). If neither is present, raw transcript is saved without a summary. Model override: `OPENCLAW_AI_MODEL` env var. Transcript is truncated to 6000 chars for the prompt (cost control). Full raw transcript always saved.
 
+### Skills path configuration
+
+- Workspace skills live at `~/.openclaw/workspace/skills/` (32 skills as of Apr 2026)
+- Must be declared in `openclaw.json` under `skills.paths` or openclaw skips them with "resolves outside configured root" warnings
+- Correct config: `"skills": {"paths": ["/home/tomdean88/.openclaw/workspace/skills"]}`
+- System skills (10 core ones) live at `~/.openclaw/skills/` — auto-loaded, no config needed
+
 ### Web search (Tavily — native provider)
 
 Tavily is integrated as a **native `web_search` provider** in OpenClaw's built-in tool system. No exec or Python script needed — L1 calls `web_search` directly.
