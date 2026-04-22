@@ -353,6 +353,7 @@ def collect(sources_path: Path, lookback_days: int) -> dict:
     raw_file = RAW_DIR / f"{today}.json"
 
     all_new_items: list[dict] = []
+    total_fetched = 0   # total items retrieved from all feeds before any dedup
     sources_ok = 0
     sources_failed = 0
     source_errors: dict[str, str] = {}
@@ -370,6 +371,7 @@ def collect(sources_path: Path, lookback_days: int) -> dict:
             continue
 
         sources_ok += 1
+        total_fetched += len(items)
         new_count = 0
 
         for item in items:
@@ -406,7 +408,7 @@ def collect(sources_path: Path, lookback_days: int) -> dict:
             "sources_ok": 0,
             "sources_failed": sources_failed,
             "source_errors": source_errors,
-            "items_fetched": 0,
+            "items_total_fetched": 0,
             "items_new": 0,
         }
 
@@ -425,8 +427,8 @@ def collect(sources_path: Path, lookback_days: int) -> dict:
         "sources_ok": sources_ok,
         "sources_failed": sources_failed,
         "source_errors": source_errors,
-        "items_fetched": len(all_new_items),
-        "items_new": len(all_new_items),
+        "items_total_fetched": total_fetched,  # all items from feeds before dedup/lookback
+        "items_new": len(all_new_items),        # new items written to raw file (deduped)
         "lookback_days": lookback_days,
     }
 

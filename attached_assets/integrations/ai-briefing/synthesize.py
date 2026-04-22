@@ -238,7 +238,7 @@ def _build_synthesis_prompt(shortlist: list[dict], quiet_week: bool, watch_items
         # Any borderline items (shortlist with 1 qualified item) are treated as
         # watch items so the output contract is consistent.
         items_text = "(No items met the relevance threshold this week.)"
-        watch_items = (shortlist + list(watch_items))[:5]  # merge, cap at 5
+        watch_items = list((shortlist + list(watch_items))[:3])  # merge, cap at 3 for quiet weeks
     else:
         parts = []
         for i, item in enumerate(shortlist, 1):
@@ -336,7 +336,7 @@ def build_fallback_briefing(shortlist: list[dict], quiet_week: bool, watch_items
     if quiet_week:
         # Quiet week: suppress shortlist items from the briefing body.
         # Merge them into watch items so output contract is consistent.
-        watch_items = (shortlist + list(watch_items))[:5]
+        watch_items = (shortlist + list(watch_items))[:3]
         lines.append("> Nothing materially important this week.")
         lines.append("")
     else:
@@ -391,7 +391,7 @@ def build_briefing_document(
 | Generated | {now} |
 | Period covered | {period_start} → {today} |
 | Sources polled | {sources_count} |
-| Items fetched | {items_fetched} |
+| Items new (deduped) | {items_fetched} |
 | Items shortlisted | {items_shortlisted} |
 | Items included | {items_included} |
 | Synthesis | {'⚠️ Fallback (Sonnet unavailable)' if fallback_used else '✅ Claude Sonnet'} |
@@ -519,8 +519,8 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
     collect_stats = state.get("collect", {})
     rank_stats    = state.get("rank", {})
 
-    sources_count    = collect_stats.get("sources_ok", 0)
-    items_fetched    = collect_stats.get("items_new", 0)
+    sources_count     = collect_stats.get("sources_ok", 0)
+    items_new         = collect_stats.get("items_new", 0)
     items_shortlisted = rank_stats.get("items_shortlisted", len(shortlist))
 
     # Determine period covered: use last_briefing_date from state (the boundary
@@ -561,10 +561,10 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
     # Compute rendered item set first so items_included is consistent everywhere.
     # - Non-quiet week: shortlist items (rendered as main briefing entries)
     # - Quiet week: merged watch list rendered under "Watch Items" in the doc
-    #   (shortlist borderline items are merged in, capped at 5)
+    #   (shortlist borderline items are merged in, capped at 3)
     # items_included reflects what actually appeared in the document.
     if quiet_week:
-        rendered = (shortlist + [w for w in watch_items if w not in shortlist])[:5]
+        rendered = (shortlist + [w for w in watch_items if w not in shortlist])[:3]
         items_included = len(rendered)   # watch items are the rendered items
     else:
         rendered = shortlist
@@ -577,7 +577,7 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
         quiet_week=quiet_week,
         period_start=period_start,
         sources_count=sources_count,
-        items_fetched=items_fetched,
+        items_fetched=items_new,
         items_shortlisted=items_shortlisted,
         items_included=items_included,
         fallback_used=fallback_used,

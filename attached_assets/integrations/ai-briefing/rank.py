@@ -186,19 +186,38 @@ def load_raw_items_since_last_briefing() -> list[dict]:
         relevant_files = all_raw_files[:1]
         log(f"No last_briefing_date — using latest raw file: {relevant_files[0].name}")
 
-    # Aggregate and deduplicate by url_hash
+    # Aggregate and deduplicate by url_hash; also enforce item-level published-
+    # date revalidation so old items from within the window but published before
+    # the lookback are excluded. This guards against collect.py including items
+    # near the lookback boundary that slip through to stale raw files.
+    item_cutoff_dt = today - timedelta(days=MAX_LOOKBACK_DAYS)
     seen: set[str] = set()
     aggregated: list[dict] = []
+    stale_count = 0
+
     for f in relevant_files:
         batch = _load_json(f, [])
         if not isinstance(batch, list):
             continue
         for item in batch:
             key = item.get("url_hash") or item.get("url", "")
-            if key and key not in seen:
-                seen.add(key)
-                aggregated.append(item)
+            if not key or key in seen:
+                continue
+            # Per-item published-date revalidation
+            pub = item.get("published", "")
+            if pub:
+                try:
+                    pub_date_str = pub[:10]  # YYYY-MM-DD prefix
+                    if pub_date_str < item_cutoff_dt.strftime("%Y-%m-%d"):
+                        stale_count += 1
+                        continue
+                except Exception:
+                    pass  # malformed date — let item through
+            seen.add(key)
+            aggregated.append(item)
 
+    if stale_count:
+        log(f"Dropped {stale_count} item(s) with published date older than {MAX_LOOKBACK_DAYS} days")
     log(f"Aggregated {len(aggregated)} unique items from {len(relevant_files)} raw file(s)")
     return aggregated
 
