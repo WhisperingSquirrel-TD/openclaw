@@ -151,8 +151,10 @@ def load_ranked(ranked_file: Path) -> dict:
 
 def _tavily_fetch(url: str) -> str | None:
     """
-    Use the Tavily search.py script to fetch article content for a URL.
-    Returns content string or None on failure/timeout.
+    Use the Tavily search.py script to fetch full article content for a URL.
+    Passes --raw-json so we receive untruncated result content and apply
+    TAVILY_MAX_CHARS ourselves rather than relying on the 500-char CLI format.
+    Returns content string (capped at TAVILY_MAX_CHARS) or None on failure/timeout.
     """
     import subprocess
 
@@ -166,17 +168,33 @@ def _tavily_fetch(url: str) -> str | None:
     try:
         result = subprocess.run(
             ["python3", str(TAVILY_SCRIPT), url,
-             "--search-depth", "advanced", "--max-results", "1", "--include-answer"],
+             "--search-depth", "advanced", "--max-results", "1",
+             "--include-answer", "--raw-json"],
             capture_output=True, text=True, timeout=TAVILY_TIMEOUT,
         )
         if result.returncode != 0:
             return None
-        content = result.stdout.strip()
-        if not content or "No results found" in content:
+        raw = result.stdout.strip()
+        if not raw:
             return None
-        return content[:TAVILY_MAX_CHARS]
+        # Parse raw JSON and concatenate available content fields
+        data = json.loads(raw)
+        parts: list[str] = []
+        if data.get("answer"):
+            parts.append(data["answer"])
+        for r in data.get("results", []):
+            content = r.get("content", "").strip()
+            if content:
+                parts.append(content)
+        combined = "\n\n".join(parts).strip()
+        if not combined:
+            return None
+        return combined[:TAVILY_MAX_CHARS]
     except subprocess.TimeoutExpired:
         log(f"Tavily timeout for {url[:60]}")
+        return None
+    except (json.JSONDecodeError, KeyError) as e:
+        log_err(f"Tavily JSON parse error: {e}")
         return None
     except Exception as e:
         log_err(f"Tavily fetch error: {e}")
@@ -540,8 +558,19 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
         body = build_fallback_briefing(shortlist, quiet_week, watch_items)
         fallback_used = True
 
+    # Compute rendered item set first so items_included is consistent everywhere.
+    # - Non-quiet week: shortlist items (rendered as main briefing entries)
+    # - Quiet week: merged watch list rendered under "Watch Items" in the doc
+    #   (shortlist borderline items are merged in, capped at 5)
+    # items_included reflects what actually appeared in the document.
+    if quiet_week:
+        rendered = (shortlist + [w for w in watch_items if w not in shortlist])[:5]
+        items_included = len(rendered)   # watch items are the rendered items
+    else:
+        rendered = shortlist
+        items_included = len(rendered)
+
     # Build full document with header
-    items_included = 0 if quiet_week else len(shortlist)
     content = build_briefing_document(
         body=body,
         shortlist=shortlist,
@@ -557,15 +586,7 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
     # Write files (primary completion condition)
     dated_file, current_file = write_briefing(content)
 
-    # Update included-items.json with deterministically rendered items only:
-    # - Non-quiet week: shortlist items (rendered as main briefing entries)
-    # - Quiet week: merged watch list that was rendered in the document (shortlist
-    #   items were downgraded to watch items in the quiet-week path, cap at 5)
-    # Watch items are explicitly defined as "included" to prevent resurfacing.
-    if quiet_week:
-        rendered = (shortlist + [w for w in watch_items if w not in shortlist])[:5]
-    else:
-        rendered = shortlist
+    # Record deterministically rendered items so they don't resurface
     if rendered:
         update_included(rendered)
 
