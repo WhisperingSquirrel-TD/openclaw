@@ -148,18 +148,54 @@ def load_raw_items(raw_file: Path) -> list[dict]:
 # Step 2: Filter items already included in a previous briefing
 # ---------------------------------------------------------------------------
 
-def load_included_hashes() -> set[str]:
+def load_included_data() -> tuple[set[str], list[set[str]]]:
+    """Return (url_hash_set, list_of_title_token_sets) from included-items.json."""
     included = _load_json(INCLUDED_FILE, {})
-    if isinstance(included, dict):
-        return set(included.keys())
-    return set()
+    if not isinstance(included, dict):
+        return set(), []
+    hashes: set[str] = set(included.keys())
+    token_sets: list[set[str]] = []
+    for entry in included.values():
+        tokens = entry.get("title_tokens") if isinstance(entry, dict) else None
+        if tokens and isinstance(tokens, list):
+            token_sets.append(set(tokens))
+    return hashes, token_sets
 
 
-def filter_already_included(items: list[dict], included_hashes: set[str]) -> list[dict]:
-    kept = [i for i in items if i.get("url_hash", "") not in included_hashes]
-    removed = len(items) - len(kept)
-    if removed:
-        log(f"Filtered {removed} item(s) already included in a previous briefing")
+def _sig_words(title: str) -> set[str]:
+    stopwords = {"the", "a", "an", "and", "or", "in", "on", "for", "of",
+                 "to", "with", "from", "is", "are", "as", "it", "its",
+                 "how", "why", "what", "by", "at", "be", "this", "that", "has"}
+    words = re.findall(r"[a-z]{3,}", title.lower())
+    return {w for w in words if w not in stopwords}
+
+
+def filter_already_included(items: list[dict],
+                             included_hashes: set[str],
+                             included_token_sets: list[set[str]]) -> list[dict]:
+    """
+    Drop items already in a previous briefing by URL hash OR topic fingerprint.
+    Topic match: ≥ 3 significant title words overlap with any included story.
+    """
+    TOPIC_OVERLAP_THRESHOLD = 3
+    kept = []
+    removed_hash = 0
+    removed_topic = 0
+    for item in items:
+        if item.get("url_hash", "") in included_hashes:
+            removed_hash += 1
+            continue
+        if included_token_sets:
+            candidate_tokens = _sig_words(item.get("title", ""))
+            if any(len(candidate_tokens & ts) >= TOPIC_OVERLAP_THRESHOLD
+                   for ts in included_token_sets):
+                removed_topic += 1
+                continue
+        kept.append(item)
+    if removed_hash:
+        log(f"Filtered {removed_hash} item(s) by URL hash (already briefed)")
+    if removed_topic:
+        log(f"Filtered {removed_topic} item(s) by topic fingerprint (story already covered)")
     return kept
 
 
@@ -437,9 +473,9 @@ def rank(raw_file: Path, top_n: int) -> dict:
 
     log(f"Loaded {len(items)} items from {raw_file}")
 
-    # Filter already-included
-    included_hashes = load_included_hashes()
-    items = filter_already_included(items, included_hashes)
+    # Filter already-included (by URL hash and by topic fingerprint)
+    included_hashes, included_token_sets = load_included_data()
+    items = filter_already_included(items, included_hashes, included_token_sets)
 
     # Cluster same-story items
     items = cluster_by_topic(items)

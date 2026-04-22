@@ -138,13 +138,6 @@ def save_state(state: dict) -> None:
 # Load ranked shortlist
 # ---------------------------------------------------------------------------
 
-def find_latest_ranked_file() -> Path | None:
-    if not RANKED_DIR.exists():
-        return None
-    files = sorted(RANKED_DIR.glob("*.json"), reverse=True)
-    return files[0] if files else None
-
-
 def load_ranked(ranked_file: Path) -> dict:
     data = _load_json(ranked_file, {})
     if not isinstance(data, dict):
@@ -406,21 +399,33 @@ def write_briefing(content: str) -> tuple[Path, Path]:
 # Update included-items.json
 # ---------------------------------------------------------------------------
 
+def _title_tokens(title: str) -> list[str]:
+    """Return significant words from a title for cross-run topic fingerprinting."""
+    import re as _re
+    stopwords = {"the", "a", "an", "and", "or", "in", "on", "for", "of",
+                 "to", "with", "from", "is", "are", "as", "it", "its",
+                 "how", "why", "what", "by", "at", "be", "this", "that", "has"}
+    words = _re.findall(r"[a-z]{3,}", title.lower())
+    return [w for w in words if w not in stopwords]
+
+
 def update_included(shortlist: list[dict]) -> None:
     included = _load_json(INCLUDED_FILE, {})
     if not isinstance(included, dict):
         included = {}
 
     now = datetime.now(timezone.utc).isoformat()
+    today = datetime.now().strftime("%Y-%m-%d")
     for item in shortlist:
         key = item.get("url_hash") or item.get("url", "")
         if key:
             included[key] = {
                 "url": item.get("url", ""),
                 "title": item.get("title", ""),
+                "title_tokens": _title_tokens(item.get("title", "")),
                 "source": item.get("source_name", ""),
                 "included_at": now,
-                "briefing_date": datetime.now().strftime("%Y-%m-%d"),
+                "briefing_date": today,
             }
 
     _write_json(INCLUDED_FILE, included)
@@ -493,8 +498,18 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
     items_fetched    = collect_stats.get("items_new", 0)
     items_shortlisted = rank_stats.get("items_shortlisted", len(shortlist))
 
-    # Determine period covered
-    period_start = collect_stats.get("run_start", run_start)[:10]
+    # Determine period covered: use last_briefing_date from state (the boundary
+    # of the previous briefing) so the header accurately reflects the interval.
+    # Falls back to last Monday if state has no record.
+    last_briefing_date = state.get("last_briefing_date", "")
+    if last_briefing_date:
+        period_start = last_briefing_date
+    else:
+        from datetime import timedelta
+        today = datetime.now()
+        days_since_monday = today.weekday()  # 0 = Monday
+        last_monday = today - timedelta(days=days_since_monday + 7)
+        period_start = last_monday.strftime("%Y-%m-%d")
 
     # Tavily enrichment
     if shortlist and use_tavily:
@@ -535,9 +550,12 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
     # Write files (primary completion condition)
     dated_file, current_file = write_briefing(content)
 
-    # Update included-items only for non-quiet weeks
-    if not quiet_week and shortlist:
-        update_included(shortlist)
+    # Always update included-items.json so items (even from a quiet week) cannot
+    # resurface in future briefings. On quiet weeks the header still shows
+    # items_included=0, but we record what was seen so it won't repeat.
+    all_seen = shortlist + [w for w in watch_items if w not in shortlist]
+    if all_seen:
+        update_included(all_seen)
 
     # Send notification (optional, non-blocking)
     if send_notification:
