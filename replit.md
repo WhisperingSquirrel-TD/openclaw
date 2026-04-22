@@ -762,8 +762,9 @@ The following bugs were fixed directly on the Pi in previous sessions. They are 
 | `web_search` blocked after reinstall | `attached_assets/install-forked-openclaw.sh` | Added `alsoAllow` block that idempotently inserts `youtube_transcript` and `web_search` into `tools.alsoAllow` in `openclaw.json` — coding profile blocks both by default |
 | Pi startup performance | `attached_assets/install-forked-openclaw.sh` | Idempotently writes `NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache` and `OPENCLAW_NO_RESPAWN=1` to `~/.openclaw/.env`; creates the cache dir |
 | Discord 400 on command registration | `src/discord/monitor/native-command.ts` | Added `sanitizeDiscordDescription()` guard — trims, truncates to 100 chars, falls back to `/<name> command` — applied to both command descriptions and every option description before sending to Discord API |
+| SharePoint housekeeping token path | `attached_assets/integrations/microsoft/sharepoint_housekeeping.py` + `attached_assets/install-forked-openclaw.sh` | Housekeeping script had hardcoded `integrations/microsoft/token-assistant.json` with no fallback; token lives at `integrations/microsoft-l1/token.json` (old path). Fixed: (1) script now uses `_resolve_token_file()` that tries all three candidate paths; (2) install script creates a symlink from old to new canonical path on reinstall |
 
-After the next `bash ~/install-forked-openclaw.sh` these five will be applied automatically. No manual Pi edits needed.
+After the next `bash ~/install-forked-openclaw.sh` these six will be applied automatically. No manual Pi edits needed.
 
 ### Outstanding items requiring Pi access
 

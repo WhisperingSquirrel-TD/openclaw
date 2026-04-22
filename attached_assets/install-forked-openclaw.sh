@@ -1432,6 +1432,13 @@ fi
 # (set up previously for assistant@stackstoneconsulting.co.uk)
 AS_TOKEN_L1="$HOME/.openclaw/integrations/microsoft-l1/token.json"
 AS_TOKEN_NEW="$HOME/.openclaw/integrations/microsoft/token-assistant.json"
+# If old token exists but new canonical path doesn't, create a symlink so all
+# scripts (including sharepoint_housekeeping.py) find it at the canonical path.
+if [ -f "$AS_TOKEN_L1" ] && [ ! -e "$AS_TOKEN_NEW" ]; then
+    mkdir -p "$(dirname "$AS_TOKEN_NEW")"
+    ln -sf "$AS_TOKEN_L1" "$AS_TOKEN_NEW"
+    info "Symlinked microsoft-l1/token.json → microsoft/token-assistant.json"
+fi
 # Resolve whichever token path exists
 if [ -f "$AS_TOKEN_L1" ]; then
     RESOLVED_AS_TOKEN="$AS_TOKEN_L1"

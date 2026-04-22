@@ -988,7 +988,22 @@ def process_sync(entities: list[dict], mode: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 MANIFEST_MAX_AGE_HOURS = 26  # slightly more than nightly cron interval
-TOKEN_FILE = STATE_DIR / "integrations/microsoft/token-assistant.json"
+
+_TOKEN_CANDIDATES = [
+    STATE_DIR / "integrations/microsoft/token-assistant.json",
+    STATE_DIR / "integrations/microsoft-l1/token.json",
+    STATE_DIR / "integrations/microsoft-assistant/token.json",
+]
+
+
+def _resolve_token_file() -> Path | None:
+    for candidate in _TOKEN_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+TOKEN_FILE: Path = _resolve_token_file() or _TOKEN_CANDIDATES[0]
 
 
 def _check_degraded_state() -> list[str]:
@@ -1032,8 +1047,9 @@ def _check_degraded_state() -> list[str]:
 
     # 3. Token file existence
     if not TOKEN_FILE.exists():
+        candidates_str = ", ".join(str(c) for c in _TOKEN_CANDIDATES)
         problems.append(
-            f"Assistant token file not found at {TOKEN_FILE} — run /ms-reauth"
+            f"Assistant token file not found (checked: {candidates_str}) — run /ms-reauth"
         )
 
     return problems
