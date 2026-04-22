@@ -663,8 +663,9 @@ def main() -> dict:
 
     if has_error:
         log_err(f"Synthesis error: {summary['error']}")
-    else:
-        log(f"Synthesis complete: {briefing_file}")
+        sys.exit(1)
+
+    log(f"Synthesis complete: {briefing_file}")
     return summary
 
 

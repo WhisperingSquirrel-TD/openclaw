@@ -228,6 +228,18 @@ def run_pipeline(
         save_state(state)
         return 2
 
+    # Verify briefing file actually exists on disk — guards against in-band
+    # error paths that exit zero without writing a file.
+    state_check = load_state()
+    bf_path = state_check.get("synthesize", {}).get("briefing_file", "")
+    if not bf_path or not Path(bf_path).exists():
+        log_err(f"Synthesis reported success but briefing file not found on disk: {bf_path!r}")
+        state_check["pipeline_status"] = "partial_failure"
+        state_check["pipeline_error"] = "briefing file missing after synthesize"
+        state_check["pipeline_end"] = datetime.now(timezone.utc).isoformat()
+        save_state(state_check)
+        return 2
+
     # ── All steps complete ────────────────────────────────────────────────────
     run_end = datetime.now(timezone.utc).isoformat()
     state = load_state()
