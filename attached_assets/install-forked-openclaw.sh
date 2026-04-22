@@ -321,6 +321,16 @@ if ! command -v qmd &> /dev/null; then
 else
     info "QMD already installed: $(qmd --version 2>/dev/null || echo 'installed')"
 fi
+# Symlink qmd into /usr/local/bin so the systemd gateway service (which runs
+# with a restricted PATH that excludes ~/.npm-packages/bin) can find it.
+QMD_BIN="$QMD_NPM_PREFIX/bin/qmd"
+if [ -f "$QMD_BIN" ] && [ ! -e "/usr/local/bin/qmd" ]; then
+    sudo ln -sf "$QMD_BIN" /usr/local/bin/qmd && \
+        info "Symlinked qmd → /usr/local/bin/qmd" || \
+        warn "Could not symlink qmd to /usr/local/bin — memory search may fail in service"
+elif [ -f "$QMD_BIN" ]; then
+    sudo ln -sf "$QMD_BIN" /usr/local/bin/qmd 2>/dev/null || true
+fi
 
 # Index the workspace collection.
 # qmd collection add fails if the collection already exists, so we check first.
@@ -590,7 +600,7 @@ if _shutil.which('qmd'):
     if not isinstance(qmd_cfg, dict):
         memory['qmd'] = {}
         qmd_cfg = memory['qmd']
-    qmd_cfg.setdefault('searchMode', 'search')
+    qmd_cfg.setdefault('searchMode', 'vsearch')
     limits = qmd_cfg.setdefault('limits', {})
     if not isinstance(limits, dict):
         qmd_cfg['limits'] = {}
@@ -602,6 +612,20 @@ if _shutil.which('qmd'):
         scope = qmd_cfg['scope']
     scope.setdefault('default', 'allow')
     print(f'Memory QMD config: searchMode={qmd_cfg[\"searchMode\"]}, timeout={limits[\"timeoutMs\"]}ms, scope.default={scope[\"default\"]}')
+    # Wire Ollama nomic-embed-text as the embedding provider for vsearch.
+    # Placed under agents.defaults.memorySearch (the correct schema path).
+    # Only set when nomic-embed-text is available in the local Ollama registry.
+    import subprocess as _sp
+    _ollama_models = _sp.run(['ollama','list'], capture_output=True, text=True).stdout
+    if 'nomic-embed-text' in _ollama_models:
+        agent_defaults = c.setdefault('agents', {}).setdefault('defaults', {})
+        ms = agent_defaults.setdefault('memorySearch', {})
+        ms['provider'] = 'ollama'
+        ms.setdefault('fallback', 'none')
+        ms['model'] = 'nomic-embed-text'
+        print('Memory embeddings: ollama/nomic-embed-text configured under agents.defaults.memorySearch')
+    else:
+        print('WARNING: nomic-embed-text not found in Ollama — run: ollama pull nomic-embed-text')
 else:
     print('WARNING: qmd binary not found — memory backend left as builtin (FLAG TO TOM: QMD install failed, re-run script after fixing npm)')
     memory.setdefault('backend', 'builtin')
