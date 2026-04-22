@@ -201,10 +201,10 @@ def _tavily_fetch(url: str) -> str | None:
         return None
 
 
-def enrich_with_tavily(shortlist: list[dict], use_tavily: bool) -> list[dict]:
-    """Fetch full content for Tavily-eligible items."""
+def enrich_with_tavily(shortlist: list[dict], use_tavily: bool) -> tuple[list[dict], int]:
+    """Fetch full content for Tavily-eligible items. Returns (shortlist, enriched_count)."""
     if not use_tavily:
-        return shortlist
+        return shortlist, 0
 
     enriched_count = 0
     for item in shortlist[:TAVILY_MAX_ITEMS]:
@@ -223,7 +223,7 @@ def enrich_with_tavily(shortlist: list[dict], use_tavily: bool) -> list[dict]:
             log(f"  Tavily unavailable — using title + snippet for this item")
 
     log(f"Tavily enrichment: {enriched_count}/{min(len(shortlist), TAVILY_MAX_ITEMS)} items enriched")
-    return shortlist
+    return shortlist, enriched_count
 
 
 # ---------------------------------------------------------------------------
@@ -540,8 +540,9 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
         period_start = last_monday.strftime("%Y-%m-%d")
 
     # Tavily enrichment
+    tavily_enriched_count = 0
     if shortlist and use_tavily:
-        shortlist = enrich_with_tavily(shortlist, use_tavily)
+        shortlist, tavily_enriched_count = enrich_with_tavily(shortlist, use_tavily)
 
     # Synthesis
     api_key = _cfg("ANTHROPIC_API_KEY")
@@ -606,7 +607,8 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
         "items_included": items_included,
         "quiet_week": quiet_week,
         "fallback_used": fallback_used,
-        "tavily_used": use_tavily and not fallback_used,
+        "tavily_used": tavily_enriched_count > 0,
+        "tavily_enriched_count": tavily_enriched_count,
         "notification_sent": send_notification,
     }
 

@@ -425,10 +425,25 @@ def collect(sources_path: Path, lookback_days: int) -> dict:
             "items_new": 0,
         }
 
-    # Write raw output
+    # Write raw output — merge-safe across same-day reruns.
+    # Existing items in today's raw file are preserved so that a failed
+    # rank/synthesize run followed by a same-day retry never loses
+    # previously fetched-but-unbriefed items.
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    _write_json(raw_file, all_new_items)
-    log(f"Wrote {len(all_new_items)} new items to {raw_file}")
+    existing_raw: list[dict] = []
+    if raw_file.exists():
+        try:
+            existing_raw = _load_json(raw_file, [])
+            if not isinstance(existing_raw, list):
+                existing_raw = []
+        except Exception:
+            existing_raw = []
+    existing_hashes = {item.get("url_hash") for item in existing_raw if item.get("url_hash")}
+    truly_new = [it for it in all_new_items if it.get("url_hash") not in existing_hashes]
+    merged_items = existing_raw + truly_new
+    _write_json(raw_file, merged_items)
+    log(f"Raw file: {len(existing_raw)} existing + {len(truly_new)} new = "
+        f"{len(merged_items)} total items in {raw_file}")
 
     # Update seen-items
     save_seen(seen)
@@ -441,7 +456,7 @@ def collect(sources_path: Path, lookback_days: int) -> dict:
         "sources_failed": sources_failed,
         "source_errors": source_errors,
         "items_total_fetched": total_fetched,  # all items from feeds before dedup/lookback
-        "items_new": len(all_new_items),        # new items written to raw file (deduped)
+        "items_new": len(all_new_items),        # new items fetched this run (deduped by seen)
         "lookback_days": lookback_days,
     }
 
