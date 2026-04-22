@@ -376,7 +376,8 @@ def build_briefing_document(
     quiet_week: bool,
     period_start: str,
     sources_count: int,
-    items_fetched: int,
+    items_total_fetched: int,
+    items_new: int,
     items_shortlisted: int,
     items_included: int,
     fallback_used: bool,
@@ -391,7 +392,8 @@ def build_briefing_document(
 | Generated | {now} |
 | Period covered | {period_start} → {today} |
 | Sources polled | {sources_count} |
-| Items new (deduped) | {items_fetched} |
+| Items fetched (total) | {items_total_fetched} |
+| Items new (deduped) | {items_new} |
 | Items shortlisted | {items_shortlisted} |
 | Items included | {items_included} |
 | Synthesis | {'⚠️ Fallback (Sonnet unavailable)' if fallback_used else '✅ Claude Sonnet'} |
@@ -519,9 +521,10 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
     collect_stats = state.get("collect", {})
     rank_stats    = state.get("rank", {})
 
-    sources_count     = collect_stats.get("sources_ok", 0)
-    items_new         = collect_stats.get("items_new", 0)
-    items_shortlisted = rank_stats.get("items_shortlisted", len(shortlist))
+    sources_count       = collect_stats.get("sources_ok", 0)
+    items_total_fetched = collect_stats.get("items_total_fetched", 0)
+    items_new           = collect_stats.get("items_new", 0)
+    items_shortlisted   = rank_stats.get("items_shortlisted", len(shortlist))
 
     # Determine period covered: use last_briefing_date from state (the boundary
     # of the previous briefing) so the header accurately reflects the interval.
@@ -577,7 +580,8 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
         quiet_week=quiet_week,
         period_start=period_start,
         sources_count=sources_count,
-        items_fetched=items_new,
+        items_total_fetched=items_total_fetched,
+        items_new=items_new,
         items_shortlisted=items_shortlisted,
         items_included=items_included,
         fallback_used=fallback_used,

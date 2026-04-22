@@ -344,7 +344,7 @@ def collect(sources_path: Path, lookback_days: int) -> dict:
             "error": "no sources loaded",
             "sources_ok": 0,
             "sources_failed": 0,
-            "items_fetched": 0,
+            "items_total_fetched": 0,
             "items_new": 0,
         }
 
@@ -470,11 +470,16 @@ def main() -> dict:
     state["collect"] = summary
     save_state(state)
 
+    if summary.get("error") == "no sources loaded":
+        log_err("Collection failed — no sources could be loaded (missing/bad YAML?)")
+        sys.exit(1)
+
     if summary.get("error") == "all sources failed":
         log_err("Collection failed — all sources returned errors")
         sys.exit(1)
 
-    log(f"Collection complete: {summary['items_new']} new items across {summary['sources_ok']} sources")
+    log(f"Collection complete: {summary['items_total_fetched']} fetched, "
+        f"{summary['items_new']} new across {summary['sources_ok']} sources")
     return summary
 
 
