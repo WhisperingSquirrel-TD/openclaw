@@ -47,6 +47,7 @@ HAIKU_MODEL       = "claude-haiku-4-5"
 MAX_CANDIDATES_FOR_MODEL = 25  # never send more than this to Haiku
 DEFAULT_TOP_N    = 7
 NOTHING_IMPORTANT_THRESHOLD = 2  # fewer than this → quiet week
+MAX_LOOKBACK_DAYS = 14           # never consider items older than this (cadence-slip guard)
 LOG_PREFIX = "[ai-briefing/rank]"
 
 
@@ -167,14 +168,19 @@ def load_raw_items_since_last_briefing() -> list[dict]:
     if not all_raw_files:
         return []
 
+    # Hard lookback cap: never consider files older than MAX_LOOKBACK_DAYS
+    today = datetime.now()
+    hard_cutoff = (today - timedelta(days=MAX_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+
     # Determine which files are new since the last briefing
     if last_briefing_date:
-        cutoff = last_briefing_date  # YYYY-MM-DD string — compare against filename stem
+        # Use the more recent of last_briefing_date and hard_cutoff
+        cutoff = max(last_briefing_date, hard_cutoff)
         relevant_files = [f for f in all_raw_files if f.stem >= cutoff]
         if not relevant_files:
-            # All files are older than last briefing; nothing new
             return []
-        log(f"Aggregating {len(relevant_files)} raw file(s) since {last_briefing_date}")
+        log(f"Aggregating {len(relevant_files)} raw file(s) since {cutoff} "
+            f"(last_briefing={last_briefing_date}, hard_cutoff={hard_cutoff})")
     else:
         # First run — use only the latest file to avoid overwhelming the ranker
         relevant_files = all_raw_files[:1]

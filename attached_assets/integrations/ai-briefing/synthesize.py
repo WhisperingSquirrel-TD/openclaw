@@ -557,12 +557,17 @@ def synthesize(ranked_file: Path, use_tavily: bool, send_notification: bool) -> 
     # Write files (primary completion condition)
     dated_file, current_file = write_briefing(content)
 
-    # Always update included-items.json so items (even from a quiet week) cannot
-    # resurface in future briefings. On quiet weeks the header still shows
-    # items_included=0, but we record what was seen so it won't repeat.
-    all_seen = shortlist + [w for w in watch_items if w not in shortlist]
-    if all_seen:
-        update_included(all_seen)
+    # Update included-items.json with deterministically rendered items only:
+    # - Non-quiet week: shortlist items (rendered as main briefing entries)
+    # - Quiet week: merged watch list that was rendered in the document (shortlist
+    #   items were downgraded to watch items in the quiet-week path, cap at 5)
+    # Watch items are explicitly defined as "included" to prevent resurfacing.
+    if quiet_week:
+        rendered = (shortlist + [w for w in watch_items if w not in shortlist])[:5]
+    else:
+        rendered = shortlist
+    if rendered:
+        update_included(rendered)
 
     # Send notification (optional, non-blocking)
     if send_notification:
