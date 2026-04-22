@@ -152,21 +152,24 @@ def run_pipeline(
     )
 
     if not collect_ok:
-        # Check state to distinguish "all sources failed" from other errors
+        # Distinguish config-fatal errors from transient partial failures.
         state = load_state()
         collect_state = state.get("collect", {})
-        all_failed = collect_state.get("error") == "all sources failed"
+        collect_error = collect_state.get("error", "")
+
+        fatal = collect_error in ("all sources failed", "no sources loaded")
 
         state["pipeline_status"] = "failed"
-        state["pipeline_error"] = "collect failed"
+        state["pipeline_error"] = f"collect failed: {collect_error or 'unknown'}"
         state["pipeline_end"] = datetime.now(timezone.utc).isoformat()
         save_state(state)
 
-        if all_failed:
-            log_err("Collection failed: all sources returned errors. Aborting pipeline.")
+        if fatal:
+            log_err(f"Collection failed ({collect_error}). Aborting pipeline — "
+                    f"no new data to rank or synthesize.")
             return 1
         else:
-            log_err("Collection step error. Attempting to continue with existing data.")
+            log_err("Collection step error. Attempting to continue with existing raw data.")
 
     # ── Step 2: Rank ──────────────────────────────────────────────────────────
     rank_ok, rank_out = run_step(
