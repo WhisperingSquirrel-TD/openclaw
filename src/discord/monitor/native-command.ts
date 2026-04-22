@@ -135,6 +135,15 @@ function resolveDiscordNativeCommandAllowlistAccess(params: {
   return { configured: true, allowed: auth.isAuthorizedSender } as const;
 }
 
+/**
+ * Discord requires command and option descriptions to be 1-100 characters.
+ * An empty string or undefined causes a 400 on command registration.
+ */
+function sanitizeDiscordDescription(value: string | undefined, fallback: string): string {
+  const trimmed = (value ?? "").trim();
+  return (trimmed || fallback).slice(0, 100);
+}
+
 function buildDiscordCommandOptions(params: {
   command: ChatCommandDefinition;
   cfg: ReturnType<typeof loadConfig>;
@@ -146,10 +155,11 @@ function buildDiscordCommandOptions(params: {
   }
   return args.map((arg) => {
     const required = arg.required ?? false;
+    const description = sanitizeDiscordDescription(arg.description, arg.name);
     if (arg.type === "number") {
       return {
         name: arg.name,
-        description: arg.description,
+        description,
         type: ApplicationCommandOptionType.Number,
         required,
       };
@@ -157,7 +167,7 @@ function buildDiscordCommandOptions(params: {
     if (arg.type === "boolean") {
       return {
         name: arg.name,
-        description: arg.description,
+        description,
         type: ApplicationCommandOptionType.Boolean,
         required,
       };
@@ -189,7 +199,7 @@ function buildDiscordCommandOptions(params: {
         : undefined;
     return {
       name: arg.name,
-      description: arg.description,
+      description,
       type: ApplicationCommandOptionType.String,
       required,
       choices,
@@ -1231,7 +1241,7 @@ export function createDiscordNativeCommand(params: {
 
   return new (class extends Command {
     name = command.name;
-    description = command.description;
+    description = sanitizeDiscordDescription(command.description, `/${command.name} command`);
     defer = true;
     ephemeral = ephemeralDefault;
     options = options;

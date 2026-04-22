@@ -760,8 +760,19 @@ The following bugs were fixed directly on the Pi in previous sessions. They are 
 | `daily-reset.py` timeout crash | `attached_assets/integrations/provider-switch/daily-reset.py` | `l1-start.sh` call now wrapped in `try/except TimeoutExpired` — falls through to `systemctl --user` if start script takes >120s |
 | `daily-reset.py` not executable | `attached_assets/install-forked-openclaw.sh` | Added `chmod +x "$RESET_DST"` after symlink creation |
 | `web_search` blocked after reinstall | `attached_assets/install-forked-openclaw.sh` | Added `alsoAllow` block that idempotently inserts `youtube_transcript` and `web_search` into `tools.alsoAllow` in `openclaw.json` — coding profile blocks both by default |
+| Pi startup performance | `attached_assets/install-forked-openclaw.sh` | Idempotently writes `NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache` and `OPENCLAW_NO_RESPAWN=1` to `~/.openclaw/.env`; creates the cache dir |
+| Discord 400 on command registration | `src/discord/monitor/native-command.ts` | Added `sanitizeDiscordDescription()` guard — trims, truncates to 100 chars, falls back to `/<name> command` — applied to both command descriptions and every option description before sending to Discord API |
 
-After the next `bash ~/install-forked-openclaw.sh` these three will be applied automatically. No manual Pi edits needed.
+After the next `bash ~/install-forked-openclaw.sh` these five will be applied automatically. No manual Pi edits needed.
+
+### Outstanding items requiring Pi access
+
+| Item | Status | Pi commands |
+|------|--------|-------------|
+| Desktop taskbar (LXPanel) | Unresolved — terminal and file-manager buttons disappeared after reboot | `lxpanelctl restart` to reload panel; if buttons still missing: right-click panel → Add/Remove Panel Items → add Application Launch Bar → add lxterminal and pcmanfm |
+| Ollama gemma4:e2b | Download was interrupted at 22% | `systemctl --user start ollama` then `ollama pull gemma4:e2b` (the model is ~6GB; runs in background) |
+| Discord "28 commands missing descriptions" 400 | Defensive guard added in source (see above) but root cause unconfirmed — needs log check | `grep -i "400\|missing.*desc\|description" ~/.openclaw/gateway.log \| tail -30` to see the exact Discord error; the guard will suppress it on next reinstall |
+| `apply_patch`/`cron` alsoAllow warnings | Baked into OpenClaw's `coding` profile — not our config | Cannot fix without a plugin override; warnings are cosmetic |
 
 ---
 

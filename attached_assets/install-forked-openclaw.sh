@@ -25,6 +25,24 @@ else
     warn ".env not found at $ENV_FILE — some integrations may not configure correctly"
 fi
 
+# ── Pi startup performance (idempotent, setdefault-style) ─────────────────
+# NODE_COMPILE_CACHE: node caches compiled JS to /var/tmp so repeated starts
+#   are faster.  /var/tmp survives reboots; /tmp does not.
+# OPENCLAW_NO_RESPAWN=1: suppresses the self-respawn overhead on small hosts.
+# Both are written to .env so the systemd EnvironmentFile picks them up.
+mkdir -p "$(dirname "$ENV_FILE")"
+touch "$ENV_FILE"
+for _pvar in "NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache" "OPENCLAW_NO_RESPAWN=1"; do
+    _pkey="${_pvar%%=*}"
+    if grep -q "^${_pkey}=" "$ENV_FILE" 2>/dev/null; then
+        info "Perf: ${_pkey} already set in .env"
+    else
+        echo "${_pvar}" >> "$ENV_FILE"
+        info "Perf: added ${_pvar} to .env"
+    fi
+done
+mkdir -p /var/tmp/openclaw-compile-cache 2>/dev/null || true
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Non-interactive guard: when launched from mgmt-bot /install (or any other
 # headless caller), set OPENCLAW_NONINTERACTIVE=1 in the environment so every
