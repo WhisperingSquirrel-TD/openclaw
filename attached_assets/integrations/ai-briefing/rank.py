@@ -91,6 +91,38 @@ def _write_json(path: Path, data) -> None:
         log_err(f"Could not write {path}: {e}")
 
 
+def _parse_published(date_str: str) -> datetime | None:
+    """
+    Robust date parser for item `published` strings.
+    Mirrors collect.py's _parse_date to ensure consistent lookback filtering.
+    RFC 2822 is tried first (most RSS), then ISO 8601 via fromisoformat().
+    Returns a UTC-aware datetime or None on parse failure.
+    """
+    if not date_str or not isinstance(date_str, str):
+        return None
+    s = date_str.strip()
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(s).astimezone(timezone.utc)
+    except Exception:
+        pass
+    iso = s.replace("Z", "+00:00").replace("z", "+00:00")
+    iso = re.sub(r"(\.\d{7,})", lambda m: m.group(0)[:7], iso)
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        pass
+    for fmt in ("%Y-%m-%d", "%d %b %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(s[:20], fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
 def load_state() -> dict:
     return _load_json(STATE_FILE, {})
 
@@ -203,12 +235,13 @@ def load_raw_items_since_last_briefing() -> list[dict]:
             key = item.get("url_hash") or item.get("url", "")
             if not key or key in seen:
                 continue
-            # Per-item published-date revalidation
+            # Per-item published-date revalidation using a robust parser
+            # (matches collect.py's _parse_date logic for consistency).
             pub = item.get("published", "")
             if pub:
                 try:
-                    pub_date_str = pub[:10]  # YYYY-MM-DD prefix
-                    if pub_date_str < item_cutoff_dt.strftime("%Y-%m-%d"):
+                    pub_dt = _parse_published(pub)
+                    if pub_dt is not None and pub_dt.date() < item_cutoff_dt.date():
                         stale_count += 1
                         continue
                 except Exception:
