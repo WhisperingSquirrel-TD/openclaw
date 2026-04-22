@@ -597,11 +597,12 @@ def rank(raw_file: Path | None, top_n: int) -> dict:
         _write_json(ranked_file, result_data)
         return {
             "run_start": run_start,
-            "items_loaded": len(items),
-            "items_after_filter": 0,
+            "source_raw": source_label,
+            "ranked_file": str(ranked_file),
+            "items_after_dedup": len(items),
+            "items_after_heuristic": 0,
             "items_shortlisted": 0,
             "quiet_week": True,
-            "ranked_file": str(ranked_file),
         }
 
     # Model scoring
@@ -624,10 +625,9 @@ def rank(raw_file: Path | None, top_n: int) -> dict:
 
     return {
         "run_start": run_start,
-        "raw_file": str(raw_file),
+        "source_raw": source_label,
         "ranked_file": str(ranked_file),
-        "items_loaded": len(items),
-        "items_after_cluster": len(items),
+        "items_after_dedup": len(items),
         "items_after_heuristic": len(candidates),
         "items_shortlisted": len(shortlist_result["shortlist"]),
         "quiet_week": shortlist_result["quiet_week"],

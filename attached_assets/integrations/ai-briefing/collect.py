@@ -255,6 +255,34 @@ def _parse_with_stdlib(raw: bytes, url: str) -> list[dict]:
     return items
 
 
+def _parse_json_feed(raw: bytes) -> list[dict] | None:
+    """
+    Parse JSON Feed 1.x (https://www.jsonfeed.org/) format.
+    Returns list of items or None if the payload is not a JSON Feed.
+    """
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+
+    if not isinstance(data, dict) or "items" not in data:
+        return None
+
+    import re as _re
+    items = []
+    for entry in data.get("items", []):
+        url = entry.get("url") or entry.get("external_url") or entry.get("id") or ""
+        if not url or not url.startswith("http"):
+            continue
+        title = entry.get("title") or "(no title)"
+        content_html = entry.get("content_html") or entry.get("content_text") or entry.get("summary") or ""
+        summary = _re.sub(r"<[^>]+>", " ", content_html).strip()
+        summary = _re.sub(r"\s+", " ", summary)[:500]
+        published = entry.get("date_published") or entry.get("date_modified") or datetime.now(timezone.utc).isoformat()
+        items.append({"url": url, "title": title, "summary": summary, "published": published})
+    return items
+
+
 def fetch_feed(source: dict) -> tuple[list[dict], str | None]:
     """
     Fetch and parse a single feed. Returns (items, error_message).
@@ -271,6 +299,12 @@ def fetch_feed(source: dict) -> tuple[list[dict], str | None]:
         return [], f"fetch failed for '{name}' ({url})"
 
     try:
+        # Try JSON Feed first if the URL suggests JSON content or the
+        # response body starts with a JSON object (handles *.json endpoints).
+        json_items = _parse_json_feed(raw)
+        if json_items is not None:
+            return json_items, None
+
         if HAS_FEEDPARSER:
             items = _parse_with_feedparser(raw, url)
         else:
