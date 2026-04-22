@@ -91,20 +91,23 @@ bash ~/install-forked-openclaw.sh
 
 ### Manual operations on the Pi
 
-- **Stop**: `~/l1-stop.sh`
-- **Start**: `~/l1-start.sh`
-- **Direct debug**: `cd ~/openclaw && node dist/entry.js gateway run`
-- **Quick update**: `bash ~/install-forked-openclaw.sh` — this is always the right command, it handles pull + build + config + restart automatically
+- **Stop**: `systemctl --user stop openclaw-gateway.service`
+- **Start**: `systemctl --user start openclaw-gateway.service`
+- **Restart**: `systemctl --user restart openclaw-gateway.service`
+- **Status**: `systemctl --user status openclaw-gateway.service`
+- **Quick update**: `bash ~/install-forked-openclaw.sh` — handles pull + build + config + restart automatically. If it hangs, it's waiting on `git pull` credentials.
+- **Direct debug** (shows startup errors in terminal): `cd ~/openclaw && node dist/index.js gateway`
 - **Config file**: `~/.openclaw/openclaw.json` (locked with `chattr +i`)
   - Unlock: `sudo chattr -i ~/.openclaw/openclaw.json`
   - Re-lock: `sudo chattr +i ~/.openclaw/openclaw.json`
-- **Logs**: `/tmp/openclaw/openclaw-YYYY-MM-DD.log`
+- **Logs**: `~/.openclaw/gateway.log` (journald does NOT collect user logs on this Pi — always use the file)
 - **TOTP debug**: Look for "TOTP" in logs. Common issues: "unauthorized sender" (message from non-owner), "TOTP code rejected" (wrong code or replay), "approval window expired"
 
 ### Pi restart notes
 
-- Use `~/l1-stop.sh && ~/l1-start.sh`, NOT `openclaw gateway restart`
-- The gateway entry point is `node dist/entry.js gateway run`
+- Systemd service name is `openclaw-gateway.service` (not `openclaw`)
+- journald returns "No journal files were found" for user services on this Pi — use `tail ~/.openclaw/gateway.log` instead
+- The CLI entry point is `node dist/index.js` with subcommand `gateway` to run the gateway directly
 
 ## WhatsApp Watch Mode
 
