@@ -123,13 +123,19 @@ def _restart_gateway() -> bool:
     start = home / "l1-start.sh"
     if stop.exists() and start.exists():
         log("Restarting via l1-stop.sh + l1-start.sh…")
-        r1 = subprocess.run(["bash", str(stop)],  capture_output=True, text=True, timeout=30)
-        r2 = subprocess.run(["bash", str(start)], capture_output=True, text=True, timeout=30)
-        if r2.returncode == 0:
-            log("Gateway restarted successfully via l1-stop/l1-start")
-            return True
-        log(f"WARNING: l1-stop/l1-start failed — stop rc={r1.returncode}, "
-            f"start rc={r2.returncode}: {r2.stderr.strip()}")
+        try:
+            r1 = subprocess.run(["bash", str(stop)], capture_output=True, text=True, timeout=30)
+            try:
+                r2 = subprocess.run(["bash", str(start)], capture_output=True, text=True, timeout=120)
+                if r2.returncode == 0:
+                    log("Gateway restarted successfully via l1-stop/l1-start")
+                    return True
+                log(f"WARNING: l1-stop/l1-start failed — stop rc={r1.returncode}, "
+                    f"start rc={r2.returncode}: {r2.stderr.strip()}")
+            except subprocess.TimeoutExpired:
+                log("WARNING: l1-start.sh timed out after 120s — falling through to systemctl")
+        except subprocess.TimeoutExpired:
+            log("WARNING: l1-stop.sh timed out — falling through to systemctl")
     else:
         log(f"WARNING: l1-stop.sh or l1-start.sh not found at {home} — skipping")
 

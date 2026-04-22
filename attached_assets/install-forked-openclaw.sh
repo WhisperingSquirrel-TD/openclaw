@@ -481,6 +481,18 @@ else:
     tools_exec.setdefault('host', 'gateway')
     print(f'Exec host: {tools_exec[\"host\"]}')
 
+# Ensure web_search and youtube_transcript are in tools.alsoAllow
+# coding profile blocks both by default — alsoAllow re-enables them additively
+also_allow = c['tools'].setdefault('alsoAllow', [])
+if not isinstance(also_allow, list):
+    c['tools']['alsoAllow'] = []
+    also_allow = c['tools']['alsoAllow']
+for _tool in ['youtube_transcript', 'web_search']:
+    if _tool not in also_allow:
+        also_allow.append(_tool)
+        print(f'Added {_tool} to tools.alsoAllow')
+print(f'tools.alsoAllow: {also_allow}')
+
 # Enable WhatsApp watch action scanner (AI-powered action detection from WhatsApp messages)
 wa_actions = wa.setdefault('watchActions', {})
 if not isinstance(wa_actions, dict):
@@ -777,6 +789,7 @@ RESET_LOG="$HOME/.openclaw/workspace/memory/daily-reset.log"
 if [ -f "$RESET_SRC" ]; then
     mkdir -p "$(dirname "$RESET_DST")"
     ln -sf "$RESET_SRC" "$RESET_DST"
+    chmod +x "$RESET_DST"
     RESET_CRON="0 4 * * * $PYTHON3_BIN $RESET_DST >> $RESET_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "daily-reset.py"; echo "$RESET_CRON" ) | crontab -
     info "Daily provider reset cron installed: 04:00 daily → ${OPENCLAW_CODEX_MODEL:-openai-codex/gpt-5.4}"

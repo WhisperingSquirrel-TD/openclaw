@@ -751,6 +751,20 @@ The install script detects and strips the corrupted value, writes the correct mo
 
 ---
 
+### Source fixes in place (git pull safe as of 2026-04-22)
+
+The following bugs were fixed directly on the Pi in previous sessions. They are now fixed **in source** in this repo so they survive `git pull && bash ~/install-forked-openclaw.sh`:
+
+| Fix | Source file | What was changed |
+|-----|-------------|-----------------|
+| `daily-reset.py` timeout crash | `attached_assets/integrations/provider-switch/daily-reset.py` | `l1-start.sh` call now wrapped in `try/except TimeoutExpired` — falls through to `systemctl --user` if start script takes >120s |
+| `daily-reset.py` not executable | `attached_assets/install-forked-openclaw.sh` | Added `chmod +x "$RESET_DST"` after symlink creation |
+| `web_search` blocked after reinstall | `attached_assets/install-forked-openclaw.sh` | Added `alsoAllow` block that idempotently inserts `youtube_transcript` and `web_search` into `tools.alsoAllow` in `openclaw.json` — coding profile blocks both by default |
+
+After the next `bash ~/install-forked-openclaw.sh` these three will be applied automatically. No manual Pi edits needed.
+
+---
+
 ### Garmin poller — confirmed endpoint map
 
 `poll-garmin-cookie.py` uses `curl --compressed` with browser-like headers to pass Cloudflare. Auth requires **three things**: full cookie string (19+ cookies), `Connect-Csrf-Token` header value, and the curl backend (not urllib).
