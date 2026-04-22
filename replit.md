@@ -564,6 +564,38 @@ _Single-video mode (`--video <url>` — always synchronous):_
 
 **AI summary:** Uses `ANTHROPIC_API_KEY` from `.env` (batch API in cron, sync in `/yt-run`), falls back to `OPENAI_API_KEY` (always sync — OpenAI has no batch API). If neither is present, raw transcript is saved without a summary. Model override: `OPENCLAW_AI_MODEL` env var. Transcript is truncated to 6000 chars for the prompt (cost control). Full raw transcript always saved.
 
+### AI Briefing Pipeline
+
+Weekly automated briefing: RSS collection → heuristic ranking → Claude synthesis → `AI_BRIEFING_CURRENT.md`.
+
+| File | Purpose |
+| ---- | ------- |
+| `~/.openclaw/integrations/ai-briefing/collect.py` | Fetch + deduplicate items from ~16 RSS/Atom feeds |
+| `~/.openclaw/integrations/ai-briefing/rank.py` | Heuristic pre-filter, title-word clustering, Haiku scoring; fallback to heuristics if API fails |
+| `~/.openclaw/integrations/ai-briefing/synthesize.py` | Tavily enrichment (top 4 items, 3000-char cap), Sonnet synthesis, writes `AI_BRIEFING_CURRENT.md`; fallback to structured plain-text |
+| `~/.openclaw/integrations/ai-briefing/run.py` | Orchestrator: runs collect→rank→synthesize, updates `state.json`, exit codes 0/1/2 |
+| `~/.openclaw/ai-briefing/AI_BRIEFING_CURRENT.md` | Latest briefing handoff file for L1 to read |
+| `~/.openclaw/ai-briefing/state.json` | Pipeline state (last run, per-stage summaries, error) |
+| `~/.openclaw/ai-briefing/seen-items.json` | URL-hash dedup across runs (prevents repeats) |
+| `~/.openclaw/ai-briefing/included-items.json` | "New since last briefing" tracking |
+| `~/.openclaw/ai-briefing/raw/` | Raw collected JSON per run |
+| `~/.openclaw/ai-briefing/ranked/` | Ranked JSON per run |
+| `~/.openclaw/ai-briefing/briefings/` | Archived briefing Markdown files |
+| `~/.openclaw/integrations/ai-briefing/pipeline.log` | Cron log |
+| `reference/AI-BRIEFING-POLICY.md` | Scoring policy, inclusion/exclusion rules, format contract |
+| `reference/ai-briefing-sources.yaml` | Machine-readable source list with weights |
+
+**Scoring:** 5 dimensions × 0–4 pts each = max 20. Shortlist ≥10; Tavily enrichment ≥14; quiet-week threshold: <2 items ≥10.
+
+**Cron:** every Monday at 06:00 → `run.py`. On-demand via `/ai-briefing run` in mgmt-bot or `python3 ~/.openclaw/integrations/ai-briefing/run.py` directly.
+
+**mgmt-bot commands:**
+- `/ai-briefing` — show pipeline status from `state.json`
+- `/ai-briefing run` — run the full pipeline now (2–5 min)
+- `/ai-briefing read` — preview first 3000 chars of `AI_BRIEFING_CURRENT.md`
+
+**Resilience:** partial source failure is tolerated (per-feed try/except); Haiku failures fall back to heuristic ranking; Sonnet failures fall back to structured plain-text briefing; pipeline always writes an output file unless zero items are collected.
+
 ### Skills path configuration
 
 - Workspace skills live at `~/.openclaw/workspace/skills/` (32 skills as of Apr 2026)
@@ -608,6 +640,7 @@ Tavily is integrated as a **native `web_search` provider** in OpenClaw's built-i
 | Stackstone report poller    | `~/.openclaw/integrations/stackstone/poller.log`                                  |
 | Stackstone enquiry poller   | `~/.openclaw/integrations/stackstone/enquiry-poller.log`                          |
 | YouTube channel poller      | `~/.openclaw/integrations/youtube/channel-poller.log`                             |
+| AI briefing pipeline        | `~/.openclaw/integrations/ai-briefing/pipeline.log`                               |
 | Health check                | `~/.openclaw/integrations/health/health-check.log`                                |
 | Stackstone poll (cron)      | `/tmp/l1-stackstone-poll.log`                                                     |
 

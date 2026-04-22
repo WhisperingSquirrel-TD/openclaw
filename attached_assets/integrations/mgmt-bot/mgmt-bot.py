@@ -22,6 +22,7 @@ COMMANDS
   /yt-add       — add a YouTube channel to the transcript poller
   /yt-list      — list configured YouTube channels
   /yt-run       — trigger the YouTube channel poller now
+  /ai-briefing  — run the AI briefing pipeline now or show current briefing status
   /disk         — disk space on the Pi
   /soul         — upload a new SOUL.md as a .docx file, re-encrypts and restarts
 
@@ -729,6 +730,7 @@ def cmd_logs(token: str, chat_id: str) -> None:
         STATE_DIR / "integrations/stackstone/enquiry-poller.log",
         STATE_DIR / "integrations/health/health-check.log",
         STATE_DIR / "integrations/mgmt-bot/mgmt-bot.log",
+        STATE_DIR / "integrations/ai-briefing/pipeline.log",
         STATE_DIR / "workspace/memory/poll-garmin-log.txt",
         STATE_DIR / "workspace/memory/poll-calendar-log.txt",
         STATE_DIR / "workspace/memory/poll-calendar-google-log.txt",
@@ -994,6 +996,95 @@ def cmd_yt_run(token: str, chat_id: str) -> None:
         send(token, chat_id, f"✅ YouTube poller complete:\n```{tail}```")
     else:
         send(token, chat_id, f"❌ YouTube poller failed:\n```{tail}```")
+
+
+def cmd_ai_briefing(token: str, chat_id: str, arg: str = "") -> None:
+    """
+    /ai-briefing          — show current briefing status (state.json)
+    /ai-briefing run      — run the full pipeline now (collect → rank → synthesize)
+    /ai-briefing status   — same as bare /ai-briefing
+    /ai-briefing read     — show first 3000 chars of AI_BRIEFING_CURRENT.md
+    """
+    run_script  = STATE_DIR / "integrations" / "ai-briefing" / "run.py"
+    current_md  = STATE_DIR / "ai-briefing" / "AI_BRIEFING_CURRENT.md"
+    state_file  = STATE_DIR / "ai-briefing" / "state.json"
+
+    cmd = (arg.strip().lower() or "status")
+
+    if cmd == "run":
+        if not run_script.exists():
+            send(token, chat_id, "❌ AI briefing pipeline not found — run `/install` first.")
+            return
+        send(token, chat_id,
+             "📰 Running AI briefing pipeline (collect → rank → synthesize)…\n"
+             "_This takes 2–5 minutes. You'll get a message when done._")
+        r = subprocess.run(
+            ["python3", str(run_script)],
+            capture_output=True, text=True, timeout=600,
+        )
+        output = (r.stdout + r.stderr).strip()
+        tail = "\n".join(output.splitlines()[-20:]) if output else "(no output)"
+        if r.returncode == 0:
+            send(token, chat_id, f"✅ AI briefing pipeline complete:\n```{tail}```")
+        else:
+            send(token, chat_id, f"⚠️ AI briefing pipeline finished with issues (rc={r.returncode}):\n```{tail}```")
+        return
+
+    if cmd == "read":
+        if not current_md.exists():
+            send(token, chat_id,
+                 "📭 No briefing yet.\nSend `/ai-briefing run` to generate one.")
+            return
+        content = current_md.read_text(encoding="utf-8")
+        preview = content[:3000] + ("…\n_(truncated — full file in AI\\_BRIEFING\\_CURRENT.md)_" if len(content) > 3000 else "")
+        send(token, chat_id, preview)
+        return
+
+    # Default: status
+    lines = ["📰 *AI Briefing Status*\n"]
+
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text())
+            pipeline_status = state.get("pipeline_status", "unknown")
+            last_run  = state.get("pipeline_end", state.get("last_successful_run", "never"))[:19]
+            last_date = state.get("last_briefing_date", "none")
+            error     = state.get("pipeline_error", "")
+
+            icon = {"success": "✅", "running": "🔄", "failed": "❌", "partial_failure": "⚠️"}.get(pipeline_status, "❓")
+            lines.append(f"{icon} Pipeline: `{pipeline_status}`")
+            lines.append(f"🕐 Last run: {last_run}")
+            lines.append(f"📅 Last briefing: {last_date}")
+            if error:
+                lines.append(f"⚠️ Error: {error}")
+
+            collect = state.get("collect", {})
+            rank    = state.get("rank", {})
+            synth   = state.get("synthesize", {})
+            if collect:
+                lines.append(f"\n*Collect:* {collect.get('items_new', 0)} new items, "
+                              f"{collect.get('sources_ok', 0)} sources OK, "
+                              f"{collect.get('sources_failed', 0)} failed")
+            if rank:
+                lines.append(f"*Rank:* {rank.get('items_shortlisted', 0)} shortlisted"
+                              f"{' (quiet week)' if rank.get('quiet_week') else ''}")
+            if synth:
+                lines.append(f"*Synthesize:* {synth.get('items_included', 0)} included"
+                              f"{', fallback used' if synth.get('fallback_used') else ''}")
+        except Exception as e:
+            lines.append(f"⚠️ Could not read state: {e}")
+    else:
+        lines.append("No state file — pipeline has not run yet.")
+
+    if current_md.exists():
+        size = current_md.stat().st_size
+        lines.append(f"\n📄 `AI_BRIEFING_CURRENT.md` exists ({size} bytes)")
+        lines.append("Send `/ai-briefing read` to preview it")
+    else:
+        lines.append("\n📭 No current briefing file")
+
+    lines.append("\nSend `/ai-briefing run` to run the pipeline now")
+    send(token, chat_id, "\n".join(lines))
 
 
 def cmd_disk(token: str, chat_id: str) -> None:
@@ -1804,6 +1895,7 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/yt-add <url> [label] — add a YouTube channel to the transcript poller\n"
          "/yt-list — list configured YouTube channels\n"
          "/yt-run — trigger the YouTube channel poller now\n"
+         "/ai-briefing — show briefing status, or: run | read\n"
          "/pull — git pull latest from GitHub\n"
          "/install — git pull + run install script (sources .env automatically)\n"
          "/reboot — reboot Pi (refused if not safe)\n\n"
@@ -1856,10 +1948,11 @@ MENU_COMMANDS = [
     ("codex",     "Switch to Codex Web gpt-5.4 (full)"),
     ("codexmini", "Switch to Codex Web gpt-5.3-codex (mini)"),
     # Integrations
-    ("garmin",    "Manually trigger the Garmin poller"),
-    ("yt_add",    "Add a YouTube channel — /yt-add <url> [label]"),
-    ("yt_list",   "List configured YouTube channels"),
-    ("yt_run",    "Trigger the YouTube channel poller now"),
+    ("garmin",       "Manually trigger the Garmin poller"),
+    ("yt_add",       "Add a YouTube channel — /yt-add <url> [label]"),
+    ("yt_list",      "List configured YouTube channels"),
+    ("yt_run",       "Trigger the YouTube channel poller now"),
+    ("ai_briefing",  "AI briefing: status | run | read"),
     ("sp_sync",        "Force SharePoint content mirror refresh"),
     ("sp_housekeep",   "CRM housekeeping sweep — dry-run|accounts|entity:<name>"),
     ("ms_reauth",          "Re-auth assistant@ (email+SP+cal+tasks, one-time)"),
@@ -2268,9 +2361,11 @@ COMMANDS = {
     "/garmin":     cmd_garmin,
     "/yt-list":    cmd_yt_list,
     "/yt_list":    cmd_yt_list,
-    "/yt-run":     cmd_yt_run,
-    "/yt_run":     cmd_yt_run,
-    "/disk":       cmd_disk,
+    "/yt-run":          cmd_yt_run,
+    "/yt_run":          cmd_yt_run,
+    "/ai-briefing":     lambda t, c: cmd_ai_briefing(t, c, ""),
+    "/ai_briefing":     lambda t, c: cmd_ai_briefing(t, c, ""),
+    "/disk":            cmd_disk,
     "/soul":       cmd_soul_start,
     "/sp-sync":    cmd_sp_sync,
     "/sp_sync":    cmd_sp_sync,
@@ -2384,6 +2479,15 @@ def main() -> None:
                 print(f"[mgmt-bot] Command: {cmd} {arg!r} from {chat_id}")
                 try:
                     cmd_sp_housekeep(token, chat_id, arg)
+                except Exception as e:
+                    print(f"[mgmt-bot] Handler error ({cmd}): {e}", file=sys.stderr)
+                    send(token, chat_id, f"❌ Error running `{cmd}`:\n```{e}```")
+                continue
+
+            if cmd in ("/ai-briefing", "/ai_briefing"):
+                print(f"[mgmt-bot] Command: {cmd} {arg!r} from {chat_id}")
+                try:
+                    cmd_ai_briefing(token, chat_id, arg)
                 except Exception as e:
                     print(f"[mgmt-bot] Handler error ({cmd}): {e}", file=sys.stderr)
                     send(token, chat_id, f"❌ Error running `{cmd}`:\n```{e}```")

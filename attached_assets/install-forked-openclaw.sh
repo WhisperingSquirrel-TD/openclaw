@@ -1129,6 +1129,59 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# AI Briefing Pipeline
+# Weekly collect → rank → synthesize pipeline.
+# Writes ~/.openclaw/ai-briefing/AI_BRIEFING_CURRENT.md for L1 to read.
+# Cron runs every Monday at 06:00.
+# On-demand: python3 ~/.openclaw/integrations/ai-briefing/run.py
+# ---------------------------------------------------------------------------
+AI_BRIEFING_SRC_DIR="$HOME/openclaw/attached_assets/integrations/ai-briefing"
+AI_BRIEFING_DST_DIR="$HOME/.openclaw/integrations/ai-briefing"
+AI_BRIEFING_DATA_DIR="$HOME/.openclaw/ai-briefing"
+AI_BRIEFING_LOG="$HOME/.openclaw/integrations/ai-briefing/pipeline.log"
+
+if [ -d "$AI_BRIEFING_SRC_DIR" ] && [ -f "$AI_BRIEFING_SRC_DIR/run.py" ]; then
+    mkdir -p "$AI_BRIEFING_DST_DIR"
+
+    # Link all pipeline scripts
+    for script in run.py collect.py rank.py synthesize.py; do
+        if [ -f "$AI_BRIEFING_SRC_DIR/$script" ]; then
+            ln -sf "$AI_BRIEFING_SRC_DIR/$script" "$AI_BRIEFING_DST_DIR/$script"
+        fi
+    done
+    info "AI briefing pipeline linked: $AI_BRIEFING_DST_DIR"
+
+    # Create data directory tree
+    mkdir -p "$AI_BRIEFING_DATA_DIR/raw"
+    mkdir -p "$AI_BRIEFING_DATA_DIR/ranked"
+    mkdir -p "$AI_BRIEFING_DATA_DIR/briefings"
+
+    # Initialise state files if they don't already exist
+    [ -f "$AI_BRIEFING_DATA_DIR/seen-items.json" ]    || echo "{}" > "$AI_BRIEFING_DATA_DIR/seen-items.json"
+    [ -f "$AI_BRIEFING_DATA_DIR/included-items.json" ] || echo "{}" > "$AI_BRIEFING_DATA_DIR/included-items.json"
+    [ -f "$AI_BRIEFING_DATA_DIR/state.json" ]          || echo "{}" > "$AI_BRIEFING_DATA_DIR/state.json"
+    info "AI briefing data directory initialised: $AI_BRIEFING_DATA_DIR"
+
+    # Install Python dependencies
+    for pkg in feedparser pyyaml; do
+        if python3 -c "import ${pkg/pyyaml/yaml}" 2>/dev/null; then
+            info "Python package '$pkg' already installed"
+        else
+            pip3 install --quiet --break-system-packages --timeout 120 "$pkg" \
+                && info "Installed: $pkg" \
+                || warn "$pkg install failed — run manually: pip3 install --break-system-packages $pkg"
+        fi
+    done
+
+    # Weekly cron: every Monday at 06:00
+    AI_BRIEFING_CRON="0 6 * * 1 python3 $AI_BRIEFING_DST_DIR/run.py >> $AI_BRIEFING_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "ai-briefing/run.py"; echo "$AI_BRIEFING_CRON" ) | crontab -
+    info "AI briefing cron installed: every Monday at 06:00 → collect → rank → synthesize"
+else
+    warn "AI briefing pipeline not found at $AI_BRIEFING_SRC_DIR — skipping"
+fi
+
+# ---------------------------------------------------------------------------
 # OpenClaw Management Bot
 # Separate Telegram bot that intercepts system commands BEFORE the LLM.
 # Works even when OpenAI is rate-limited or the gateway is completely down.

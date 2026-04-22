@@ -1,0 +1,132 @@
+# AI Briefing Sources
+# Machine-readable source config for the ai-briefing pipeline.
+# Edit this file to add, remove, or reweight feeds.
+# Human-readable companion: ai-briefing-sources.md
+#
+# Fields per entry:
+#   name     - Display name used in briefing output
+#   url      - RSS/Atom feed URL
+#   weight   - 0.4–1.0; higher = harder to filter in heuristic pass (see policy)
+#   category - One or more of: model-capability, enterprise-adoption, agent-tooling,
+#              economics, governance, risk, general
+#   active   - Set to false to pause without deleting
+
+sources:
+
+  # ── AI Research & Primary Sources ────────────────────────────────────────────
+
+  - name: "Google DeepMind Blog"
+    url: "https://deepmind.google/blog/rss.xml"
+    weight: 1.0
+    category: [model-capability, agent-tooling]
+    active: true
+
+  - name: "Anthropic News"
+    url: "https://www.anthropic.com/news/rss.json"
+    weight: 1.0
+    category: [model-capability, governance, risk]
+    active: true
+
+  - name: "OpenAI News"
+    url: "https://openai.com/news/rss/"
+    weight: 1.0
+    category: [model-capability, economics, governance]
+    active: true
+
+  - name: "Meta AI Blog"
+    url: "https://ai.meta.com/blog/rss/"
+    weight: 0.8
+    category: [model-capability, agent-tooling]
+    active: true
+
+  - name: "Microsoft AI Blog"
+    url: "https://blogs.microsoft.com/ai/feed/"
+    weight: 0.8
+    category: [enterprise-adoption, model-capability]
+    active: true
+
+  - name: "Google AI Blog"
+    url: "https://blog.google/technology/ai/rss/"
+    weight: 0.8
+    category: [model-capability, enterprise-adoption]
+    active: true
+
+  # ── Enterprise AI & Industry ──────────────────────────────────────────────────
+
+  - name: "MIT Technology Review AI"
+    url: "https://www.technologyreview.com/topic/artificial-intelligence/feed/"
+    weight: 0.8
+    category: [enterprise-adoption, governance, risk]
+    active: true
+
+  - name: "The Gradient"
+    url: "https://thegradient.pub/rss/"
+    weight: 0.8
+    category: [model-capability, agent-tooling]
+    active: true
+
+  - name: "VentureBeat AI"
+    url: "https://venturebeat.com/ai/feed/"
+    weight: 0.6
+    category: [enterprise-adoption, economics, model-capability]
+    active: true
+
+  - name: "TechCrunch AI"
+    url: "https://techcrunch.com/category/artificial-intelligence/feed/"
+    weight: 0.6
+    category: [enterprise-adoption, economics]
+    active: true
+
+  # ── Agent Tooling & Practitioner ─────────────────────────────────────────────
+
+  - name: "LangChain Blog"
+    url: "https://blog.langchain.dev/rss/"
+    weight: 0.8
+    category: [agent-tooling]
+    active: true
+
+  - name: "Simon Willison's Weblog"
+    url: "https://simonwillison.net/atom/everything/"
+    weight: 1.0
+    category: [agent-tooling, model-capability, economics]
+    active: true
+
+  - name: "Hugging Face Blog"
+    url: "https://huggingface.co/blog/feed.xml"
+    weight: 0.8
+    category: [model-capability, economics, agent-tooling]
+    active: true
+
+  - name: "The Register AI"
+    url: "https://www.theregister.com/software/ai_ml/headlines.atom"
+    weight: 0.6
+    category: [enterprise-adoption, governance, risk]
+    active: true
+
+  # ── Governance & Regulation ───────────────────────────────────────────────────
+
+  - name: "Future of Life Institute"
+    url: "https://futureoflife.org/feed/"
+    weight: 0.8
+    category: [governance, risk]
+    active: true
+
+  - name: "AI Now Institute"
+    url: "https://ainowinstitute.org/feed"
+    weight: 0.8
+    category: [governance, risk]
+    active: true
+
+  # ── Economics & Market ────────────────────────────────────────────────────────
+
+  - name: "Stratechery"
+    url: "https://stratechery.com/feed/"
+    weight: 1.0
+    category: [economics, enterprise-adoption]
+    active: true
+
+  - name: "Benedict Evans Newsletter"
+    url: "https://www.ben-evans.com/benedictevans?format=rss"
+    weight: 0.8
+    category: [economics, enterprise-adoption]
+    active: true
