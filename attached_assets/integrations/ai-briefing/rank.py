@@ -127,7 +127,7 @@ def _anthropic_key() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step 1: Load latest raw batch
+# Step 1: Load raw items — aggregate since last briefing
 # ---------------------------------------------------------------------------
 
 def find_latest_raw_file() -> Path | None:
@@ -142,6 +142,59 @@ def load_raw_items(raw_file: Path) -> list[dict]:
     if not isinstance(items, list):
         return []
     return items
+
+
+def _load_state_for_rank() -> dict:
+    state_data = _load_json(STATE_FILE, {})
+    return state_data if isinstance(state_data, dict) else {}
+
+
+def load_raw_items_since_last_briefing() -> list[dict]:
+    """
+    Aggregate raw items from all raw files created since the last briefing date.
+    This ensures items that were fetched but not briefed (e.g., due to pipeline
+    failure or a quiet week) are re-evaluated in the next run.
+    Falls back to only the latest file if no state is available.
+    Deduplicates by url_hash within the aggregated set.
+    """
+    state = _load_state_for_rank()
+    last_briefing_date = state.get("last_briefing_date", "")
+
+    if not RAW_DIR.exists():
+        return []
+
+    all_raw_files = sorted(RAW_DIR.glob("*.json"), reverse=True)
+    if not all_raw_files:
+        return []
+
+    # Determine which files are new since the last briefing
+    if last_briefing_date:
+        cutoff = last_briefing_date  # YYYY-MM-DD string — compare against filename stem
+        relevant_files = [f for f in all_raw_files if f.stem >= cutoff]
+        if not relevant_files:
+            # All files are older than last briefing; nothing new
+            return []
+        log(f"Aggregating {len(relevant_files)} raw file(s) since {last_briefing_date}")
+    else:
+        # First run — use only the latest file to avoid overwhelming the ranker
+        relevant_files = all_raw_files[:1]
+        log(f"No last_briefing_date — using latest raw file: {relevant_files[0].name}")
+
+    # Aggregate and deduplicate by url_hash
+    seen: set[str] = set()
+    aggregated: list[dict] = []
+    for f in relevant_files:
+        batch = _load_json(f, [])
+        if not isinstance(batch, list):
+            continue
+        for item in batch:
+            key = item.get("url_hash") or item.get("url", "")
+            if key and key not in seen:
+                seen.add(key)
+                aggregated.append(item)
+
+    log(f"Aggregated {len(aggregated)} unique items from {len(relevant_files)} raw file(s)")
+    return aggregated
 
 
 # ---------------------------------------------------------------------------
@@ -456,22 +509,29 @@ def build_shortlist(items: list[dict], top_n: int) -> dict:
 # Main
 # ---------------------------------------------------------------------------
 
-def rank(raw_file: Path, top_n: int) -> dict:
+def rank(raw_file: Path | None, top_n: int) -> dict:
     run_start = datetime.now(timezone.utc).isoformat()
 
-    # Load raw items
-    items = load_raw_items(raw_file)
+    # Load raw items: aggregate all files since last briefing (decoupled from
+    # seen-items.json fetch dedup) so unbriefed items are reconsidered.
+    if raw_file is not None:
+        items = load_raw_items(raw_file)
+        source_label = str(raw_file)
+    else:
+        items = load_raw_items_since_last_briefing()
+        source_label = "aggregated-since-last-briefing"
+
     if not items:
         log("No raw items to rank")
         return {
             "run_start": run_start,
-            "raw_file": str(raw_file),
+            "raw_file": source_label,
             "items_loaded": 0,
             "items_shortlisted": 0,
             "quiet_week": True,
         }
 
-    log(f"Loaded {len(items)} items from {raw_file}")
+    log(f"Loaded {len(items)} items ({source_label})")
 
     # Filter already-included (by URL hash and by topic fingerprint)
     included_hashes, included_token_sets = load_included_data()
@@ -547,14 +607,17 @@ def parse_args() -> argparse.Namespace:
 def main() -> dict:
     args = parse_args()
 
-    raw_file = args.raw_file
-    if raw_file is None:
-        raw_file = find_latest_raw_file()
-    if raw_file is None or not raw_file.exists():
-        log_err(f"No raw file found. Run collect.py first.")
+    # When no explicit file given, pass None so rank() aggregates all raw files
+    # since last briefing — decoupled from fetch dedup (seen-items.json).
+    raw_file: Path | None = args.raw_file
+    if raw_file is not None and not raw_file.exists():
+        log_err(f"Specified raw file not found: {raw_file}")
+        sys.exit(1)
+    if raw_file is None and not RAW_DIR.exists():
+        log_err("Raw directory not found. Run collect.py first.")
         sys.exit(1)
 
-    log(f"Ranking items from {raw_file} (top-n={args.top_n})")
+    log(f"Ranking (top-n={args.top_n}, {'explicit file: ' + str(raw_file) if raw_file else 'aggregating since last briefing'})")
     summary = rank(raw_file, args.top_n)
 
     state = load_state()

@@ -215,8 +215,12 @@ def enrich_with_tavily(shortlist: list[dict], use_tavily: bool) -> list[dict]:
 def _build_synthesis_prompt(shortlist: list[dict], quiet_week: bool, watch_items: list[dict]) -> str:
     today = datetime.now().strftime("%Y-%m-%d")
 
-    if quiet_week and not shortlist:
+    if quiet_week:
+        # Quiet week: always suppress shortlist items from the synthesis prompt.
+        # Any borderline items (shortlist with 1 qualified item) are treated as
+        # watch items so the output contract is consistent.
         items_text = "(No items met the relevance threshold this week.)"
+        watch_items = (shortlist + list(watch_items))[:5]  # merge, cap at 5
     else:
         parts = []
         for i, item in enumerate(shortlist, 1):
@@ -311,7 +315,10 @@ def build_fallback_briefing(shortlist: list[dict], quiet_week: bool, watch_items
     today = datetime.now().strftime("%Y-%m-%d")
     lines = []
 
-    if quiet_week and not shortlist:
+    if quiet_week:
+        # Quiet week: suppress shortlist items from the briefing body.
+        # Merge them into watch items so output contract is consistent.
+        watch_items = (shortlist + list(watch_items))[:5]
         lines.append("> Nothing materially important this week.")
         lines.append("")
     else:

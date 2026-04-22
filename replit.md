@@ -585,7 +585,7 @@ Weekly automated briefing: RSS collection → heuristic ranking → Claude synth
 | `reference/AI-BRIEFING-POLICY.md` | Scoring policy, inclusion/exclusion rules, format contract |
 | `reference/ai-briefing-sources.yaml` | Machine-readable source list with weights |
 
-**Scoring:** 5 dimensions × 0–4 pts each = max 20. Shortlist ≥10; Tavily enrichment ≥14; quiet-week threshold: <2 items ≥10.
+**Scoring:** 4 dimensions (Relevance, Novelty, Actionability, Credibility) × 1–5 pts each = max 20. Shortlist ≥10; Tavily enrichment ≥14; quiet-week threshold: <2 items ≥10.
 
 **Cron:** every Monday at 06:00 → `run.py`. On-demand via `/ai-briefing run` in mgmt-bot or `python3 ~/.openclaw/integrations/ai-briefing/run.py` directly.
 
