@@ -579,6 +579,13 @@ Tavily is integrated as a **native `web_search` provider** in OpenClaw's built-i
 
 ## Known Failure Patterns & Diagnostics
 
+### OpenAI model routing: codex vs standard
+
+- `openai-codex/*` models route through the ChatGPT Plus account — subject to ChatGPT Plus usage limits (~221 min cooldown when hit)
+- `openai/*` models use the standard OpenAI API key — separate limits, not affected by ChatGPT Plus cap
+- Symptom of hitting the Plus cap: `[compaction] Summarization failed: You have hit your ChatGPT usage limit (plus plan)` — L1 goes silent
+- Fix: switch model to `anthropic/claude-sonnet-4-5` or `openai/gpt-5.4` until limit resets
+
 ### Gateway crash-loop: "Unknown model: export VAR=value"
 
 **Symptom:** Telegram mgmt-bot shows repeated cycles of:
