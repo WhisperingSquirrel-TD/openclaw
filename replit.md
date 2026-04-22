@@ -108,6 +108,14 @@ bash ~/install-forked-openclaw.sh
 - Systemd service name is `openclaw-gateway.service` (not `openclaw`)
 - journald returns "No journal files were found" for user services on this Pi — use `tail ~/.openclaw/gateway.log` instead
 - The CLI entry point is `node dist/index.js` with subcommand `gateway` to run the gateway directly
+- If `install-forked-openclaw.sh` hangs, it's waiting on `git pull` credentials — Ctrl+C and run steps manually
+- **Config migration**: if openclaw reports `agent.*` is deprecated, run `cd ~/openclaw && node dist/index.js doctor --fix` to auto-migrate
+- **Pi performance** (from doctor): add to `~/.openclaw/.env` for faster CLI starts:
+  ```
+  NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
+  OPENCLAW_NO_RESPAWN=1
+  ```
+  And: `mkdir -p /var/tmp/openclaw-compile-cache`
 
 ## WhatsApp Watch Mode
 
@@ -581,6 +589,118 @@ Tavily is integrated as a **native `web_search` provider** in OpenClaw's built-i
 | `~/.openclaw/oauth/google/tasks-token.json` | Google Tasks OAuth token (separate from Gmail token)                 |
 
 ---
+
+---
+
+## Quick Reference: Debugging & Diagnostics
+
+### Log files — always use these, journald does NOT work for user services on this Pi
+
+| What                        | Log path                                                                          |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| **Gateway (L1)**            | `~/.openclaw/gateway.log`                                                         |
+| Daily model reset           | `~/.openclaw/workspace/memory/daily-reset.log`                                    |
+| Garmin poller               | `~/.openclaw/workspace/memory/poll-garmin-log.txt`                                |
+| CRM poller                  | `~/.openclaw/workspace/memory/poll-crm-log.txt`                                   |
+| SharePoint cache poller     | `~/.openclaw/integrations/microsoft/sp-cache-poller.log`                          |
+| SharePoint queue processor  | `~/.openclaw/integrations/microsoft/sp-queue-processor.log`                       |
+| SharePoint housekeeping     | `~/.openclaw/integrations/microsoft/sp-housekeeping.log`                          |
+| Stackstone report poller    | `~/.openclaw/integrations/stackstone/poller.log`                                  |
+| Stackstone enquiry poller   | `~/.openclaw/integrations/stackstone/enquiry-poller.log`                          |
+| YouTube channel poller      | `~/.openclaw/integrations/youtube/channel-poller.log`                             |
+| Health check                | `~/.openclaw/integrations/health/health-check.log`                                |
+| Stackstone poll (cron)      | `/tmp/l1-stackstone-poll.log`                                                     |
+
+**Live tail of gateway:**
+```bash
+tail -f ~/.openclaw/gateway.log
+```
+
+**Watch what happens when you send L1 a message:**
+```bash
+tail -f ~/.openclaw/gateway.log   # then send message in Telegram
+```
+
+---
+
+### Key paths
+
+| What                            | Path                                                                |
+| ------------------------------- | ------------------------------------------------------------------- |
+| Main config (locked)            | `~/.openclaw/openclaw.json`                                         |
+| API keys / secrets              | `~/.openclaw/.env`                                                  |
+| System skills (10 core)         | `~/.openclaw/skills/`                                               |
+| Workspace skills (32 custom)    | `~/.openclaw/workspace/skills/`                                     |
+| L1 memory files                 | `~/.openclaw/workspace/memory/`                                     |
+| Session transcripts             | `~/.openclaw/agents/main/sessions/`                                 |
+| All integrations                | `~/.openclaw/integrations/`                                         |
+| Microsoft tokens                | `~/.openclaw/integrations/microsoft/token-*.json`                   |
+| Google OAuth tokens             | `~/.openclaw/oauth/google/`                                         |
+| Daily reset script              | `~/.openclaw/integrations/provider-switch/daily-reset.py`           |
+| SharePoint manifest/cache       | `~/.openclaw/integrations/microsoft/sharepoint-manifest.json`       |
+| SharePoint write queue          | `~/.openclaw/integrations/microsoft/sharepoint-queue.json`          |
+
+---
+
+### Systemd user services on this Pi
+
+| Service                              | Purpose                          |
+| ------------------------------------ | -------------------------------- |
+| `openclaw-gateway.service`           | Main L1 gateway                  |
+| `openclaw-mgmt-bot.service`          | Telegram management bot          |
+| `openclaw-email-assistant.service`   | Email assistant channel          |
+| `openclaw-email-gmail.service`       | Gmail poller                     |
+| `openclaw-email-microsoft.service`   | Microsoft mail poller            |
+| `openclaw-calendar-google.service`   | Google Calendar poller           |
+| `openclaw-calendar-microsoft.service`| Microsoft Calendar poller        |
+
+**Commands:**
+```bash
+systemctl --user status openclaw-gateway.service
+systemctl --user restart openclaw-gateway.service
+systemctl --user start openclaw-gateway.service
+systemctl --user stop openclaw-gateway.service
+```
+
+---
+
+### First-check diagnostics — run these when L1 is silent or stuck
+
+```bash
+# 1. Is the gateway actually running?
+systemctl --user status openclaw-gateway.service
+
+# 2. What's in the gateway log right now?
+tail -30 ~/.openclaw/gateway.log
+
+# 3. Is the config valid JSON?
+python3 -c "import json; json.load(open('/home/tomdean88/.openclaw/openclaw.json')); print('JSON OK')"
+
+# 4. What model is L1 using?
+python3 -c "import json; cfg=json.load(open('/home/tomdean88/.openclaw/openclaw.json')); print(cfg.get('agents',{}).get('defaults',{}).get('model',{}))"
+
+# 5. Check for rate limit / compaction error
+grep -i "usage limit\|compaction\|summarization failed" ~/.openclaw/gateway.log | tail -5
+
+# 6. Check all errors in gateway log
+grep -i "error\|warn\|fail" ~/.openclaw/gateway.log | tail -20
+```
+
+---
+
+### Config editing (locked file)
+
+```bash
+sudo chattr -i ~/.openclaw/openclaw.json   # unlock
+# ... edit ...
+sudo chattr +i ~/.openclaw/openclaw.json   # re-lock
+systemctl --user restart openclaw-gateway.service
+```
+
+**Always validate JSON before restarting:**
+```bash
+python3 -c "import json; json.load(open('/home/tomdean88/.openclaw/openclaw.json')); print('OK')"
+```
 
 ---
 
