@@ -674,6 +674,45 @@ print('Config updated successfully')
 sudo chattr +i "$CONFIG_FILE"
 info "Config updated and locked"
 
+# Seed Ollama auth entry in every agent's auth-profiles.json.
+# Ollama is a local provider that needs no real key, but OpenClaw's auth
+# store check fails with "No API key found for provider ollama" unless an
+# entry exists. This seeds the key as the literal string "ollama" (the
+# convention for keyless local providers). setdefault-style: never
+# overwrites a key that is already present.
+warn "Seeding Ollama auth entry in agent auth stores..."
+python3 - <<'PYEOF'
+import json, pathlib, sys
+
+agents_dir = pathlib.Path.home() / ".openclaw" / "agents"
+if not agents_dir.exists():
+    print("  agents/ dir not found — skipping (will be created on first L1 start)")
+    sys.exit(0)
+
+patched = 0
+for auth_file in agents_dir.glob("*/agent/auth-profiles.json"):
+    try:
+        data = json.loads(auth_file.read_text())
+        if not isinstance(data, dict):
+            print(f"  SKIP {auth_file}: unexpected format")
+            continue
+        if "ollama" in data:
+            print(f"  OK   {auth_file}: ollama already present")
+            continue
+        data["ollama"] = "ollama"
+        auth_file.write_text(json.dumps(data, indent=2))
+        print(f"  SET  {auth_file}: ollama entry added")
+        patched += 1
+    except Exception as e:
+        print(f"  ERR  {auth_file}: {e}")
+
+if patched == 0:
+    print("  All agent auth stores already have ollama entry — nothing to do")
+else:
+    print(f"  Patched {patched} auth store(s)")
+PYEOF
+info "Ollama auth seeding complete"
+
 # Step 11: Deploy integration scripts from repo
 echo ""
 warn "Deploying integration scripts..."
