@@ -66,7 +66,7 @@ STATE_FILE   = STATE_DIR / "integrations/microsoft/sp-housekeeping-state.json"
 
 ANTHROPIC_API_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_BATCH_URL = "https://api.anthropic.com/v1/messages/batches"
-ANTHROPIC_MODEL     = "claude-3-5-haiku-20241022"
+ANTHROPIC_MODEL     = "claude-haiku-4-5"
 
 # SharePoint CRM root paths to search for entities
 CRM_ACCOUNTS_PREFIX      = "Stackstone CRM/Accounts"
@@ -987,7 +987,7 @@ def process_sync(entities: list[dict], mode: str) -> list[dict]:
 # Degraded-state check
 # ---------------------------------------------------------------------------
 
-MANIFEST_MAX_AGE_HOURS = 26  # slightly more than nightly cron interval
+MANIFEST_MAX_AGE_HOURS = 36  # 1.5× nightly cron interval — buffer for slow/late sp-sync runs
 
 _TOKEN_CANDIDATES = [
     STATE_DIR / "integrations/microsoft/token-assistant.json",
