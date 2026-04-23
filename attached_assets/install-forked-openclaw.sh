@@ -689,18 +689,25 @@ if not agents_dir.exists():
     print("  agents/ dir not found — skipping (will be created on first L1 start)")
     sys.exit(0)
 
+import subprocess as _sp
+
 patched = 0
 for auth_file in agents_dir.glob("*/agent/auth-profiles.json"):
     try:
+        # Unlock immutable flag if set, then re-lock after write
+        _sp.run(["sudo", "chattr", "-i", str(auth_file)], capture_output=True)
         data = json.loads(auth_file.read_text())
         if not isinstance(data, dict):
             print(f"  SKIP {auth_file}: unexpected format")
+            _sp.run(["sudo", "chattr", "+i", str(auth_file)], capture_output=True)
             continue
         if "ollama" in data:
             print(f"  OK   {auth_file}: ollama already present")
+            _sp.run(["sudo", "chattr", "+i", str(auth_file)], capture_output=True)
             continue
         data["ollama"] = "ollama"
         auth_file.write_text(json.dumps(data, indent=2))
+        _sp.run(["sudo", "chattr", "+i", str(auth_file)], capture_output=True)
         print(f"  SET  {auth_file}: ollama entry added")
         patched += 1
     except Exception as e:
