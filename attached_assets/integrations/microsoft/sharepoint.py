@@ -10,7 +10,8 @@ COMMANDS
   sharepoint.py create <sp-file-path> --content-file /tmp/oc-sp-content.txt
   sharepoint.py update <sp-file-path> --content-file /tmp/oc-sp-content.txt
   sharepoint.py append <sp-file-path> --content-file /tmp/oc-sp-content.txt
-  sharepoint.py move   <sp-source-path> --destination <sp-destination-path>
+  sharepoint.py move          <sp-source-path> --destination <sp-destination-path>
+  sharepoint.py delete_folder <sp-folder-path>   # only succeeds if folder is empty
 
 PATHS
 -----
@@ -20,7 +21,8 @@ All paths are relative to the document library root, e.g.:
 
 PROHIBITED OPERATIONS
 ---------------------
-delete — not implemented by design. Use move to relocate files to an Archive/ folder instead.
+Deleting files is not implemented by design. Use move to relocate files to an Archive/ folder.
+Deleting non-empty folders is blocked — the folder must be empty before delete_folder will proceed.
 
 REQUIRED ENV VARS (in ~/.openclaw/.env)
 ---------------------------------------
@@ -120,7 +122,7 @@ def parse_args() -> argparse.Namespace:
         description="OpenClaw SharePoint document manager (assistant@ identity)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("command", choices=["list", "read", "create", "update", "append", "move", "reauth"],
+    p.add_argument("command", choices=["list", "read", "create", "update", "append", "move", "delete_folder", "reauth"],
                    help="Operation to perform")
     p.add_argument("path", nargs="?", default="",
                    help="SharePoint path, e.g. /Stackstone CRM/Opportunities/Harken Health.md")
@@ -653,6 +655,67 @@ def cmd_append(access_token: str, sp_path: str, site_id: str, drive_id: str,
     print(f"  URL:     {item.get('webUrl', '(unavailable)')}")
 
 
+def cmd_delete_folder(access_token: str, sp_path: str,
+                      site_id: str, drive_id: str) -> None:
+    """Delete a folder — only if it contains zero items.
+
+    Safety check: lists the folder's children first. If anything is inside
+    (files or subfolders) the operation is refused with exit code 2.
+    This prevents any accidental data loss — move files out first, then call
+    delete_folder once the folder is empty.
+    """
+    sp_path = _normalise_path(sp_path)
+
+    # 1. Verify it exists and is a folder
+    meta_url  = _drive_item_url(site_id, drive_id, sp_path)
+    meta_resp = requests.get(meta_url, headers=_headers(access_token), timeout=15)
+    if meta_resp.status_code == 404:
+        print(f"ERROR: Folder not found: {sp_path}", file=sys.stderr)
+        sys.exit(5)
+    if not meta_resp.ok:
+        print(f"ERROR: Could not read item metadata ({meta_resp.status_code}): {meta_resp.text[:300]}",
+              file=sys.stderr)
+        sys.exit(2)
+    meta = meta_resp.json()
+    if "folder" not in meta:
+        print(
+            f"ERROR: '{sp_path}' is a file, not a folder. "
+            "File deletion is not permitted — use move to relocate files.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    # 2. Check it is empty
+    children_url  = _drive_item_url(site_id, drive_id, sp_path) + ":/children"
+    children_resp = requests.get(children_url, headers=_headers(access_token), timeout=15)
+    if not children_resp.ok:
+        print(f"ERROR: Could not list folder contents ({children_resp.status_code}): {children_resp.text[:300]}",
+              file=sys.stderr)
+        sys.exit(2)
+    children = children_resp.json().get("value", [])
+    if children:
+        names = ", ".join(c.get("name", "?") for c in children[:5])
+        extra = f" … and {len(children) - 5} more" if len(children) > 5 else ""
+        print(
+            f"ERROR: Folder is not empty ({len(children)} item(s)): {names}{extra}\n"
+            "Move or relocate all contents first, then retry delete_folder.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    # 3. Delete the empty folder
+    del_url  = _drive_item_url(site_id, drive_id, sp_path)
+    del_resp = requests.delete(del_url, headers=_headers(access_token), timeout=15)
+    if del_resp.status_code == 404:
+        print(f"ERROR: Folder not found (may have already been deleted): {sp_path}", file=sys.stderr)
+        sys.exit(5)
+    if not del_resp.ok:
+        print(f"ERROR: Delete failed ({del_resp.status_code}): {del_resp.text[:300]}", file=sys.stderr)
+        sys.exit(2)
+
+    print(f"✓ Deleted empty folder: {sp_path}")
+
+
 def cmd_move(access_token: str, sp_path: str, destination: str,
              site_id: str, drive_id: str) -> None:
     """Move (and optionally rename) a file or folder to a new path.
@@ -759,6 +822,8 @@ def main() -> None:
         cmd_append(access_token, sp_path, site_id, drive_id, args.content_file)
     elif args.command == "move":
         cmd_move(access_token, sp_path, args.destination, site_id, drive_id)
+    elif args.command == "delete_folder":
+        cmd_delete_folder(access_token, sp_path, site_id, drive_id)
 
 
 if __name__ == "__main__":

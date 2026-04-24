@@ -60,9 +60,10 @@ LOG_FILE    = STATE_DIR / "integrations/microsoft/sp-queue-processor.log"
 SP_SCRIPT   = STATE_DIR / "integrations/microsoft-l1/sharepoint.py"
 LOG_MAX     = 500
 
-WRITE_OPERATIONS = {"create", "update", "append"}
-MOVE_OPERATIONS  = {"move"}          # relocate/rename without delete permission
-READ_OPERATIONS  = {"read_binary"}  # on-demand binary extraction
+WRITE_OPERATIONS         = {"create", "update", "append"}
+MOVE_OPERATIONS          = {"move"}           # relocate/rename, no delete permission
+FOLDER_DELETE_OPERATIONS = {"delete_folder"}  # empty folders only — files never deleted
+READ_OPERATIONS          = {"read_binary"}    # on-demand binary extraction
 
 # Binary extractor — same directory as this script
 import sys as _sys
@@ -316,6 +317,41 @@ def _run_read_binary_operation(op: dict) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
+# Execute a single SharePoint delete_folder operation
+# ---------------------------------------------------------------------------
+
+def _run_delete_folder_operation(op: dict) -> tuple[bool, str]:
+    """Execute one delete_folder queue entry. Returns (success, output_text).
+
+    sharepoint.py enforces the empty-folder safety check server-side — if the
+    folder has any contents the Graph call is refused before any DELETE is sent.
+    """
+    sp_path = op.get("path", "").strip()
+
+    if not sp_path:
+        return False, "Missing 'path' field"
+    if not SP_SCRIPT.exists():
+        return False, f"sharepoint.py not found at {SP_SCRIPT}"
+
+    cmd = ["python3", str(SP_SCRIPT), "delete_folder", sp_path]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output  = (result.stdout + result.stderr).strip()
+        success = result.returncode == 0
+        return success, output
+    except subprocess.TimeoutExpired:
+        return False, "Timed out after 30 seconds"
+    except Exception as e:
+        return False, str(e)
+
+
+# ---------------------------------------------------------------------------
 # Execute a single SharePoint move operation
 # ---------------------------------------------------------------------------
 
@@ -477,11 +513,14 @@ def main() -> None:
                     success, output = _run_write_operation(op)
                 elif op_lower in MOVE_OPERATIONS:
                     success, output = _run_move_operation(op)
+                elif op_lower in FOLDER_DELETE_OPERATIONS:
+                    success, output = _run_delete_folder_operation(op)
                 else:
                     msg = (
                         f"Unknown operation '{op_name}'. "
                         f"Write operations: {', '.join(sorted(WRITE_OPERATIONS))}. "
                         f"Move operations: {', '.join(sorted(MOVE_OPERATIONS))}. "
+                        f"Folder delete: {', '.join(sorted(FOLDER_DELETE_OPERATIONS))}. "
                         f"Read operations: {', '.join(sorted(READ_OPERATIONS))}. "
                         f"For plain text files, read directly from "
                         f"~/.openclaw/workspace/sharepoint-cache/<path>."

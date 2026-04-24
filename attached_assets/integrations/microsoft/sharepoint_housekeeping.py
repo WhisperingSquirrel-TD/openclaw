@@ -340,10 +340,14 @@ Action guide:
 - "create"   — create a new file (provide "content")
 - "update"   — overwrite an existing file (provide "content")
 - "append"   — add content to an existing file (provide "content")
-- "move"     — relocate or rename a file/folder (provide "path" = source, "destination" = target full path; NO content needed)
+- "move"          — relocate or rename a file/folder (provide "path" = source, "destination" = target full path; NO content needed)
   - Use move to relocate loose/raw/source files into an Archive/ or Source/ subfolder
   - Use move to rename a file to its correct canonical name
   - Move is safe and reversible — prefer it over recreate when the source file simply needs relocating
+- "delete_folder" — delete a folder (provide "path" = folder path; NO content or destination needed)
+  - ONLY use after all files have been moved out — the system will REFUSE if the folder still has any contents
+  - Safe to queue speculatively: if the folder is not yet empty the queue processor rejects it cleanly
+  - Use this to remove leftover empty parent folders after moving their contents elsewhere
 - "recreate" — create at canonical path when content also needs rewriting (provide "content" and "from_path")
   - The from_path file will NOT be deleted; it is surfaced as ambiguous for manual review
 
@@ -354,10 +358,10 @@ Output schema:
   "assessment": "<one sentence summary of current state>",
   "safe_changes": [
     {
-      "action": "create|recreate|update|append|move",
-      "path": "<full SP path — source for move, destination for all others>",
+      "action": "create|recreate|update|append|move|delete_folder",
+      "path": "<full SP path — source for move, folder for delete_folder, destination for all others>",
       "destination": "<full SP destination path — required for move only>",
-      "content": "<full file content — required for create/recreate/update/append; omit for move>",
+      "content": "<full file content — required for create/recreate/update/append; omit for move/delete_folder>",
       "from_path": "<original path — required for recreate only>",
       "reason": "<brief reason>"
     }
@@ -687,6 +691,20 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
                 "_housekeeping": True,
                 "_action":       "recreate",
                 "_from_path":    from_path,
+                "_reason":       change.get("reason", ""),
+                "_verified":     False,
+            }
+            queue.append(entry)
+            submitted.append(entry)
+
+        elif action == "delete_folder":
+            entry_id = f"sp-hk-{entity['name'][:8].replace(' ', '')}-{len(queue)+1}-{int(time.time())}"
+            entry = {
+                "id":            entry_id,
+                "operation":     "delete_folder",
+                "path":          path,
+                "requested_at":  run_ts,
+                "_housekeeping": True,
                 "_reason":       change.get("reason", ""),
                 "_verified":     False,
             }
