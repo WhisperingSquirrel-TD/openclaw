@@ -10,6 +10,7 @@ COMMANDS
   sharepoint.py create <sp-file-path> --content-file /tmp/oc-sp-content.txt
   sharepoint.py update <sp-file-path> --content-file /tmp/oc-sp-content.txt
   sharepoint.py append <sp-file-path> --content-file /tmp/oc-sp-content.txt
+  sharepoint.py move   <sp-source-path> --destination <sp-destination-path>
 
 PATHS
 -----
@@ -19,7 +20,7 @@ All paths are relative to the document library root, e.g.:
 
 PROHIBITED OPERATIONS
 ---------------------
-delete / rename / move — not implemented by design.
+delete — not implemented by design. Use move to relocate files to an Archive/ folder instead.
 
 REQUIRED ENV VARS (in ~/.openclaw/.env)
 ---------------------------------------
@@ -119,7 +120,7 @@ def parse_args() -> argparse.Namespace:
         description="OpenClaw SharePoint document manager (assistant@ identity)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("command", choices=["list", "read", "create", "update", "append", "reauth"],
+    p.add_argument("command", choices=["list", "read", "create", "update", "append", "move", "reauth"],
                    help="Operation to perform")
     p.add_argument("path", nargs="?", default="",
                    help="SharePoint path, e.g. /Stackstone CRM/Opportunities/Harken Health.md")
@@ -127,6 +128,8 @@ def parse_args() -> argparse.Namespace:
                    help="Path to temp file containing content (required for create/update/append)")
     p.add_argument("--allow-overwrite", action="store_true",
                    help="For create: overwrite if file already exists (default: fail)")
+    p.add_argument("--destination", default=None,
+                   help="Destination SharePoint path (required for move)")
     p.add_argument("--account", default="assistant",
                    help="Token account slug (default: assistant)")
     p.add_argument("--token-file", default=None,
@@ -650,6 +653,61 @@ def cmd_append(access_token: str, sp_path: str, site_id: str, drive_id: str,
     print(f"  URL:     {item.get('webUrl', '(unavailable)')}")
 
 
+def cmd_move(access_token: str, sp_path: str, destination: str,
+             site_id: str, drive_id: str) -> None:
+    """Move (and optionally rename) a file or folder to a new path.
+
+    Uses the Graph API PATCH endpoint with parentReference + name.
+    The destination folder is created automatically by SharePoint if it
+    doesn't exist only when the parent path already exists — otherwise
+    the call fails cleanly with a 404/409 so no silent data loss occurs.
+    """
+    sp_path     = _normalise_path(sp_path)
+    destination = _normalise_path(destination)
+
+    # Derive destination parent folder and new filename
+    dest_parts  = destination.rsplit("/", 1)
+    dest_folder = dest_parts[0] if len(dest_parts) > 1 else ""
+    dest_name   = dest_parts[1] if len(dest_parts) > 1 else destination.strip("/")
+
+    # Build the parentReference path that Graph expects:
+    #   /drives/{drive-id}/root:/{folder-path}
+    if dest_folder.strip("/"):
+        parent_path = f"/drives/{drive_id}/root:/{dest_folder.strip('/')}"
+    else:
+        parent_path = f"/drives/{drive_id}/root:"
+
+    url  = _drive_item_url(site_id, drive_id, sp_path)
+    hdrs = _headers(access_token)
+    hdrs["Content-Type"] = "application/json"
+
+    body = {
+        "parentReference": {"path": parent_path},
+        "name": dest_name,
+    }
+
+    resp = requests.patch(url, headers=hdrs, json=body, timeout=30)
+
+    if resp.status_code == 404:
+        print(f"ERROR: Source not found: {sp_path}", file=sys.stderr)
+        sys.exit(5)
+    if resp.status_code == 409:
+        print(
+            f"ERROR: Destination conflict — a file named '{dest_name}' already exists at "
+            f"{dest_folder or '(root)'}. Rename the destination path to avoid overwriting.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if not resp.ok:
+        print(f"ERROR: Move failed ({resp.status_code}): {resp.text[:300]}", file=sys.stderr)
+        sys.exit(2)
+
+    item = resp.json()
+    print(f"✓ Moved:  {sp_path}")
+    print(f"  → To:   {destination}")
+    print(f"  URL:    {item.get('webUrl', '(unavailable)')}")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -676,6 +734,10 @@ def main() -> None:
         )
         sys.exit(3)
 
+    if args.command == "move" and not args.destination:
+        print("ERROR: --destination is required for 'move'.", file=sys.stderr)
+        sys.exit(3)
+
     try:
         access_token = get_access_token(args)
     except FileNotFoundError as e:
@@ -695,6 +757,8 @@ def main() -> None:
         cmd_update(access_token, sp_path, site_id, drive_id, args.content_file)
     elif args.command == "append":
         cmd_append(access_token, sp_path, site_id, drive_id, args.content_file)
+    elif args.command == "move":
+        cmd_move(access_token, sp_path, args.destination, site_id, drive_id)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,13 @@ L1 writes this file directly (file writes need no exec/TOTP):
     "path": "/Stackstone CRM/Opportunities/Harken Health.md",
     "content": "Markdown content to write",
     "requested_at": "2026-04-09T10:00:00Z"
+  },
+  {
+    "id": "unique-id",
+    "operation": "move",
+    "path": "/Stackstone CRM/Andy Barrett - SJP/raw-transcript.docx",
+    "destination": "/Stackstone CRM/Andy Barrett - SJP/Archive/raw-transcript.docx",
+    "requested_at": "2026-04-09T10:00:00Z"
   }
 ]
 
@@ -54,6 +61,7 @@ SP_SCRIPT   = STATE_DIR / "integrations/microsoft-l1/sharepoint.py"
 LOG_MAX     = 500
 
 WRITE_OPERATIONS = {"create", "update", "append"}
+MOVE_OPERATIONS  = {"move"}          # relocate/rename without delete permission
 READ_OPERATIONS  = {"read_binary"}  # on-demand binary extraction
 
 # Binary extractor — same directory as this script
@@ -308,6 +316,40 @@ def _run_read_binary_operation(op: dict) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
+# Execute a single SharePoint move operation
+# ---------------------------------------------------------------------------
+
+def _run_move_operation(op: dict) -> tuple[bool, str]:
+    """Execute one move queue entry. Returns (success, output_text)."""
+    sp_path     = op.get("path", "").strip()
+    destination = op.get("destination", "").strip()
+
+    if not sp_path:
+        return False, "Missing 'path' field"
+    if not destination:
+        return False, "Missing 'destination' field for move operation"
+    if not SP_SCRIPT.exists():
+        return False, f"sharepoint.py not found at {SP_SCRIPT}"
+
+    cmd = ["python3", str(SP_SCRIPT), "move", sp_path, "--destination", destination]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        output  = (result.stdout + result.stderr).strip()
+        success = result.returncode == 0
+        return success, output
+    except subprocess.TimeoutExpired:
+        return False, "Timed out after 60 seconds"
+    except Exception as e:
+        return False, str(e)
+
+
+# ---------------------------------------------------------------------------
 # Execute a single SharePoint write operation
 # ---------------------------------------------------------------------------
 
@@ -374,7 +416,7 @@ def _write_results(results: list[dict]) -> None:
         "",
         f"_Last processed: {now}_",
         "",
-        "> This file shows write operation results only (create/update/append).",
+        "> This file shows write and move operation results (create/update/append/move).",
         "> To read SharePoint files, use the local cache:",
         "> `~/.openclaw/workspace/sharepoint-cache/<SP-path>`",
         "",
@@ -433,10 +475,13 @@ def main() -> None:
                     success, output = _run_read_binary_operation(op)
                 elif op_lower in WRITE_OPERATIONS:
                     success, output = _run_write_operation(op)
+                elif op_lower in MOVE_OPERATIONS:
+                    success, output = _run_move_operation(op)
                 else:
                     msg = (
                         f"Unknown operation '{op_name}'. "
                         f"Write operations: {', '.join(sorted(WRITE_OPERATIONS))}. "
+                        f"Move operations: {', '.join(sorted(MOVE_OPERATIONS))}. "
                         f"Read operations: {', '.join(sorted(READ_OPERATIONS))}. "
                         f"For plain text files, read directly from "
                         f"~/.openclaw/workspace/sharepoint-cache/<path>."

@@ -333,12 +333,19 @@ OUTPUT_CONTRACT = """
 You must respond with **valid JSON only** — no prose, no markdown fences, nothing else.
 
 IMPORTANT — SharePoint write model:
-The underlying system supports create, update, and append only.
-There is no true rename or delete capability.
-If a file needs to be at a canonical path, use action "recreate":
-  - "path" = the new canonical destination path
-  - "from_path" = the original file (it will NOT be deleted; it will be surfaced as ambiguous for manual review)
-Never assume a file has been removed. Surface the original in ambiguous if it should be cleaned up.
+The underlying system supports create, update, append, and move.
+There is NO delete capability — never attempt to delete files.
+
+Action guide:
+- "create"   — create a new file (provide "content")
+- "update"   — overwrite an existing file (provide "content")
+- "append"   — add content to an existing file (provide "content")
+- "move"     — relocate or rename a file/folder (provide "path" = source, "destination" = target full path; NO content needed)
+  - Use move to relocate loose/raw/source files into an Archive/ or Source/ subfolder
+  - Use move to rename a file to its correct canonical name
+  - Move is safe and reversible — prefer it over recreate when the source file simply needs relocating
+- "recreate" — create at canonical path when content also needs rewriting (provide "content" and "from_path")
+  - The from_path file will NOT be deleted; it is surfaced as ambiguous for manual review
 
 Output schema:
 {
@@ -347,9 +354,10 @@ Output schema:
   "assessment": "<one sentence summary of current state>",
   "safe_changes": [
     {
-      "action": "create|recreate|update|append",
-      "path": "<full SP path — destination>",
-      "content": "<full file content — required for all actions>",
+      "action": "create|recreate|update|append|move",
+      "path": "<full SP path — source for move, destination for all others>",
+      "destination": "<full SP destination path — required for move only>",
+      "content": "<full file content — required for create/recreate/update/append; omit for move>",
       "from_path": "<original path — required for recreate only>",
       "reason": "<brief reason>"
     }
@@ -685,6 +693,28 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
             queue.append(entry)
             submitted.append(entry)
 
+        elif action == "move":
+            destination = change.get("destination", "").strip()
+            if not destination:
+                decision["ambiguous"].append({
+                    "file": path,
+                    "reason": "Move requested but no destination provided — skipped",
+                })
+                continue
+            entry_id = f"sp-hk-{entity['name'][:8].replace(' ', '')}-{len(queue)+1}-{int(time.time())}"
+            entry = {
+                "id":            entry_id,
+                "operation":     "move",
+                "path":          path,
+                "destination":   destination,
+                "requested_at":  run_ts,
+                "_housekeeping": True,
+                "_reason":       change.get("reason", ""),
+                "_verified":     False,
+            }
+            queue.append(entry)
+            submitted.append(entry)
+
         elif action in ("create", "update", "append"):
             content = change.get("content", "")
             if not content:
@@ -705,7 +735,7 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
 
     if submitted:
         _write_queue(queue)
-        log(f"  Queued {len(submitted)} write(s) for {entity['name']} "
+        log(f"  Queued {len(submitted)} write(s)/move(s) for {entity['name']} "
             f"(pending verification — check SHAREPOINT_RESULT.md)")
 
     return submitted
