@@ -3,7 +3,7 @@
 SharePoint CRM housekeeping sweep for OpenClaw.
 
 Reads the local SharePoint cache, reviews each CRM entity (Account or Opportunity)
-using Claude via the Anthropic batch API (50% cost saving), and executes safe
+using the configured model via the Anthropic batch API (50% cost saving), and executes safe
 normalisation changes via the existing sharepoint-queue.json write path.
 
 Operating modes
@@ -75,7 +75,7 @@ CRM_OPPORTUNITIES_PREFIX = "Stackstone CRM/Opportunities"
 # Batch expiry — drop batches older than this (Anthropic expires after 24h)
 BATCH_MAX_AGE_HOURS = 23
 
-# Per-entity content limits sent to Claude (keeps tokens reasonable)
+# Per-entity content limits sent to the model (keeps tokens reasonable)
 CURRENT_MD_MAX_CHARS     = 4000
 ARTIFACT_MAX_CHARS       = 2000
 MAX_ARTIFACTS_IN_PROMPT  = 3
@@ -598,7 +598,7 @@ def poll_anthropic_batch(batch_id: str) -> tuple[str, dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 def parse_decision(response_text: str, entity_name: str) -> dict:
-    """Parse Claude's JSON response into a decision dict."""
+    """Parse the model's JSON response into a decision dict."""
     try:
         raw = response_text.strip()
         # Strip any accidental markdown fences
@@ -621,7 +621,7 @@ def parse_decision(response_text: str, entity_name: str) -> dict:
             "assessment": "Parse error",
             "safe_changes": [],
             "ambiguous": [],
-            "blocked": [{"reason": f"Could not parse Claude response: {e}"}],
+            "blocked": [{"reason": f"Could not parse model response: {e}"}],
             "current_md_status": "up_to_date",
         }
 
