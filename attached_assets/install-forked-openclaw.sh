@@ -782,13 +782,9 @@ fi
 # ---------------------------------------------------------------------------
 mkdir -p "$INTEGRATIONS_DST/youtube"
 deploy_integration "$INTEGRATIONS_SRC/youtube/transcript.py"       "$INTEGRATIONS_DST/youtube/transcript.py"
-if pip3 show youtube-transcript-api &>/dev/null 2>&1; then
-    info "youtube-transcript-api already installed"
-else
-    pip3 install --quiet --break-system-packages --timeout 120 youtube-transcript-api \
-        && info "youtube-transcript-api installed" \
-        || warn "youtube-transcript-api install failed — run manually: pip3 install --break-system-packages youtube-transcript-api"
-fi
+pip3 install --quiet --upgrade --break-system-packages --timeout 120 youtube-transcript-api \
+    && info "youtube-transcript-api installed/upgraded" \
+    || warn "youtube-transcript-api install failed — run manually: pip3 install --upgrade --break-system-packages youtube-transcript-api"
 
 # ---------------------------------------------------------------------------
 # GitHub helpers (repo creation + retroactive push)
@@ -1159,14 +1155,14 @@ if [ -f "$YT_POLL_SRC" ]; then
     ( crontab -l 2>/dev/null | grep -v "youtube/channel_poller.py"; echo "$YT_CRON" ) | crontab -
     info "YouTube channel poller cron installed: every 30 min (skips 06:xx-07:xx)"
 
-    # Ensure youtube-transcript-api is installed
-    if python3 -c "import youtube_transcript_api" 2>/dev/null; then
-        info "youtube-transcript-api: already installed"
+    # Ensure youtube-transcript-api is installed and current (list_transcripts requires >= 0.6)
+    if python3 -c "from youtube_transcript_api import YouTubeTranscriptApi; assert hasattr(YouTubeTranscriptApi, 'list_transcripts')" 2>/dev/null; then
+        info "youtube-transcript-api: OK (list_transcripts present)"
     else
-        info "Installing youtube-transcript-api..."
-        pip3 install --break-system-packages --quiet youtube-transcript-api 2>/dev/null && \
-            info "youtube-transcript-api installed" || \
-            warn "youtube-transcript-api install failed — install manually: pip3 install --break-system-packages youtube-transcript-api"
+        info "Installing/upgrading youtube-transcript-api..."
+        pip3 install --upgrade --break-system-packages --quiet youtube-transcript-api 2>/dev/null && \
+            info "youtube-transcript-api upgraded" || \
+            warn "youtube-transcript-api install failed — install manually: pip3 install --upgrade --break-system-packages youtube-transcript-api"
     fi
 else
     warn "YouTube channel poller not found at $YT_POLL_SRC — skipping"

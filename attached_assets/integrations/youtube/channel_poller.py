@@ -612,6 +612,11 @@ def submit_anthropic_batch(items: list[dict]) -> str | None:
     items: list of {"custom_id": str, "title": str, "transcript": str}
     Returns the batch_id string on success, None on failure.
     """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        log_err("ANTHROPIC_API_KEY not set — cannot submit batch. Add it to ~/.openclaw/.env")
+        return None
+
     model = os.environ.get("OPENCLAW_AI_MODEL", DEFAULT_AI_MODEL)
     requests_payload = []
     for item in items:
@@ -639,6 +644,14 @@ def submit_anthropic_batch(items: list[dict]) -> str | None:
             batch_id = data.get("id", "")
             log(f"  Batch submitted: {batch_id} ({len(items)} requests)")
             return batch_id
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:300]
+        except Exception:
+            pass
+        log_err(f"Batch submit failed: HTTP {e.code} — {body}")
+        return None
     except Exception as e:
         log_err(f"Batch submit failed: {e}")
         return None
@@ -907,6 +920,9 @@ def notify(msg: str) -> None:
     token, chat_id = _get_telegram_creds()
     if not token or not chat_id:
         return
+    # Telegram hard limit is 4096 chars
+    if len(msg) > 4096:
+        msg = msg[:4090] + "\n…"
     try:
         payload = json.dumps({"chat_id": chat_id, "text": msg}).encode()
         req = urllib.request.Request(
@@ -915,6 +931,13 @@ def notify(msg: str) -> None:
             headers={"Content-Type": "application/json"},
         )
         urllib.request.urlopen(req, timeout=10)
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:200]
+        except Exception:
+            pass
+        log_err(f"Telegram notify failed: HTTP {e.code} — {body}")
     except Exception as e:
         log_err(f"Telegram notify failed: {e}")
 
@@ -1155,6 +1178,112 @@ def process_single_video_url(url_or_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Backfill — reprocess stub files
+# ---------------------------------------------------------------------------
+
+def backfill_stubs(filenames: list[str]) -> None:
+    """
+    Reprocess a list of stub transcript files.
+
+    For each filename, reads the file from TRANSCRIPTS_DIR (or as a path),
+    extracts the YouTube video ID from the '- Source:' line, removes that ID
+    from processed state, then reprocesses the video in sync mode so a full
+    transcript and summary are written.
+
+    Usage:
+      python3 channel_poller.py --backfill "2026-04-14 - some-video.md" ...
+      python3 channel_poller.py --backfill-list /tmp/stubs.txt
+    """
+    _lock = acquire_lock()
+    state = load_state()
+
+    VID_RE = re.compile(
+        r'(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/shorts/)([A-Za-z0-9_-]{11})'
+    )
+
+    to_process: list[dict] = []
+    for fname in filenames:
+        p = Path(fname)
+        if not p.is_absolute():
+            p = TRANSCRIPTS_DIR / fname
+        if not p.exists():
+            log_err(f"Backfill: file not found — {p}")
+            continue
+
+        text = p.read_text(encoding="utf-8", errors="replace")
+
+        # Extract video ID from Source line
+        source_line = next(
+            (ln for ln in text.splitlines() if ln.strip().lower().startswith("- source:")), ""
+        )
+        m = VID_RE.search(source_line)
+        if not m:
+            log_err(f"Backfill: could not extract video ID from {p.name} — skipping")
+            continue
+        vid = m.group(1)
+
+        # Extract title from first heading
+        title_line = next(
+            (ln for ln in text.splitlines() if ln.startswith("# ")), ""
+        )
+        title = title_line.lstrip("# ").strip() or vid
+
+        # Extract published from Received line (best effort)
+        received_line = next(
+            (ln for ln in text.splitlines() if ln.strip().lower().startswith("- received:")), ""
+        )
+        published = ""
+        date_m = re.search(r'(\d{4}-\d{2}-\d{2})', received_line)
+        if date_m:
+            published = f"{date_m.group(1)}T00:00:00Z"
+
+        url = f"https://www.youtube.com/watch?v={vid}"
+        url_m = re.search(r'https://(?:www\.)?youtube\.com/\S+', source_line)
+        if url_m:
+            url = url_m.group(0).rstrip(")")
+
+        to_process.append({
+            "video_id":  vid,
+            "title":     title,
+            "published": published,
+            "url":       url,
+        })
+        log(f"Backfill: queued {vid} — {title!r}")
+
+    if not to_process:
+        log("Backfill: nothing to reprocess")
+        return
+
+    # Remove these IDs from processed state so the sync path will accept them
+    processed_ids = set(state.get("processed_ids", []))
+    pending_ids   = set(state.get("pending_video_ids", []))
+    for v in to_process:
+        processed_ids.discard(v["video_id"])
+        pending_ids.discard(v["video_id"])
+    state["processed_ids"]    = list(processed_ids)
+    state["pending_video_ids"] = list(pending_ids)
+    save_state(state)
+
+    log(f"Backfill: reprocessing {len(to_process)} video(s) in sync mode…")
+    written = 0
+    for video in to_process:
+        vid = video["video_id"]
+        try:
+            ok = process_video_sync(video, channel_label="backfill")
+            if ok:
+                written += 1
+        except Exception as e:
+            log_err(f"Backfill: failed for {vid}: {e}")
+        # Mark done regardless so we don't loop forever on hard failures
+        processed_ids.add(vid)
+        state["processed_ids"] = list(processed_ids)
+        save_state(state)
+        time.sleep(2)
+
+    log(f"Backfill complete — {written}/{len(to_process)} reprocessed")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -1169,10 +1298,35 @@ def main() -> None:
                             "Used by /yt-run in mgmt-bot for instant Telegram feedback. "
                             "Costs ~2x vs batch mode."
                         ))
+    parser.add_argument("--backfill", nargs="+", metavar="FILENAME",
+                        help=(
+                            "Reprocess a list of stub transcript filenames. "
+                            "Reads video ID from each file's Source line, then reruns "
+                            "transcript fetch + summary in sync mode. "
+                            "Filenames are relative to the transcripts directory."
+                        ))
+    parser.add_argument("--backfill-list", metavar="FILE",
+                        help=(
+                            "Path to a text file listing stub filenames to backfill, "
+                            "one per line. Alternative to passing filenames directly."
+                        ))
     args = parser.parse_args()
 
     if args.video:
         process_single_video_url(args.video)
+        return
+
+    # Backfill mode — reprocess a list of stub files
+    if args.backfill or args.backfill_list:
+        filenames: list[str] = list(args.backfill or [])
+        if args.backfill_list:
+            try:
+                extra = Path(args.backfill_list).read_text().splitlines()
+                filenames.extend(ln.strip() for ln in extra if ln.strip() and not ln.startswith("#"))
+            except Exception as e:
+                print(f"Could not read backfill list {args.backfill_list}: {e}", file=sys.stderr)
+                sys.exit(1)
+        backfill_stubs(filenames)
         return
 
     _lock = acquire_lock()
