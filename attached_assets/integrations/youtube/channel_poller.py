@@ -400,6 +400,13 @@ def fetch_transcript(video_id: str) -> tuple[str, str]:
 
     langs = [l.strip() for l in os.environ.get("YOUTUBE_POLL_LANGS", "en").split(",") if l.strip()]
 
+    if not hasattr(YouTubeTranscriptApi, "list_transcripts"):
+        log_err(
+            "youtube-transcript-api is too old — list_transcripts missing. "
+            "Fix: pip3 install --break-system-packages --upgrade youtube-transcript-api"
+        )
+        return "", "library version too old — upgrade youtube-transcript-api"
+
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
     except Exception as e:
@@ -833,12 +840,19 @@ def write_transcript_file(video: dict, transcript: str, source_info: str,
 
     raw_section = transcript.strip() if transcript.strip() else "_No transcript available for this video._"
 
+    # Derive a clear transcript status for the frontmatter
+    if transcript.strip():
+        transcript_status = f"full ({source_info})" if source_info else "full"
+    else:
+        transcript_status = f"unavailable — {source_info}" if source_info else "unavailable"
+
     content = (
         f"# {title}\n"
         f"- Received: {received_str} Europe/London\n"
         f"- Source: {url}\n"
         f"- Topic: {topic}\n"
         f"- Status: resource\n"
+        f"- Transcript: {transcript_status}\n"
         f"\n"
         f"## Useful Summary\n"
         f"{summary}\n"
@@ -1022,24 +1036,29 @@ def poll_channels(state: dict, sync: bool = False) -> int:
                 time.sleep(2)
             else:
                 # ── Batch path — collect transcript, queue for submission ─
-                log(f"  Fetching transcript for batch: {title!r}")
                 title = video.get("title", vid)
-                transcript, source_info = fetch_transcript(vid)
-                batch_queue.append({
-                    "custom_id":     f"vid_{vid}",
-                    "video_id":      vid,
-                    "title":         title,
-                    "transcript":    transcript,
-                    "source_info":   source_info,
-                    "published":     video.get("published", ""),
-                    "url":           video.get("url", f"https://www.youtube.com/watch?v={vid}"),
-                    "channel_label": label,
-                    # Pass through fields write_transcript_file needs
-                    "channel_id":    video.get("channel_id", ""),
-                })
-                pending_ids.add(vid)
-                claimed_ids.add(vid)
-                channel_new += 1
+                log(f"  Fetching transcript for batch: {title!r}")
+                try:
+                    transcript, source_info = fetch_transcript(vid)
+                    batch_queue.append({
+                        "custom_id":     f"vid_{vid}",
+                        "video_id":      vid,
+                        "title":         title,
+                        "transcript":    transcript,
+                        "source_info":   source_info,
+                        "published":     video.get("published", ""),
+                        "url":           video.get("url", f"https://www.youtube.com/watch?v={vid}"),
+                        "channel_label": label,
+                        # Pass through fields write_transcript_file needs
+                        "channel_id":    video.get("channel_id", ""),
+                    })
+                    pending_ids.add(vid)
+                    claimed_ids.add(vid)
+                    channel_new += 1
+                except Exception as e:
+                    log_err(f"  Failed collecting {vid} for batch ({title!r}): {e} — skipping")
+                    processed_ids.add(vid)
+                    claimed_ids.add(vid)
                 time.sleep(1)
 
         if channel_new == 0:
