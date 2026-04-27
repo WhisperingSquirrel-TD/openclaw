@@ -708,10 +708,10 @@ import json, pathlib, subprocess as _sp
 
 OLLAMA_KEY   = "ollama:ollama-local"   # must match apiKey in agents/main/agent/models.json
 OLLAMA_VALUE = {"apiKey": "ollama-local"}
-OLD_KEYS     = ["ollama", "ollama:default"]  # wrong formats from earlier installs
+OLD_KEYS     = ["ollama", "ollama:default", "ollama:ollama-local"]  # may be at wrong level
 
 def seed_auth_file(auth_file: pathlib.Path) -> str:
-    """Ensure auth_file exists and contains the correct ollama:ollama-local entry."""
+    """Ensure auth_file exists and contains the correct ollama:ollama-local entry inside profiles."""
     _sp.run(["sudo", "chattr", "-i", str(auth_file)], capture_output=True)
     if auth_file.exists():
         try:
@@ -720,18 +720,23 @@ def seed_auth_file(auth_file: pathlib.Path) -> str:
             return f"ERR  {auth_file}: could not parse — {e}"
         if not isinstance(data, dict):
             return f"SKIP {auth_file}: unexpected format"
+        # Remove any wrong top-level entries
         changed = any(data.pop(k, None) is not None for k in OLD_KEYS)
-        if OLLAMA_KEY in data:
+        # Ensure profiles dict exists
+        if "profiles" not in data or not isinstance(data["profiles"], dict):
+            data["profiles"] = {}
+        # Check if already correctly placed inside profiles
+        if OLLAMA_KEY in data["profiles"]:
             if changed:
                 auth_file.write_text(json.dumps(data, indent=2))
-            return f"OK   {auth_file}: ollama:ollama-local already present"
-        data[OLLAMA_KEY] = OLLAMA_VALUE
+            return f"OK   {auth_file}: ollama:ollama-local already present in profiles"
+        data["profiles"][OLLAMA_KEY] = OLLAMA_VALUE
         auth_file.write_text(json.dumps(data, indent=2))
-        return f"SET  {auth_file}: ollama:ollama-local entry added"
+        return f"SET  {auth_file}: ollama:ollama-local added to profiles"
     else:
         auth_file.parent.mkdir(parents=True, exist_ok=True)
-        auth_file.write_text(json.dumps({OLLAMA_KEY: OLLAMA_VALUE}, indent=2))
-        return f"CREATED {auth_file}: pre-seeded with ollama:ollama-local entry"
+        auth_file.write_text(json.dumps({"profiles": {OLLAMA_KEY: OLLAMA_VALUE}}, indent=2))
+        return f"CREATED {auth_file}: pre-seeded with ollama:ollama-local in profiles"
 
 agents_dir = pathlib.Path.home() / ".openclaw" / "agents"
 
@@ -2007,7 +2012,7 @@ import json, pathlib, subprocess as _sp
 
 OLLAMA_KEY   = "ollama:ollama-local"
 OLLAMA_VALUE = {"apiKey": "ollama-local"}
-OLD_KEYS     = ["ollama", "ollama:default"]
+OLD_KEYS     = ["ollama", "ollama:default", "ollama:ollama-local"]  # may be at wrong level
 
 def seed_auth_file(auth_file: pathlib.Path) -> str:
     _sp.run(["sudo", "chattr", "-i", str(auth_file)], capture_output=True)
@@ -2019,16 +2024,18 @@ def seed_auth_file(auth_file: pathlib.Path) -> str:
         if not isinstance(data, dict):
             return f"SKIP {auth_file}: unexpected format"
         changed = any(data.pop(k, None) is not None for k in OLD_KEYS)
-        if OLLAMA_KEY in data:
+        if "profiles" not in data or not isinstance(data["profiles"], dict):
+            data["profiles"] = {}
+        if OLLAMA_KEY in data["profiles"]:
             if changed:
                 auth_file.write_text(json.dumps(data, indent=2))
-            return f"OK   {auth_file}: ollama:ollama-local present"
-        data[OLLAMA_KEY] = OLLAMA_VALUE
+            return f"OK   {auth_file}: ollama:ollama-local present in profiles"
+        data["profiles"][OLLAMA_KEY] = OLLAMA_VALUE
         auth_file.write_text(json.dumps(data, indent=2))
-        return f"SET  {auth_file}: ollama:ollama-local entry added"
+        return f"SET  {auth_file}: ollama:ollama-local added to profiles"
     else:
         auth_file.parent.mkdir(parents=True, exist_ok=True)
-        auth_file.write_text(json.dumps({OLLAMA_KEY: OLLAMA_VALUE}, indent=2))
+        auth_file.write_text(json.dumps({"profiles": {OLLAMA_KEY: OLLAMA_VALUE}}, indent=2))
         return f"CREATED {auth_file}: pre-seeded"
 
 agents_dir = pathlib.Path.home() / ".openclaw" / "agents"
