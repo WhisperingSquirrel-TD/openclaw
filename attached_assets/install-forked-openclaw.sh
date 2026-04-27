@@ -674,6 +674,24 @@ print('Config updated successfully')
 sudo chattr +i "$CONFIG_FILE"
 info "Config updated and locked"
 
+# Pull required Ollama models if not already present.
+# llama3.2:3b  — L1 fallback model when cloud providers are rate-limited
+# nomic-embed-text — memory/vector search embeddings
+if command -v ollama &>/dev/null; then
+    for _model in "llama3.2:3b" "nomic-embed-text"; do
+        if ollama list 2>/dev/null | grep -q "^${_model}"; then
+            info "Ollama model already present: ${_model}"
+        else
+            info "Pulling Ollama model: ${_model} (this may take a few minutes)..."
+            ollama pull "${_model}" \
+                && info "Ollama model ready: ${_model}" \
+                || warn "Failed to pull ${_model} — run manually: ollama pull ${_model}"
+        fi
+    done
+else
+    warn "ollama not found — skipping model pull (install Ollama first)"
+fi
+
 # Seed Ollama auth entry in every agent's auth-profiles.json.
 # Ollama is a local provider that needs no real key, but OpenClaw's auth
 # store check fails with "No API key found for provider ollama" unless an
