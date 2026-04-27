@@ -680,41 +680,48 @@ info "Config updated and locked"
 # entry exists. This seeds the key as the literal string "ollama" (the
 # convention for keyless local providers). setdefault-style: never
 # overwrites a key that is already present.
+#
+# Also pre-creates ~/.openclaw/agents/main/agent/auth-profiles.json if it
+# does not exist yet — so Ollama auth is present before L1's first start,
+# not just on subsequent runs.
 warn "Seeding Ollama auth entry in agent auth stores..."
 python3 - <<'PYEOF'
-import json, pathlib, sys
+import json, pathlib, subprocess as _sp
 
-agents_dir = pathlib.Path.home() / ".openclaw" / "agents"
-if not agents_dir.exists():
-    print("  agents/ dir not found — skipping (will be created on first L1 start)")
-    sys.exit(0)
-
-import subprocess as _sp
-
-patched = 0
-for auth_file in agents_dir.glob("*/agent/auth-profiles.json"):
-    try:
-        # Unlock immutable flag if set — auth-profiles.json must remain
-        # writable at runtime so OpenClaw can update tokens; do NOT re-lock.
-        _sp.run(["sudo", "chattr", "-i", str(auth_file)], capture_output=True)
-        data = json.loads(auth_file.read_text())
+def seed_auth_file(auth_file: pathlib.Path) -> str:
+    """Ensure auth_file exists and contains an ollama key. Returns status string."""
+    _sp.run(["sudo", "chattr", "-i", str(auth_file)], capture_output=True)
+    if auth_file.exists():
+        try:
+            data = json.loads(auth_file.read_text())
+        except Exception as e:
+            return f"ERR  {auth_file}: could not parse — {e}"
         if not isinstance(data, dict):
-            print(f"  SKIP {auth_file}: unexpected format")
-            continue
+            return f"SKIP {auth_file}: unexpected format"
         if "ollama" in data:
-            print(f"  OK   {auth_file}: ollama already present")
-            continue
+            return f"OK   {auth_file}: ollama already present"
         data["ollama"] = "ollama"
         auth_file.write_text(json.dumps(data, indent=2))
-        print(f"  SET  {auth_file}: ollama entry added")
-        patched += 1
+        return f"SET  {auth_file}: ollama entry added"
+    else:
+        auth_file.parent.mkdir(parents=True, exist_ok=True)
+        auth_file.write_text(json.dumps({"ollama": "ollama"}, indent=2))
+        return f"CREATED {auth_file}: pre-seeded with ollama entry"
+
+agents_dir = pathlib.Path.home() / ".openclaw" / "agents"
+
+# Always ensure the main agent auth file exists
+main_auth = agents_dir / "main" / "agent" / "auth-profiles.json"
+print(f"  {seed_auth_file(main_auth)}")
+
+# Also patch any other agent auth files that already exist
+for auth_file in agents_dir.glob("*/agent/auth-profiles.json"):
+    if auth_file == main_auth:
+        continue  # already handled above
+    try:
+        print(f"  {seed_auth_file(auth_file)}")
     except Exception as e:
         print(f"  ERR  {auth_file}: {e}")
-
-if patched == 0:
-    print("  All agent auth stores already have ollama entry — nothing to do")
-else:
-    print(f"  Patched {patched} auth store(s)")
 PYEOF
 info "Ollama auth seeding complete"
 
@@ -1965,3 +1972,45 @@ if systemctl --user is-active openclaw-mgmt-bot.service >/dev/null 2>&1; then
 else
     info "mgmt-bot is not running — start it with: systemctl --user start openclaw-mgmt-bot.service"
 fi
+
+# ---------------------------------------------------------------------------
+# Final Ollama auth check — re-run seeding at end of script so any agent
+# directories created during this install run also get the Ollama entry.
+# ---------------------------------------------------------------------------
+python3 - <<'PYEOF'
+import json, pathlib, subprocess as _sp
+
+def seed_auth_file(auth_file: pathlib.Path) -> str:
+    _sp.run(["sudo", "chattr", "-i", str(auth_file)], capture_output=True)
+    if auth_file.exists():
+        try:
+            data = json.loads(auth_file.read_text())
+        except Exception:
+            return f"ERR  {auth_file}: could not parse"
+        if not isinstance(data, dict):
+            return f"SKIP {auth_file}: unexpected format"
+        if "ollama" in data:
+            return f"OK   {auth_file}: ollama present"
+        data["ollama"] = "ollama"
+        auth_file.write_text(json.dumps(data, indent=2))
+        return f"SET  {auth_file}: ollama entry added"
+    else:
+        auth_file.parent.mkdir(parents=True, exist_ok=True)
+        auth_file.write_text(json.dumps({"ollama": "ollama"}, indent=2))
+        return f"CREATED {auth_file}: pre-seeded"
+
+agents_dir = pathlib.Path.home() / ".openclaw" / "agents"
+main_auth  = agents_dir / "main" / "agent" / "auth-profiles.json"
+result = seed_auth_file(main_auth)
+if not result.startswith("OK"):
+    print(f"  [final ollama check] {result}")
+for auth_file in agents_dir.glob("*/agent/auth-profiles.json"):
+    if auth_file == main_auth:
+        continue
+    try:
+        r = seed_auth_file(auth_file)
+        if not r.startswith("OK"):
+            print(f"  [final ollama check] {r}")
+    except Exception as e:
+        print(f"  [final ollama check] ERR {auth_file}: {e}")
+PYEOF
