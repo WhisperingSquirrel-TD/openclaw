@@ -706,12 +706,12 @@ warn "Seeding Ollama auth entry in agent auth stores..."
 python3 - <<'PYEOF'
 import json, pathlib, subprocess as _sp
 
-OLLAMA_KEY   = "ollama:default"
-OLLAMA_VALUE = {"apiKey": "ollama"}
-OLD_KEY      = "ollama"  # wrong format from earlier installs — remove if found
+OLLAMA_KEY   = "ollama:ollama-local"   # must match apiKey in agents/main/agent/models.json
+OLLAMA_VALUE = {"apiKey": "ollama-local"}
+OLD_KEYS     = ["ollama", "ollama:default"]  # wrong formats from earlier installs
 
 def seed_auth_file(auth_file: pathlib.Path) -> str:
-    """Ensure auth_file exists and contains the correct ollama:default entry."""
+    """Ensure auth_file exists and contains the correct ollama:ollama-local entry."""
     _sp.run(["sudo", "chattr", "-i", str(auth_file)], capture_output=True)
     if auth_file.exists():
         try:
@@ -720,21 +720,18 @@ def seed_auth_file(auth_file: pathlib.Path) -> str:
             return f"ERR  {auth_file}: could not parse — {e}"
         if not isinstance(data, dict):
             return f"SKIP {auth_file}: unexpected format"
-        changed = False
-        if OLD_KEY in data and OLD_KEY != OLLAMA_KEY:
-            del data[OLD_KEY]
-            changed = True
+        changed = any(data.pop(k, None) is not None for k in OLD_KEYS)
         if OLLAMA_KEY in data:
             if changed:
                 auth_file.write_text(json.dumps(data, indent=2))
-            return f"OK   {auth_file}: ollama:default already present"
+            return f"OK   {auth_file}: ollama:ollama-local already present"
         data[OLLAMA_KEY] = OLLAMA_VALUE
         auth_file.write_text(json.dumps(data, indent=2))
-        return f"SET  {auth_file}: ollama:default entry added"
+        return f"SET  {auth_file}: ollama:ollama-local entry added"
     else:
         auth_file.parent.mkdir(parents=True, exist_ok=True)
         auth_file.write_text(json.dumps({OLLAMA_KEY: OLLAMA_VALUE}, indent=2))
-        return f"CREATED {auth_file}: pre-seeded with ollama:default entry"
+        return f"CREATED {auth_file}: pre-seeded with ollama:ollama-local entry"
 
 agents_dir = pathlib.Path.home() / ".openclaw" / "agents"
 
@@ -2008,9 +2005,9 @@ fi
 python3 - <<'PYEOF'
 import json, pathlib, subprocess as _sp
 
-OLLAMA_KEY   = "ollama:default"
-OLLAMA_VALUE = {"apiKey": "ollama"}
-OLD_KEY      = "ollama"
+OLLAMA_KEY   = "ollama:ollama-local"
+OLLAMA_VALUE = {"apiKey": "ollama-local"}
+OLD_KEYS     = ["ollama", "ollama:default"]
 
 def seed_auth_file(auth_file: pathlib.Path) -> str:
     _sp.run(["sudo", "chattr", "-i", str(auth_file)], capture_output=True)
@@ -2021,17 +2018,14 @@ def seed_auth_file(auth_file: pathlib.Path) -> str:
             return f"ERR  {auth_file}: could not parse"
         if not isinstance(data, dict):
             return f"SKIP {auth_file}: unexpected format"
-        changed = False
-        if OLD_KEY in data and OLD_KEY != OLLAMA_KEY:
-            del data[OLD_KEY]
-            changed = True
+        changed = any(data.pop(k, None) is not None for k in OLD_KEYS)
         if OLLAMA_KEY in data:
             if changed:
                 auth_file.write_text(json.dumps(data, indent=2))
-            return f"OK   {auth_file}: ollama:default present"
+            return f"OK   {auth_file}: ollama:ollama-local present"
         data[OLLAMA_KEY] = OLLAMA_VALUE
         auth_file.write_text(json.dumps(data, indent=2))
-        return f"SET  {auth_file}: ollama:default entry added"
+        return f"SET  {auth_file}: ollama:ollama-local entry added"
     else:
         auth_file.parent.mkdir(parents=True, exist_ok=True)
         auth_file.write_text(json.dumps({OLLAMA_KEY: OLLAMA_VALUE}, indent=2))
