@@ -806,8 +806,68 @@ After the next `bash ~/install-forked-openclaw.sh` these seven will be applied a
 |------|--------|-------------|
 | Desktop taskbar (LXPanel) | Unresolved — terminal and file-manager buttons disappeared after reboot | `lxpanelctl restart` to reload panel; if buttons still missing: right-click panel → Add/Remove Panel Items → add Application Launch Bar → add lxterminal and pcmanfm |
 | Ollama local LLM | **RESOLVED 2026-04-22** — `llama3.2:3b` (2GB) pulled and verified working; `ollama/llama3.2:3b` added to `agents.defaults.model.fallbacks` in `openclaw.json`; Ollama running as systemd service (`sudo systemctl enable/start ollama`). Tested: responds correctly at ~2 tok/s CPU-only. gemma4:e2b removed (7.2GB exceeded 6.1GB available RAM). | No further action needed |
+| Ollama auth "No API key found" | **RESOLVED 2026-04-27** — see full playbook below | `~/.config/environment.d/openclaw-ollama.conf` with `OLLAMA_API_KEY=ollama` |
 | Discord "28 commands missing descriptions" 400 | **Root cause confirmed 2026-04-22** — workspace skill commands with empty SKILL.md descriptions registered as Discord slash commands with empty description field. Defensive `sanitizeDiscordDescription()` guard added to source — will suppress on next `git pull && bash ~/install-forked-openclaw.sh`. Recent errors (12:49, 13:10) are separate network issue (`EAI_AGAIN` DNS, self-resolving). | Run reinstall to apply guard |
 | `apply_patch`/`cron` alsoAllow warnings | Baked into OpenClaw's `coding` profile — not our config | Cannot fix without a plugin override; warnings are cosmetic |
+
+---
+
+### OpenClaw auth debugging playbook (2026-04-27)
+
+**Symptom:** L1 silent — `⚠️ Agent failed before reply: All models failed (N): ... No API key found for provider "ollama"`
+
+**Quick triage steps (in order):**
+
+1. **Check gateway is running** — `openclaw logs --follow`. If "Gateway not reachable": run `openclaw doctor` → say Yes to "Start gateway service now?"
+2. **Check provider cooldowns** — shown in `openclaw doctor` output. openai-codex rate-limits clear within ~40 min automatically, no action needed.
+3. **Check Ollama auth** — see fix below.
+
+**Ollama auth fix (the correct one):**
+
+OpenClaw resolves provider auth via three paths in order:
+1. `auth-profiles.json` — entries must be inside `data["profiles"]` dict, AND a matching top-level key at root level with credentials. Profiles is a **list** of name strings, not a dict — the actual credential objects ARE top-level keys.
+2. **Environment variable** — `OLLAMA_API_KEY` env var (simplest, most reliable)
+3. `models.json` custom `apiKey` field — unreliable, `normalizeOptionalSecretInput` may return null
+
+**The fix that actually works:**
+```bash
+mkdir -p ~/.config/environment.d/
+echo 'OLLAMA_API_KEY=ollama' > ~/.config/environment.d/openclaw-ollama.conf
+systemctl --user daemon-reload
+systemctl --user restart openclaw-gateway.service openclaw-mgmt-bot.service
+```
+This persists across reboots. The value `"ollama"` can be any non-empty string — Ollama doesn't validate it.
+
+**auth-profiles.json structure (for reference):**
+```json
+{
+  "version": 1,
+  "profiles": ["anthropic:default", "openai-codex:default"],  // LIST of active profile names
+  "anthropic:default": { "accessToken": "...", ... },         // top-level credential objects
+  "openai-codex:default": { ... },
+  "lastGood": ["anthropic"],
+  "usageStats": { ... }
+}
+```
+The `profiles` list is what OpenClaw scans. Credentials for each profile are stored as **top-level keys** (same name). Our earlier failed attempts wrote `"ollama:ollama-local"` either at top-level only (not in the list) or inside a `profiles` dict (but profiles is a list, not a dict). The env var approach bypasses all of this.
+
+**Source file for auth logic:**
+`~/openclaw/node_modules/.pnpm/openclaw@2026.2.24_*/node_modules/openclaw/dist/auth-profiles-BLqWs5Ho.js`
+Search for `resolveEnvApiKey` and `getCustomProviderApiKey` to trace the lookup chain.
+
+**auth-profiles.json is overwritten on every gateway start** — never manually edit it while the gateway or mgmt-bot is running. Always: stop both services → edit → start both.
+
+**Services to stop/start:**
+```bash
+systemctl --user stop openclaw-mgmt-bot.service openclaw-gateway.service
+# ... edit ...
+systemctl --user start openclaw-gateway.service openclaw-mgmt-bot.service
+```
+
+**Logs location:** `/tmp/openclaw/openclaw-YYYY-MM-DD.log` (NOT journalctl — no journal files exist)
+```bash
+grep -i "ollama\|error\|failed" /tmp/openclaw/openclaw-$(date +%Y-%m-%d).log | tail -30
+```
 
 ---
 
