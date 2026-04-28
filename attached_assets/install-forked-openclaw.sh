@@ -1199,6 +1199,17 @@ if [ -f "$SS_ENQ_SRC" ]; then
     SS_ENQ_CRON="*/2 * * * * python3 $SS_ENQ_DST >> $SS_ENQ_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "stackstone/enquiry_poller.py"; echo "$SS_ENQ_CRON" ) | crontab -
     info "Stackstone enquiry poller cron installed: runs every 2 minutes"
+
+    # Pre-create the workspace file so L1 never sees it as missing on first run.
+    # The poller will overwrite this with real data on its first successful poll.
+    SS_ENQ_MD="$HOME/.openclaw/workspace/STACKSTONE_ENQUIRIES.md"
+    mkdir -p "$HOME/.openclaw/workspace"
+    if [ ! -f "$SS_ENQ_MD" ]; then
+        printf '# Stackstone Enquiries\n\n_No enquiries recorded yet — poller is active._\n' > "$SS_ENQ_MD"
+        info "Created placeholder: $SS_ENQ_MD"
+    else
+        info "Workspace file already exists: $SS_ENQ_MD"
+    fi
 else
     warn "Stackstone enquiry poller not found at $SS_ENQ_SRC — skipping"
 fi
