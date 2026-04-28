@@ -760,6 +760,45 @@ for auth_file in agents_dir.glob("*/agent/auth-profiles.json"):
 PYEOF
 info "Ollama auth seeding complete"
 
+# ---------------------------------------------------------------------------
+# Patch Ollama model context window in agents/main/agent/models.json
+#
+# llama3.2:3b at its default 131072-token context window requires ~15.9 GiB
+# of KV cache — more than the Pi 4's 8 GB RAM. 16384 tokens costs ~2 GiB of
+# KV cache, leaving ~3 GiB headroom alongside the 2 GB model weight and OS.
+# This gives L1 ~10,000 usable tokens after the soul.md system prompt (~6000
+# tokens). Codex and Anthropic are built-in providers unaffected by this file.
+# ---------------------------------------------------------------------------
+warn "Patching Ollama models.json context window for Pi 4 memory limits..."
+python3 - <<'PYEOF'
+import json, pathlib
+
+OLLAMA_CONTEXT  = 16384
+OLLAMA_MAX_TOKS = 2048
+
+models_file = pathlib.Path.home() / ".openclaw/agents/main/agent/models.json"
+if not models_file.exists():
+    print(f"  SKIP {models_file}: not found (will be created by OpenClaw on first run)")
+else:
+    try:
+        d = json.loads(models_file.read_text())
+        changed = False
+        for model in d.get("providers", {}).get("ollama", {}).get("models", []):
+            old_ctx = model.get("contextWindow")
+            old_max = model.get("maxTokens")
+            if old_ctx != OLLAMA_CONTEXT or old_max != OLLAMA_MAX_TOKS:
+                model["contextWindow"] = OLLAMA_CONTEXT
+                model["maxTokens"]     = OLLAMA_MAX_TOKS
+                print(f"  SET  {model['id']}: contextWindow {old_ctx}→{OLLAMA_CONTEXT}, maxTokens {old_max}→{OLLAMA_MAX_TOKS}")
+                changed = True
+            else:
+                print(f"  OK   {model['id']}: contextWindow already {OLLAMA_CONTEXT}")
+        if changed:
+            models_file.write_text(json.dumps(d, indent=2))
+    except Exception as e:
+        print(f"  ERR  {models_file}: {e}")
+PYEOF
+
 # Step 11: Deploy integration scripts from repo
 echo ""
 warn "Deploying integration scripts..."
