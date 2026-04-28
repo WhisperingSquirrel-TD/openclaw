@@ -702,6 +702,11 @@ fi
 # Also pre-creates ~/.openclaw/agents/main/agent/auth-profiles.json if it
 # does not exist yet — so Ollama auth is present before L1's first start,
 # not just on subsequent runs.
+warn "Setting OLLAMA_API_KEY for systemd user services (resolveEnvApiKey path)..."
+mkdir -p "${HOME}/.config/environment.d"
+echo 'OLLAMA_API_KEY=ollama' > "${HOME}/.config/environment.d/openclaw-ollama.conf"
+systemctl --user daemon-reload || true
+
 warn "Seeding Ollama auth entry in agent auth stores..."
 python3 - <<'PYEOF'
 import json, pathlib, subprocess as _sp
