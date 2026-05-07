@@ -704,7 +704,11 @@ fi
 # not just on subsequent runs.
 warn "Setting OLLAMA_API_KEY for systemd user services (resolveEnvApiKey path)..."
 mkdir -p "${HOME}/.config/environment.d"
-echo 'OLLAMA_API_KEY=ollama' > "${HOME}/.config/environment.d/openclaw-ollama.conf"
+# OLLAMA_MAX_CONTEXT_WINDOW caps the context window written to models.json on every
+# gateway start.  llama3.2:3b reports 131072 (needs ~15.9 GiB) which OOMs a Pi 4 8 GB.
+# 16384 tokens uses ~2 GiB and fits comfortably alongside the gateway.
+printf 'OLLAMA_API_KEY=ollama\nOLLAMA_MAX_CONTEXT_WINDOW=16384\n' \
+    > "${HOME}/.config/environment.d/openclaw-ollama.conf"
 systemctl --user daemon-reload || true
 
 warn "Seeding Ollama auth entry in agent auth stores..."
@@ -2107,47 +2111,4 @@ for auth_file in agents_dir.glob("*/agent/auth-profiles.json"):
             print(f"  [final ollama check] {r}")
     except Exception as e:
         print(f"  [final ollama check] ERR {auth_file}: {e}")
-PYEOF
-
-# ---------------------------------------------------------------------------
-# Final Ollama context window patch — re-run AFTER gateway start.
-# On a fresh install OpenClaw creates models.json on first startup (with the
-# default 131072 context window). We wait briefly then patch again to ensure
-# the Pi-safe 16384 limit is always in effect, even after a clean pull.
-# ---------------------------------------------------------------------------
-warn "Final Ollama context window patch (post-start, handles fresh installs)..."
-sleep 8
-python3 - <<'PYEOF'
-import json, pathlib, time
-
-OLLAMA_CONTEXT  = 16384
-OLLAMA_MAX_TOKS = 2048
-models_file = pathlib.Path.home() / ".openclaw/agents/main/agent/models.json"
-
-# Wait up to 20 s for the gateway to create models.json on a fresh install
-for _ in range(4):
-    if models_file.exists():
-        break
-    time.sleep(5)
-
-if not models_file.exists():
-    print(f"  SKIP {models_file}: still not found after waiting — will fix on next run")
-else:
-    try:
-        d = json.loads(models_file.read_text())
-        changed = False
-        for model in d.get("providers", {}).get("ollama", {}).get("models", []):
-            old_ctx = model.get("contextWindow")
-            old_max = model.get("maxTokens")
-            if old_ctx != OLLAMA_CONTEXT or old_max != OLLAMA_MAX_TOKS:
-                model["contextWindow"] = OLLAMA_CONTEXT
-                model["maxTokens"]     = OLLAMA_MAX_TOKS
-                print(f"  SET  {model['id']}: contextWindow {old_ctx}→{OLLAMA_CONTEXT}, maxTokens {old_max}→{OLLAMA_MAX_TOKS}")
-                changed = True
-            else:
-                print(f"  OK   {model['id']}: contextWindow already {OLLAMA_CONTEXT}")
-        if changed:
-            models_file.write_text(json.dumps(d, indent=2))
-    except Exception as e:
-        print(f"  ERR  {models_file}: {e}")
 PYEOF

@@ -156,6 +156,15 @@ const OLLAMA_SHOW_CONCURRENCY = 8;
 const OLLAMA_SHOW_MAX_MODELS = 200;
 const OLLAMA_DEFAULT_CONTEXT_WINDOW = 128000;
 const OLLAMA_DEFAULT_MAX_TOKENS = 8192;
+// OLLAMA_MAX_CONTEXT_WINDOW: hard cap on the context window written to models.json.
+// Set this env var on memory-constrained devices (e.g. Pi 4 8GB) to prevent OOM.
+// llama3.2:3b reports 131072 which needs ~15.9 GiB KV cache — fatal on 8 GB RAM.
+const OLLAMA_MAX_CONTEXT_WINDOW: number | undefined = (() => {
+  const raw = process.env.OLLAMA_MAX_CONTEXT_WINDOW;
+  if (!raw) return undefined;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+})();
 const OLLAMA_DEFAULT_COST = {
   input: 0,
   output: 0,
@@ -323,7 +332,12 @@ async function discoverOllamaModels(
             reasoning: isReasoning,
             input: ["text"],
             cost: OLLAMA_DEFAULT_COST,
-            contextWindow: contextWindow ?? OLLAMA_DEFAULT_CONTEXT_WINDOW,
+            contextWindow: (() => {
+              const raw = contextWindow ?? OLLAMA_DEFAULT_CONTEXT_WINDOW;
+              return OLLAMA_MAX_CONTEXT_WINDOW !== undefined
+                ? Math.min(raw, OLLAMA_MAX_CONTEXT_WINDOW)
+                : raw;
+            })(),
             maxTokens: OLLAMA_DEFAULT_MAX_TOKENS,
           } satisfies ModelDefinitionConfig;
         }),
