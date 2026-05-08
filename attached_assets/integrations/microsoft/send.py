@@ -8,19 +8,26 @@ auth required. Uses the same token file as poll.py and refreshes automatically.
 Usage:
   send.py <to> <from_name> <subject> <body> [reply_to_message_id]
 
-  to                  Recipient email address
+  to                  Recipient email address(es) — comma-separated for
+                      multiple recipients (all on the same email, not separate)
   from_name           Display name for the From field (e.g. "PA to Tom Dean")
   subject             Email subject
   body                Email body (plain text; use \\n for newlines)
   reply_to_message_id (optional) Microsoft message ID to thread the reply to
 
 Options:
-  --account <slug>    Account slug to locate the token file (e.g. "assistant",
-                      "microsoft")
-  --token-file <path> Explicit path to OAuth token JSON file
-  --whoami            Print the authenticated email address for the resolved
-                      token file and exit. Use to verify which account a token
-                      file actually belongs to.
+  --account <slug>         Account slug to locate the token file (e.g. "assistant",
+                           "microsoft")
+  --token-file <path>      Explicit path to OAuth token JSON file
+  --recipients-file <path> Read To: recipients from this file — one per line or
+                           comma-separated. Overrides the <to> positional arg.
+                           All addresses end up on the SAME email (not separate sends).
+  --subject-file <path>    Read subject from this file (overrides subject positional arg)
+  --body-file <path>       Read body from this file (overrides body positional arg).
+                           Avoids passing large/sensitive content as a shell argument.
+  --whoami                 Print the authenticated email address for the resolved
+                           token file and exit. Use to verify which account a token
+                           file actually belongs to.
 
 Exit codes:
   0  Success
@@ -40,7 +47,9 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="OpenClaw Microsoft Graph email sender")
-    p.add_argument("to",        nargs="?", default=None, help="Recipient email address")
+    p.add_argument("to",        nargs="?", default=None,
+                   help="Recipient email address(es) — comma-separated for multiple "
+                        "(overridden by --recipients-file if given)")
     p.add_argument("from_name", nargs="?", default=None, help="Display name for the From field")
     p.add_argument("subject",   nargs="?", default="",
                    help="Email subject (overridden by --subject-file if given)")
@@ -48,18 +57,31 @@ def parse_args() -> argparse.Namespace:
                    help="Email body plain text, \\n for newlines (overridden by --body-file if given)")
     p.add_argument("reply_to_message_id", nargs="?", default=None,
                    help="Microsoft message ID to thread as a reply")
-    p.add_argument("--account",      default=None,
+    p.add_argument("--account",          default=None,
                    help="Account slug (used to locate token file)")
-    p.add_argument("--token-file",   default=None,
+    p.add_argument("--token-file",       default=None,
                    help="Explicit path to OAuth token JSON file")
-    p.add_argument("--whoami",       action="store_true",
+    p.add_argument("--whoami",           action="store_true",
                    help="Print the authenticated email for the resolved token and exit")
-    p.add_argument("--subject-file", default=None,
+    p.add_argument("--recipients-file",  default=None,
+                   help="Read To: recipients from this file — one per line or comma-separated. "
+                        "All addresses go on ONE email. Overrides <to> positional arg.")
+    p.add_argument("--subject-file",     default=None,
                    help="Read subject from this file (overrides subject positional arg)")
-    p.add_argument("--body-file",    default=None,
+    p.add_argument("--body-file",        default=None,
                    help="Read body from this file (overrides body positional arg). "
                         "Avoids passing large/sensitive content as a shell argument.")
     return p.parse_args()
+
+
+def parse_recipients(raw: str) -> list[str]:
+    """Parse a comma- or newline-separated list of email addresses."""
+    addresses = []
+    for part in raw.replace("\n", ",").split(","):
+        addr = part.strip()
+        if addr and "@" in addr:
+            addresses.append(addr)
+    return addresses
 
 
 def resolve_token_file(args: argparse.Namespace) -> Path:
@@ -132,7 +154,7 @@ def _load_json_resilient(path: Path) -> dict:
             pass
         raise ValueError(
             f"Token file unreadable and cannot be auto-recovered: {path}\n"
-            f"Error: {first_err}\nDelete the file and re-authenticate."
+            f"Error: {first_err}\nDelete the file and re-recovered."
         ) from first_err
 
 
@@ -205,27 +227,31 @@ def whoami(access_token: str) -> None:
 
 def send_email(
     access_token: str,
-    to: str,
+    recipients: list[str],
     from_name: str,
     subject: str,
     body: str,
     reply_to_message_id: str | None = None,
 ) -> None:
+    if not recipients:
+        print("ERROR: no valid recipient addresses found", file=sys.stderr)
+        sys.exit(3)
+
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type":  "application/json",
     }
 
-    # Build the message payload
+    # All recipients go on ONE email — never loop and send separately.
+    to_recipients = [{"emailAddress": {"address": addr}} for addr in recipients]
+
     message: dict = {
         "subject": subject,
         "body": {
             "contentType": "Text",
             "content":      body.replace("\\n", "\n"),
         },
-        "toRecipients": [
-            {"emailAddress": {"address": to}},
-        ],
+        "toRecipients": to_recipients,
     }
 
     if reply_to_message_id:
@@ -241,9 +267,9 @@ def send_email(
         # Update the draft with our content
         update_url = f"{GRAPH_BASE}/me/messages/{draft_id}"
         resp = requests.patch(update_url, headers=headers, json={
-            "subject": subject,
-            "body": message["body"],
-            "toRecipients": message["toRecipients"],
+            "subject":      subject,
+            "body":         message["body"],
+            "toRecipients": to_recipients,
         }, timeout=15)
         if not resp.ok:
             print(f"Draft update failed: {resp.status_code} {resp.text}", file=sys.stderr)
@@ -263,7 +289,8 @@ def send_email(
         )
 
     if resp.status_code in (200, 202, 204):
-        print(f"Email sent to {to}")
+        to_display = ", ".join(recipients)
+        print(f"Email sent to: {to_display}")
     else:
         print(f"Send failed: {resp.status_code} {resp.text}", file=sys.stderr)
         sys.exit(2)
@@ -285,13 +312,26 @@ def main() -> None:
         whoami(access_token)
         sys.exit(0)
 
-    if not args.to or not args.from_name:
-        print("ERROR: to and from_name are required when sending email", file=sys.stderr)
+    if not args.from_name:
+        print("ERROR: from_name is required when sending email", file=sys.stderr)
+        sys.exit(3)
+
+    # Resolve recipients — file takes priority over positional arg.
+    recipient_raw = args.to or ""
+    if args.recipients_file:
+        try:
+            recipient_raw = Path(args.recipients_file).read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"ERROR: Cannot read --recipients-file {args.recipients_file}: {e}", file=sys.stderr)
+            sys.exit(3)
+
+    recipients = parse_recipients(recipient_raw)
+    if not recipients:
+        print("ERROR: at least one recipient is required (positional <to> or --recipients-file)",
+              file=sys.stderr)
         sys.exit(3)
 
     # Resolve subject and body — file flags take priority over positional args.
-    # This avoids embedding large/sensitive content in the shell command itself,
-    # which can trigger security policy pattern matches on the gateway.
     subject = args.subject
     if args.subject_file:
         try:
@@ -317,7 +357,7 @@ def main() -> None:
 
     send_email(
         access_token,
-        to=args.to,
+        recipients=recipients,
         from_name=args.from_name,
         subject=subject,
         body=body,
