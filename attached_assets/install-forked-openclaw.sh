@@ -964,6 +964,27 @@ else
     warn "daily-reset.py not found at $RESET_SRC — skipping"
 fi
 
+# ── Codex token keeper — proactive OAuth refresh every 20 minutes ─────────────
+# The openai-codex access token expires every ~1 hour. OpenClaw only refreshes
+# it on-demand (mid-conversation). If the Pi's network blips at that exact
+# moment the refresh fails permanently, requiring full re-auth.
+# This keeper probes the token every 20 minutes so it is refreshed against a
+# stable idle connection rather than during a live user request.
+CODEX_KEEPER_SRC="$HOME/openclaw/attached_assets/integrations/provider-switch/codex-token-keeper.sh"
+CODEX_KEEPER_DST="$HOME/.openclaw/integrations/provider-switch/codex-token-keeper.sh"
+CODEX_KEEPER_LOG="$HOME/.openclaw/workspace/memory/codex-token-keeper-log.txt"
+
+if [ -f "$CODEX_KEEPER_SRC" ]; then
+    mkdir -p "$(dirname "$CODEX_KEEPER_DST")"
+    ln -sf "$CODEX_KEEPER_SRC" "$CODEX_KEEPER_DST"
+    chmod +x "$CODEX_KEEPER_DST"
+    CODEX_KEEPER_CRON="*/20 * * * * bash $CODEX_KEEPER_DST >> $CODEX_KEEPER_LOG 2>&1"
+    ( crontab -l 2>/dev/null | grep -v "codex-token-keeper.sh"; echo "$CODEX_KEEPER_CRON" ) | crontab -
+    info "Codex token keeper cron installed: every 20 minutes → proactive OAuth refresh"
+else
+    warn "codex-token-keeper.sh not found at $CODEX_KEEPER_SRC — skipping"
+fi
+
 # ── CRM lead importer (no LLM, replaces agentTurn cron) ──────────────────────
 # Scheduled at 08:00 — after the prospector runs at 06:00, before Garmin at 09:00.
 # NOT 06:xx (prospector/CRM cron) and NOT 07:xx (another job runs there).
