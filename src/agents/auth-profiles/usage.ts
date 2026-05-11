@@ -256,11 +256,14 @@ export function clearProviderCooldowns(
     if (!stats) {
       continue;
     }
+    // Match by explicit provider field when present (fully structured profile),
+    // or by the profileId prefix (e.g. "ollama:ollama-local" → "ollama") for
+    // profiles seeded without a provider field (e.g. the Ollama API-key entry
+    // written by the install script as { "apiKey": "ollama-local" }).
     const profile = store.profiles[profileId];
-    if (!profile) {
-      continue;
-    }
-    if (normalizeProviderId(profile.provider) !== normalizedProvider) {
+    const profileProvider =
+      profile?.provider?.trim() || profileId.split(":")[0];
+    if (normalizeProviderId(profileProvider) !== normalizedProvider) {
       continue;
     }
     if (stats.cooldownUntil !== undefined || stats.errorCount !== undefined) {
