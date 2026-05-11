@@ -67,6 +67,8 @@ const MemoryQmdUpdateSchema = z
     commandTimeoutMs: z.number().int().nonnegative().optional(),
     updateTimeoutMs: z.number().int().nonnegative().optional(),
     embedTimeoutMs: z.number().int().nonnegative().optional(),
+    embedActiveHoursStart: z.number().int().min(0).max(23).optional(),
+    embedActiveHoursEnd: z.number().int().min(0).max(23).optional(),
   })
   .strict();
 

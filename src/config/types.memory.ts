@@ -57,6 +57,9 @@ export type MemoryQmdUpdateConfig = {
   commandTimeoutMs?: number;
   updateTimeoutMs?: number;
   embedTimeoutMs?: number;
+  /** Hour-of-day (0-23) when qmd embed is allowed to run. If both start/end are set, embed is restricted to [start, end). Use to confine heavy CPU work to quiet hours. */
+  embedActiveHoursStart?: number;
+  embedActiveHoursEnd?: number;
 };
 
 export type MemoryQmdLimitsConfig = {

@@ -616,6 +616,16 @@ if _shutil.which('qmd'):
         memory['qmd'] = {}
         qmd_cfg = memory['qmd']
     qmd_cfg.setdefault('searchMode', 'vsearch')
+    # Confine qmd embed (heavy CPU) to 02:00-05:00 so it can't starve Ollama
+    # during the day. Without this guard, embed has been seen to consume 343%
+    # CPU on a 4-core Pi, causing local-LLM fallback to time out. Force-assigned
+    # so re-running install always corrects stale daytime windows.
+    qmd_update = qmd_cfg.setdefault('update', {})
+    if not isinstance(qmd_update, dict):
+        qmd_cfg['update'] = {}
+        qmd_update = qmd_cfg['update']
+    qmd_update['embedActiveHoursStart'] = 2
+    qmd_update['embedActiveHoursEnd'] = 5
     limits = qmd_cfg.setdefault('limits', {})
     if not isinstance(limits, dict):
         qmd_cfg['limits'] = {}

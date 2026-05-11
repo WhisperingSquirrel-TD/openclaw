@@ -1131,12 +1131,31 @@ export class QmdMemoryManager implements MemorySearchManager {
     if (this.embedBackoffUntil !== null && now < this.embedBackoffUntil) {
       return false;
     }
+    if (!this.isWithinEmbedActiveHours()) {
+      return false;
+    }
     const embedIntervalMs = this.qmd.update.embedIntervalMs;
     return (
       Boolean(force) ||
       this.lastEmbedAt === null ||
       (embedIntervalMs > 0 && now - this.lastEmbedAt > embedIntervalMs)
     );
+  }
+
+  private isWithinEmbedActiveHours(): boolean {
+    const start = this.qmd.update.embedActiveHoursStart;
+    const end = this.qmd.update.embedActiveHoursEnd;
+    if (start === null || end === null) {
+      return true;
+    }
+    const hour = new Date().getHours();
+    if (start === end) {
+      return false;
+    }
+    if (start < end) {
+      return hour >= start && hour < end;
+    }
+    return hour >= start || hour < end;
   }
 
   private noteEmbedFailure(reason: string, err: unknown): void {

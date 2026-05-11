@@ -36,6 +36,8 @@ export type ResolvedQmdUpdateConfig = {
   commandTimeoutMs: number;
   updateTimeoutMs: number;
   embedTimeoutMs: number;
+  embedActiveHoursStart: number | null;
+  embedActiveHoursEnd: number | null;
 };
 
 export type ResolvedQmdLimitsConfig = {
@@ -175,6 +177,13 @@ function resolveTimeoutMs(raw: number | undefined, fallback: number): number {
     return Math.floor(raw);
   }
   return fallback;
+}
+
+function resolveActiveHour(raw: number | undefined): number | null {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0 && raw <= 23) {
+    return Math.floor(raw);
+  }
+  return null;
 }
 
 function resolveLimits(raw?: MemoryQmdConfig["limits"]): ResolvedQmdLimitsConfig {
@@ -341,6 +350,8 @@ export function resolveMemoryBackendConfig(params: {
         qmdCfg?.update?.embedTimeoutMs,
         DEFAULT_QMD_EMBED_TIMEOUT_MS,
       ),
+      embedActiveHoursStart: resolveActiveHour(qmdCfg?.update?.embedActiveHoursStart),
+      embedActiveHoursEnd: resolveActiveHour(qmdCfg?.update?.embedActiveHoursEnd),
     },
     limits: resolveLimits(qmdCfg?.limits),
     scope: qmdCfg?.scope ?? DEFAULT_QMD_SCOPE,
