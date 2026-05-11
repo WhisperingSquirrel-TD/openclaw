@@ -7,6 +7,7 @@ import {
   resolveConfiguredModelRef,
   resolveHooksGmailModel,
 } from "../agents/model-selection.js";
+import { clearLocalProviderCooldownsToDisk } from "../agents/auth-profiles.js";
 import { resolveAgentSessionDirs } from "../agents/session-dirs.js";
 import { cleanStaleLockFiles } from "../agents/session-write-lock.js";
 import type { CliDeps } from "../cli/deps.js";
@@ -60,6 +61,16 @@ export async function startGatewaySidecars(params: {
     }
   } catch (err) {
     params.log.warn(`session lock cleanup failed on startup: ${String(err)}`);
+  }
+
+  // Clear stale cooldowns for local providers (Ollama) on every gateway start.
+  // Ollama is a local service that recovers in seconds; exponential-backoff
+  // cooldowns persisted from a previous session should never block the fallback
+  // path after a restart.
+  try {
+    await clearLocalProviderCooldownsToDisk(["ollama"]);
+  } catch (err) {
+    params.log.warn(`local provider cooldown clear failed on startup: ${String(err)}`);
   }
 
   // Start OpenClaw browser control server (unless disabled via config).

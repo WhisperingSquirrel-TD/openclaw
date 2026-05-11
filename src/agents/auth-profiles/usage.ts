@@ -233,6 +233,32 @@ export function clearExpiredCooldowns(store: AuthProfileStore, now?: number): bo
 }
 
 /**
+ * Persist the cooldown clear for local providers to disk using the file lock.
+ * Call once during gateway startup so every restart begins with a clean slate
+ * for providers like Ollama that recover in seconds.
+ *
+ * Returns true if any profile was mutated and saved.
+ */
+export async function clearLocalProviderCooldownsToDisk(
+  providers: string[],
+  agentDir?: string,
+): Promise<boolean> {
+  const updated = await updateAuthProfileStoreWithLock({
+    agentDir,
+    updater: (store) => {
+      let mutated = false;
+      for (const provider of providers) {
+        if (clearProviderCooldowns(store, provider)) {
+          mutated = true;
+        }
+      }
+      return mutated;
+    },
+  });
+  return updated !== null;
+}
+
+/**
  * Clear all transient cooldowns for every profile belonging to the given
  * provider. Intended for local providers (e.g. "ollama") that recover in
  * seconds — long exponential backoffs are not meaningful for localhost APIs.
