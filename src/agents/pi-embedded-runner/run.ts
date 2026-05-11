@@ -20,6 +20,7 @@ import {
   markAuthProfileGood,
   markAuthProfileUsed,
   resolveProfilesUnavailableReason,
+  clearProviderCooldowns,
 } from "../auth-profiles.js";
 import {
   CONTEXT_WINDOW_HARD_MIN_TOKENS,
@@ -402,6 +403,10 @@ export async function runEmbeddedPiAgent(
       }
 
       const authStore = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
+      // Ollama is a local service that recovers in seconds. Clear any stale
+      // exponential-backoff cooldowns so a previous OOM/overload in an earlier
+      // session never blocks the fallback path in the current session.
+      clearProviderCooldowns(authStore, "ollama");
       const preferredProfileId = params.authProfileId?.trim();
       let lockedProfileId = params.authProfileIdSource === "user" ? preferredProfileId : undefined;
       if (lockedProfileId) {

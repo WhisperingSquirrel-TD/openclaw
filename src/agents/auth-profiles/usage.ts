@@ -233,6 +233,49 @@ export function clearExpiredCooldowns(store: AuthProfileStore, now?: number): bo
 }
 
 /**
+ * Clear all transient cooldowns for every profile belonging to the given
+ * provider. Intended for local providers (e.g. "ollama") that recover in
+ * seconds — long exponential backoffs are not meaningful for localhost APIs.
+ *
+ * Safe to call synchronously on startup before any auth-profile writes.
+ * Returns true if any profile was mutated.
+ */
+export function clearProviderCooldowns(
+  store: AuthProfileStore,
+  provider: string,
+): boolean {
+  const usageStats = store.usageStats;
+  if (!usageStats) {
+    return false;
+  }
+
+  const normalizedProvider = normalizeProviderId(provider);
+  let mutated = false;
+
+  for (const [profileId, stats] of Object.entries(usageStats)) {
+    if (!stats) {
+      continue;
+    }
+    const profile = store.profiles[profileId];
+    if (!profile) {
+      continue;
+    }
+    if (normalizeProviderId(profile.provider) !== normalizedProvider) {
+      continue;
+    }
+    if (stats.cooldownUntil !== undefined || stats.errorCount !== undefined) {
+      stats.cooldownUntil = undefined;
+      stats.errorCount = 0;
+      stats.failureCounts = undefined;
+      usageStats[profileId] = stats;
+      mutated = true;
+    }
+  }
+
+  return mutated;
+}
+
+/**
  * Mark a profile as successfully used. Resets error count and updates lastUsed.
  * Uses store lock to avoid overwriting concurrent usage updates.
  */
