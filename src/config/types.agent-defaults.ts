@@ -194,6 +194,8 @@ export type AgentDefaultsConfig = {
   /** Human-like delay between block replies. */
   humanDelay?: HumanDelayConfig;
   timeoutSeconds?: number;
+  /** Per-provider agent session timeout in seconds. Overrides timeoutSeconds for the named provider only. Keys are provider names (e.g. "ollama"). Useful for slow local models without inflating the global timeout for fast cloud providers. */
+  providerTimeoutSeconds?: Record<string, number>;
   /** Max inbound media size in MB for agent-visible attachments (text note or future image attach). */
   mediaMaxMb?: number;
   /**

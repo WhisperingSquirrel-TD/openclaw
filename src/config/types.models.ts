@@ -57,6 +57,8 @@ export type ModelProviderConfig = {
   headers?: Record<string, SecretInput>;
   authHeader?: boolean;
   models: ModelDefinitionConfig[];
+  /** Per-provider agent session timeout in seconds. Overrides agents.defaults.timeoutSeconds for this provider only. Useful for slow local models (e.g. Ollama on Pi) without increasing the global timeout for fast cloud providers. */
+  timeoutSeconds?: number;
 };
 
 export type BedrockDiscoveryConfig = {

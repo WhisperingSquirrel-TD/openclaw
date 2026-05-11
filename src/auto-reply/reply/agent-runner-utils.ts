@@ -185,7 +185,22 @@ export function buildEmbeddedRunBaseParams(params: {
     reasoningLevel: params.run.reasoningLevel,
     execOverrides: params.run.execOverrides,
     bashElevated: params.run.bashElevated,
-    timeoutMs: params.run.timeoutMs,
+    timeoutMs: (() => {
+      // Allow per-provider session timeout override so slow local models (e.g.
+      // Ollama on Pi 4 at 3-8 tok/s) can be given a longer timeout without
+      // also delaying fast-fail detection for cloud providers (Codex, Claude).
+      // Priority: agents.defaults.providerTimeoutSeconds[provider]
+      //        -> models.providers[provider].timeoutSeconds
+      //        -> global params.run.timeoutMs
+      const cfg = params.run.config;
+      const agentSecs =
+        cfg?.agents?.defaults?.providerTimeoutSeconds?.[params.provider];
+      if (typeof agentSecs === "number" && agentSecs > 0) return agentSecs * 1000;
+      const modelSecs =
+        cfg?.models?.providers?.[params.provider]?.timeoutSeconds;
+      if (typeof modelSecs === "number" && modelSecs > 0) return modelSecs * 1000;
+      return params.run.timeoutMs;
+    })(),
     runId: params.runId,
     allowTransientCooldownProbe: params.allowTransientCooldownProbe,
   };
