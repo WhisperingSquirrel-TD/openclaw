@@ -6,6 +6,7 @@ import {
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { sanitizeForLog } from "../terminal/ansi.js";
 import {
+  clearProviderCooldowns,
   ensureAuthProfileStore,
   getSoonestCooldownExpiry,
   isProfileInCooldown,
@@ -471,6 +472,13 @@ export async function runWithModelFallback<T>(params: {
   const authStore = params.cfg
     ? ensureAuthProfileStore(params.agentDir, { allowKeychainPrompt: false })
     : null;
+  // Clear stale exponential-backoff cooldowns for local providers (Ollama)
+  // before the candidate loop runs its cooldown checks. Ollama recovers in
+  // seconds and should never be skipped due to a cooldown carried over from
+  // a previous session or message.
+  if (authStore) {
+    clearProviderCooldowns(authStore, "ollama");
+  }
   const attempts: FallbackAttempt[] = [];
   let lastError: unknown;
 
