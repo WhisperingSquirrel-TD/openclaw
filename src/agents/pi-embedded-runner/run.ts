@@ -1366,11 +1366,18 @@ export async function runEmbeddedPiAgent(
                       : authFailure
                         ? "LLM request unauthorized."
                         : "LLM request failed.");
+              // When the run timed out, always use "timeout" as the reason —
+              // assistantFailoverReason is typically null (stream was aborted
+              // before the model returned an error message), which would
+              // otherwise become the misleading "unknown" reason.
+              const failoverReason = timedOut
+                ? "timeout"
+                : (assistantFailoverReason ?? "unknown");
               const status =
-                resolveFailoverStatus(assistantFailoverReason ?? "unknown") ??
+                resolveFailoverStatus(failoverReason) ??
                 (isTimeoutErrorMessage(message) ? 408 : undefined);
               throw new FailoverError(message, {
-                reason: assistantFailoverReason ?? "unknown",
+                reason: failoverReason,
                 provider: activeErrorContext.provider,
                 model: activeErrorContext.model,
                 profileId: lastProfileId,

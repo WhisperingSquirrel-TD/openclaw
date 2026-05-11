@@ -8,6 +8,7 @@ import {
   resolveHooksGmailModel,
 } from "../agents/model-selection.js";
 import { clearLocalProviderCooldownsToDisk } from "../agents/auth-profiles.js";
+import { warmUpOllamaModels } from "../agents/ollama-stream.js";
 import { resolveAgentSessionDirs } from "../agents/session-dirs.js";
 import { cleanStaleLockFiles } from "../agents/session-write-lock.js";
 import type { CliDeps } from "../cli/deps.js";
@@ -72,6 +73,11 @@ export async function startGatewaySidecars(params: {
   } catch (err) {
     params.log.warn(`local provider cooldown clear failed on startup: ${String(err)}`);
   }
+
+  // Pre-warm Ollama models in the background so the first real user request
+  // does not time out while the model loads from disk (10–20 s on Pi 4).
+  // Fire-and-forget: startup is not blocked and failures are silently ignored.
+  void warmUpOllamaModels().catch(() => {});
 
   // Start OpenClaw browser control server (unless disabled via config).
   let browserControl: Awaited<ReturnType<typeof startBrowserControlServerIfEnabled>> = null;
