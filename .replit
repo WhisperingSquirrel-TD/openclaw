@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "swift-5.8", "bash"]
+modules = ["nodejs-20", "swift-5.8", "bash", "python-3.11"]
 [agent]
 expertMode = true
 

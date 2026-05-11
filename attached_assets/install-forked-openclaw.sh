@@ -577,17 +577,20 @@ pruning.setdefault('mode', 'cache-ttl')
 pruning.setdefault('ttl', '2h')
 pruning.setdefault('keepLastAssistants', 5)
 
-# Give Ollama a generous per-provider session timeout so it can finish
-# generating even when agents.defaults.timeoutSeconds is kept short for fast
-# Codex failure detection.  300 s covers llama3.2:3b on Pi 4 at 3-8 tok/s.
+# Give Ollama a generous per-provider session timeout.  A real session
+# pumps SOUL.md (~2500 tok), multiple memory files, tool descriptions and
+# conversation history through the model — easily 10,000-20,000 input
+# tokens.  At Pi 4 prefill rates of 20-50 tok/s that alone takes
+# 200-1000 s, before any output generation.  1800 s (30 min) covers even
+# worst-case large-context turns.  We force-assign (not setdefault) so
+# re-running install corrects a previously-written low value (e.g. 300).
 # Stored under agents.defaults.providerTimeoutSeconds (not models.providers,
 # which requires baseUrl/models fields in the schema).
-# Uses setdefault — never overwrites a value you've already set manually.
 provider_timeouts = agent_defaults.setdefault('providerTimeoutSeconds', {})
 if not isinstance(provider_timeouts, dict):
     agent_defaults['providerTimeoutSeconds'] = {}
     provider_timeouts = agent_defaults['providerTimeoutSeconds']
-provider_timeouts.setdefault('ollama', 300)
+provider_timeouts['ollama'] = 1800
 
 print(f'Token efficiency: lightContext={hb[\"lightContext\"]}, heartbeat every={hb[\"every\"]}, ' +
       f'activeHours={active_hours[\"start\"]}-{active_hours[\"end\"]}, ' +

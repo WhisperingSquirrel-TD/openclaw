@@ -41,14 +41,15 @@ This installs dependencies then launches the Vite dev server at **port 5000**.
 
 The install script applies these automatically via `setdefault` (all preserving any manual overrides):
 
-| Setting                  | Value         | Effect                                                                                  |
-| ------------------------ | ------------- | --------------------------------------------------------------------------------------- |
-| `heartbeat.lightContext` | `true`        | Heartbeat only sends `HEARTBEAT.md`, **not** SOUL.md/memory. ~70% cut in heartbeat cost |
-| `heartbeat.every`        | `60m`         | Once per hour (default 30m) — halves background API calls                               |
-| `heartbeat.activeHours`  | `07:00–23:00` | Zero calls midnight–7am                                                                 |
-| `heartbeat.ackMaxChars`  | `150`         | Heartbeat replies capped at 150 chars                                                   |
-| `bootstrapMaxChars`      | `10000`       | Each workspace file (SOUL.md etc.) capped at 10KB                                       |
-| `contextPruning.mode`    | `cache-ttl`   | Prunes conversation history >2h old (Claude only)                                       |
+| Setting                              | Value         | Effect                                                                                  |
+| ------------------------------------ | ------------- | --------------------------------------------------------------------------------------- |
+| `heartbeat.lightContext`             | `true`        | Heartbeat only sends `HEARTBEAT.md`, **not** SOUL.md/memory. ~70% cut in heartbeat cost |
+| `heartbeat.every`                    | `60m`         | Once per hour (default 30m) — halves background API calls                               |
+| `heartbeat.activeHours`              | `07:00–23:00` | Zero calls midnight–7am                                                                 |
+| `heartbeat.ackMaxChars`              | `150`         | Heartbeat replies capped at 150 chars                                                   |
+| `bootstrapMaxChars`                  | `10000`       | Each workspace file (SOUL.md etc.) capped at 10KB                                       |
+| `contextPruning.mode`                | `cache-ttl`   | Prunes conversation history >2h old (Claude only)                                       |
+| `providerTimeoutSeconds.ollama`      | `1800`        | Ollama session timeout = 30 min. Force-assigned (not setdefault) so re-running install always corrects lower values. A real session has 10k–20k input tokens; at Pi 4 prefill rates of 20–50 tok/s that's 200–1000 s before any output is generated. |
 
 **What still gets sent on every interactive message:** SOUL.md + memory files (up to 10KB each). Keep these files focused — every line costs tokens on every exchange.
 
