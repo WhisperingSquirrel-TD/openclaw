@@ -615,11 +615,15 @@ export async function warmUpOllamaModels(params?: {
     }
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), Math.min(30_000, remaining()));
+      // Allow up to 90 s per model — Pi 4 can take 45–60 s to load a 2 GB
+      // model from a cold disk cache.  stream:false makes Ollama return a
+      // single JSON response instead of a streaming body so the fetch
+      // completes immediately once the model finishes loading.
+      const timer = setTimeout(() => ctrl.abort(), Math.min(90_000, remaining()));
       await fetch(`${base}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, prompt: "", keep_alive: keepAlive }),
+        body: JSON.stringify({ model, prompt: "", keep_alive: keepAlive, stream: false }),
         signal: ctrl.signal,
       }).finally(() => clearTimeout(timer));
     } catch {

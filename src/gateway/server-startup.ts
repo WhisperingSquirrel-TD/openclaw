@@ -77,7 +77,10 @@ export async function startGatewaySidecars(params: {
   // Pre-warm Ollama models in the background so the first real user request
   // does not time out while the model loads from disk (10–20 s on Pi 4).
   // Fire-and-forget: startup is not blocked and failures are silently ignored.
-  void warmUpOllamaModels().catch(() => {});
+  void warmUpOllamaModels({
+    keepAlive: "-1",
+    timeoutMs: 120_000,
+  }).catch(() => {});
 
   // Start OpenClaw browser control server (unless disabled via config).
   let browserControl: Awaited<ReturnType<typeof startBrowserControlServerIfEnabled>> = null;

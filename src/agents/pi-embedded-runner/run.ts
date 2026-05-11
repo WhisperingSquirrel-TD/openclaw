@@ -1343,20 +1343,21 @@ export async function runEmbeddedPiAgent(
 
             if (fallbackConfigured) {
               await maybeBackoffBeforeOverloadFailover(assistantFailoverReason);
-              // Prefer formatted error message (user-friendly) over raw errorMessage
-              const message =
-                (lastAssistant
-                  ? formatAssistantErrorText(lastAssistant, {
-                      cfg: params.config,
-                      sessionKey: params.sessionKey ?? params.sessionId,
-                      provider: activeErrorContext.provider,
-                      model: activeErrorContext.model,
-                    })
-                  : undefined) ||
-                lastAssistant?.errorMessage?.trim() ||
-                (timedOut
-                  ? "LLM request timed out."
-                  : rateLimitFailure
+              // When the run timed out, always use the timeout message — the
+              // stream may have produced a raw AbortError in lastAssistant before
+              // the timer fired, which would otherwise shadow the real cause.
+              const message = timedOut
+                ? "LLM request timed out."
+                : ((lastAssistant
+                    ? formatAssistantErrorText(lastAssistant, {
+                        cfg: params.config,
+                        sessionKey: params.sessionKey ?? params.sessionId,
+                        provider: activeErrorContext.provider,
+                        model: activeErrorContext.model,
+                      })
+                    : undefined) ||
+                  lastAssistant?.errorMessage?.trim() ||
+                  (rateLimitFailure
                     ? "LLM request rate limited."
                     : billingFailure
                       ? formatBillingErrorMessage(
@@ -1365,7 +1366,7 @@ export async function runEmbeddedPiAgent(
                         )
                       : authFailure
                         ? "LLM request unauthorized."
-                        : "LLM request failed.");
+                        : "LLM request failed."));
               // When the run timed out, always use "timeout" as the reason —
               // assistantFailoverReason is typically null (stream was aborted
               // before the model returned an error message), which would
