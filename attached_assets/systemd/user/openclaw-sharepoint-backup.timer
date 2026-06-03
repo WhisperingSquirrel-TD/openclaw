@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw SharePoint backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Europe/London
+Persistent=true
+Unit=openclaw-sharepoint-backup.service
+
+[Install]
+WantedBy=timers.target

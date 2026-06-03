@@ -1,0 +1,12 @@
+[Unit]
+Description=OpenClaw SharePoint Backup
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/tomdean88/.openclaw/integrations/microsoft/sharepoint_backup.py
+StandardOutput=append:/home/tomdean88/.openclaw/workspace/memory/sharepoint-backup-log.txt
+StandardError=append:/home/tomdean88/.openclaw/workspace/memory/sharepoint-backup-log.txt
