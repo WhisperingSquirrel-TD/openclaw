@@ -72,6 +72,12 @@ ANTHROPIC_MODEL     = "claude-haiku-4-5"
 CRM_ACCOUNTS_PREFIX      = "Stackstone CRM/Accounts"
 CRM_OPPORTUNITIES_PREFIX = "Stackstone CRM/Opportunities"
 
+# Protected SharePoint areas that housekeeping must never reorganise.
+# These are recovery/storage paths, not normal CRM content.
+PROTECTED_PREFIXES = [
+    "OpenClaw Backups",
+]
+
 # Batch expiry — drop batches older than this (Anthropic expires after 24h)
 BATCH_MAX_AGE_HOURS = 23
 
@@ -172,8 +178,15 @@ def _parse_entity_key(sp_path: str) -> tuple[str, str] | None:
 
     /Stackstone CRM/Accounts/Harken Health/...    → ("account",      "Harken Health")
     /Stackstone CRM/Opportunities/Croyde Medical/... → ("opportunity", "Croyde Medical")
+
+    Protected prefixes are always excluded from housekeeping discovery.
     """
     p = sp_path.lstrip("/")
+
+    for protected in PROTECTED_PREFIXES:
+        if p == protected or p.startswith(protected + "/"):
+            return None
+
     for prefix, etype in [
         (CRM_ACCOUNTS_PREFIX,      "account"),
         (CRM_OPPORTUNITIES_PREFIX, "opportunity"),
