@@ -42,6 +42,7 @@ SOUL.md INSTRUCTION (add to L1 morning briefing section):
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -55,6 +56,10 @@ OPENCLAW   = HOME / ".openclaw"
 WORKSPACE  = OPENCLAW / "workspace"
 MEMORY     = WORKSPACE / "memory"
 OUTPUT_MD  = WORKSPACE / "SYSTEM_HEALTH.md"
+CODE_REPO  = HOME / "openclaw"
+WORKSPACE_REPO = WORKSPACE
+SP_BACKUP_STATE = OPENCLAW / "integrations/microsoft/sharepoint-backup-state.json"
+SP_BACKUP_TIMER = "openclaw-sharepoint-backup.timer"
 
 # ---------------------------------------------------------------------------
 # Monitored services
@@ -255,6 +260,71 @@ def check_enquiry_pipeline() -> list[str]:
     return issues
 
 
+def _run(cmd: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
+    try:
+        p = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True, timeout=20)
+        return p.returncode, p.stdout.strip(), p.stderr.strip()
+    except Exception as e:
+        return 1, "", str(e)
+
+
+def check_github_sync() -> list[str]:
+    issues = []
+    for label, repo in [("openclaw repo", CODE_REPO), ("workspace repo", WORKSPACE_REPO)]:
+        if not repo.exists():
+            issues.append(f"{label}: repo path missing ({repo})")
+            continue
+        rc, out, err = _run(["git", "status", "--porcelain"], cwd=repo)
+        if rc != 0:
+            issues.append(f"{label}: git status failed ({err or out})")
+            continue
+        if out.strip():
+            issues.append(f"{label}: local changes present — GitHub may not reflect latest Pi state")
+        # Fetch-less ahead/behind using existing remote refs
+        rc, branch, err = _run(["git", "branch", "--show-current"], cwd=repo)
+        branch = branch.strip() or "main"
+        rc, out, err = _run(["git", "rev-list", "--left-right", "--count", f"origin/{branch}...{branch}"], cwd=repo)
+        if rc == 0 and out.strip():
+            try:
+                behind, ahead = [int(x) for x in out.split()[:2]]
+                if ahead > 0:
+                    issues.append(f"{label}: {ahead} unpushed commit(s) on {branch}")
+                if behind > 0:
+                    issues.append(f"{label}: local {branch} is {behind} commit(s) behind origin/{branch}")
+            except Exception:
+                pass
+        else:
+            issues.append(f"{label}: could not compare local branch to remote tracking branch")
+    return issues
+
+
+def check_sharepoint_backup_health() -> list[str]:
+    issues = []
+    age = _mtime_age_minutes(SP_BACKUP_STATE)
+    if age is None:
+        issues.append("SharePoint backup: state file missing — backup may never have completed")
+    else:
+        if age > (26 * 60):
+            age_h = int(age // 60)
+            age_m = int(age % 60)
+            issues.append(f"SharePoint backup: state stale ({age_h}h {age_m}m since last successful state update)")
+        try:
+            state = json.loads(SP_BACKUP_STATE.read_text())
+            if state.get('status') != 'ok':
+                issues.append("SharePoint backup: latest recorded state is not OK")
+        except Exception as e:
+            issues.append(f"SharePoint backup: state unreadable ({e})")
+
+    rc, out, err = _run(["systemctl", "--user", "is-enabled", SP_BACKUP_TIMER])
+    if rc != 0 or out.strip() != 'enabled':
+        issues.append("SharePoint backup: timer not enabled")
+
+    rc, out, err = _run(["systemctl", "--user", "show", SP_BACKUP_TIMER, "--property=NextElapseUSecRealtime", "--property=LastTriggerUSec"], cwd=WORKSPACE)
+    if rc != 0:
+        issues.append("SharePoint backup: could not read timer state")
+    return issues
+
+
 def check_reminder_failures() -> list[str]:
     """
     Check if any scheduled reminder or L1 task shows a recent failure.
@@ -309,11 +379,15 @@ def main() -> None:
     feed_issues = check_feed_freshness()
     enq_issues  = check_enquiry_pipeline()
     rem_issues  = check_reminder_failures()
+    git_issues  = check_github_sync()
+    spb_issues  = check_sharepoint_backup_health()
 
     issues.extend(log_issues)
     issues.extend(feed_issues)
     issues.extend(enq_issues)
     issues.extend(rem_issues)
+    issues.extend(git_issues)
+    issues.extend(spb_issues)
 
     report = build_health_report(issues)
     write_output(report)
