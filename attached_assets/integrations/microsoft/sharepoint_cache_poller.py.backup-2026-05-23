@@ -444,25 +444,6 @@ def _write_extracted_file(
     local_path.write_text(header + extracted_text, encoding="utf-8")
 
 
-def _get_cached_extracted_synced(extracted_path: Path) -> str | None:
-    """Read synced timestamp from .extracted.md header.
-    
-    Returns ISO timestamp string or None if file doesn't exist or header missing.
-    """
-    if not extracted_path.exists():
-        return None
-    try:
-        content = extracted_path.read_text(encoding="utf-8")
-        first_line = content.split("\n")[0]
-        # <!-- sharepoint-binary-extract: /path | synced: 2026-05-23T11:00:00Z -->
-        if "synced:" in first_line:
-            synced = first_line.split("synced:")[1].split("-->")[0].strip()
-            return synced
-    except Exception:
-        pass
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Orphan cleanup
 # ---------------------------------------------------------------------------
@@ -808,21 +789,6 @@ def main() -> None:
             extracted_path = _local_path_for(sp_path + ".extracted.md")
             image_dir      = extracted_path.parent / (Path(name).stem + ".images")
             eligible_sp_paths.add(extracted_rel)
-
-            # Check if already extracted and up-to-date
-            cached_synced = _get_cached_extracted_synced(extracted_path)
-            if cached_synced and cached_synced >= modified:
-                # File hasn't changed since last extraction — skip re-extraction
-                extracted[extracted_rel] = {
-                    "sp_path":        sp_path,
-                    "original_ext":   ext,
-                    "size":           size,
-                    "sp_modified":    modified,
-                    "synced_at":      cached_synced,
-                    "local_path":     str(extracted_path.relative_to(WORKSPACE)),
-                }
-                log(f"  CACHED (unchanged) {sp_path}")
-                continue
 
             try:
                 raw_bytes      = _fetch_file_bytes(token, site_id, drive_id, sp_path)

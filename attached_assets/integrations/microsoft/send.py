@@ -12,7 +12,7 @@ Usage:
                       multiple recipients (all on the same email, not separate)
   from_name           Display name for the From field (e.g. "PA to Tom Dean")
   subject             Email subject
-  body                Email body (plain text; use \\n for newlines)
+  body                Email body (plain text; use \\n for line breaks)
   reply_to_message_id (optional) Microsoft message ID to thread the reply to
 
 Options:
@@ -36,7 +36,9 @@ Exit codes:
   3  Bad arguments
 """
 import argparse
+import base64
 import json
+import mimetypes
 import sys
 import requests
 from pathlib import Path
@@ -57,6 +59,8 @@ def parse_args() -> argparse.Namespace:
                    help="Email body plain text, \\n for newlines (overridden by --body-file if given)")
     p.add_argument("reply_to_message_id", nargs="?", default=None,
                    help="Microsoft message ID to thread as a reply")
+    p.add_argument("--reply-all", action="store_true",
+                   help="When replying to an existing message, preserve reply-all rather than reply")
     p.add_argument("--account",          default=None,
                    help="Account slug (used to locate token file)")
     p.add_argument("--token-file",       default=None,
@@ -71,6 +75,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--body-file",        default=None,
                    help="Read body from this file (overrides body positional arg). "
                         "Avoids passing large/sensitive content as a shell argument.")
+    p.add_argument("--attachment", action="append", default=[],
+                   help="Path to file to attach. Can be repeated.")
     return p.parse_args()
 
 
@@ -225,6 +231,26 @@ def whoami(access_token: str) -> None:
     print(f"{email}  ({name})")
 
 
+def _build_attachments(paths: list[str]) -> list[dict]:
+    attachments = []
+    for raw in paths:
+        if not raw:
+            continue
+        p = Path(raw)
+        if not p.exists() or not p.is_file():
+            print(f"ERROR: attachment not found: {p}", file=sys.stderr)
+            sys.exit(3)
+        data = p.read_bytes()
+        mime = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+        attachments.append({
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": p.name,
+            "contentType": mime,
+            "contentBytes": base64.b64encode(data).decode("ascii"),
+        })
+    return attachments
+
+
 def send_email(
     access_token: str,
     recipients: list[str],
@@ -232,6 +258,8 @@ def send_email(
     subject: str,
     body: str,
     reply_to_message_id: str | None = None,
+    attachments: list[dict] | None = None,
+    reply_all: bool = False,
 ) -> None:
     if not recipients:
         print("ERROR: no valid recipient addresses found", file=sys.stderr)
@@ -253,10 +281,13 @@ def send_email(
         },
         "toRecipients": to_recipients,
     }
+    if attachments:
+        message["attachments"] = attachments
 
     if reply_to_message_id:
-        # Use createReply endpoint to properly thread the email
-        create_url = f"{GRAPH_BASE}/me/messages/{reply_to_message_id}/createReply"
+        # Use createReply / createReplyAll endpoint to properly preserve thread context
+        reply_endpoint = "createReplyAll" if reply_all else "createReply"
+        create_url = f"{GRAPH_BASE}/me/messages/{reply_to_message_id}/{reply_endpoint}"
         resp = requests.post(create_url, headers=headers, timeout=15)
         if not resp.ok:
             print(f"createReply failed: {resp.status_code} {resp.text}", file=sys.stderr)
@@ -266,11 +297,14 @@ def send_email(
 
         # Update the draft with our content
         update_url = f"{GRAPH_BASE}/me/messages/{draft_id}"
-        resp = requests.patch(update_url, headers=headers, json={
-            "subject":      subject,
-            "body":         message["body"],
+        draft_patch = {
+            "subject": subject,
+            "body": message["body"],
             "toRecipients": to_recipients,
-        }, timeout=15)
+        }
+        if attachments:
+            draft_patch["attachments"] = attachments
+        resp = requests.patch(update_url, headers=headers, json=draft_patch, timeout=15)
         if not resp.ok:
             print(f"Draft update failed: {resp.status_code} {resp.text}", file=sys.stderr)
             sys.exit(2)
@@ -355,6 +389,8 @@ def main() -> None:
         print("ERROR: body is required (positional arg or --body-file)", file=sys.stderr)
         sys.exit(3)
 
+    attachments = _build_attachments(args.attachment)
+
     send_email(
         access_token,
         recipients=recipients,
@@ -362,6 +398,8 @@ def main() -> None:
         subject=subject,
         body=body,
         reply_to_message_id=args.reply_to_message_id,
+        attachments=attachments,
+        reply_all=args.reply_all,
     )
 
 

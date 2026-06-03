@@ -266,7 +266,16 @@ At this point, it is time to actually create the skill.
 
 Skip this step only if the skill being developed already exists, and iteration or packaging is needed. In this case, continue to the next step.
 
-When creating a new skill from scratch, always run the `init_skill.py` script. The script conveniently generates a new template skill directory that automatically includes everything a skill requires, making the skill creation process much more efficient and reliable.
+**Lightweight-skill exception (MANDATORY):**
+If the requested skill is clearly just a simple text-only skill (for example: only a `SKILL.md`, or a small local workspace skill folder with no bundled scripts/assets/examples needed), do **not** force `init_skill.py` first. Create the minimal folder/file structure directly with normal file writes.
+
+Use `init_skill.py` when:
+
+- a reusable scaffold is genuinely helpful
+- bundled resource folders are needed
+- the skill is being created as a more formal/packageable public skill
+
+When creating a new skill from scratch that is **not** a lightweight exception, run the `init_skill.py` script. The script conveniently generates a new template skill directory that automatically includes everything a skill requires, making the skill creation process much more efficient and reliable.
 
 Usage:
 
@@ -359,6 +368,24 @@ The packaging script will:
    Security restriction: symlinks are rejected and packaging fails when any symlink is present.
 
 If validation fails, the script will report the errors and exit without creating a package. Fix any validation errors and run the packaging command again.
+
+### Routing / discoverability rule (MANDATORY)
+
+When creating or updating a skill that should be reusable in future sessions:
+
+1. Check whether agents will need to discover it through `SYSTEM_MAP.md`
+2. If yes, add or update the corresponding `SYSTEM_MAP.md` entry before calling the work done
+3. If the skill introduces a new workflow cluster, add a clear routing line, not just a buried mention
+4. Do not treat "skill file created" as complete if the routing/discoverability layer is still stale
+5. Treat `SYSTEM_MAP.md` as the primary findability/discoverability layer for local skills. If a skill is in the right canonical location and correctly routed in `SYSTEM_MAP.md`, describe it as findable through the system even if the current runtime-provided skill list has not been refreshed yet
+6. For any claim about whether a skill can be "found", verify against both:
+   - the canonical on-disk skill path
+   - the `SYSTEM_MAP.md` routing entry
+     Do not over-weight the current session's injected skill list when answering that question
+
+### Durable-document creation rule
+
+When creating a new durable operational/planning/reference document during system-building work, ask whether future sessions will need to find it through routing. If yes, update the relevant governing map/file rather than leaving the document discoverable only by luck.
 
 ### Step 6: Iterate
 

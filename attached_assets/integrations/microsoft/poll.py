@@ -220,7 +220,7 @@ def fetch_emails(access_token: str, folder: str = "inbox", top: int = MAX_RESULT
     params = {
         "$top": top,
         "$orderby": "receivedDateTime desc",
-        "$select": "id,subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,isRead",
+        "$select": "id,conversationId,internetMessageId,subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,isRead",
     }
     resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"}, params=params, timeout=15)
     if resp.status_code == 429:
@@ -270,11 +270,17 @@ def format_trusted_entry(msg: dict, prefix: str = "") -> str:
     from_addr = sender.get("address", "")
     preview   = msg.get("bodyPreview", "").replace("\r\n", " ").replace("\n", " ")[:300]
     ts_fmt    = received[:16].replace("T", " ") if received else "unknown"
+    msg_id    = msg.get("id", "")
+    conv_id   = msg.get("conversationId", "")
+    internet_id = msg.get("internetMessageId", "")
     tag       = f"[{prefix}] " if prefix else ""
     return (
         f"---\n"
         f"{tag}**{subject}**\n"
         f"From: {from_name} <{from_addr}> | {ts_fmt}\n"
+        f"Message ID: {msg_id}\n"
+        f"Conversation ID: {conv_id}\n"
+        f"Internet Message ID: {internet_id}\n"
         f"{preview}\n\n"
     )
 
@@ -292,10 +298,16 @@ def format_sent_entry(msg: dict) -> str:
     to_str    = ", ".join(to_parts) if to_parts else "(unknown)"
     preview   = msg.get("bodyPreview", "").replace("\r\n", " ").replace("\n", " ")[:300]
     ts_fmt    = sent_at[:16].replace("T", " ") if sent_at else "unknown"
+    msg_id    = msg.get("id", "")
+    conv_id   = msg.get("conversationId", "")
+    internet_id = msg.get("internetMessageId", "")
     return (
         f"---\n"
         f"**{subject}**\n"
         f"To: {to_str} | {ts_fmt}\n"
+        f"Message ID: {msg_id}\n"
+        f"Conversation ID: {conv_id}\n"
+        f"Internet Message ID: {internet_id}\n"
         f"{preview}\n\n"
     )
 
@@ -307,10 +319,16 @@ def format_external_entry(msg: dict) -> str:
     from_name = sender.get("name", "")
     from_addr = sender.get("address", "")
     ts_fmt    = received[:16].replace("T", " ") if received else "unknown"
+    msg_id    = msg.get("id", "")
+    conv_id   = msg.get("conversationId", "")
+    internet_id = msg.get("internetMessageId", "")
     return (
         f"---\n"
         f"**{subject}**\n"
         f"From: {from_name} <{from_addr}> | {ts_fmt}\n"
+        f"Message ID: {msg_id}\n"
+        f"Conversation ID: {conv_id}\n"
+        f"Internet Message ID: {internet_id}\n"
         f"[Body not shown — external sender]\n\n"
     )
 

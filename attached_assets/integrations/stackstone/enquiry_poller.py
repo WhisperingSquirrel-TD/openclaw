@@ -43,12 +43,13 @@ FAILURE / STALENESS BEHAVIOUR
     → Telegram alert sent immediately, no retry storm (next cron run = 2 min)
 - If the API returns 404:
     → Logged as "endpoint not deployed yet", no Telegram alert (expected during dev)
-- Staleness check:
-    → If the API has returned zero enquiries for more than STALE_HOURS (default 24h)
-      AND the last known enquiry was received more than STALE_HOURS ago, a
-      Telegram health warning is sent once per STALE_INTERVAL_HOURS (6h) to flag
-      that the enquiry pipeline may be broken (form not sending, API down, etc.)
-    → Staleness check uses a separate state file to track last-seen times.
+- Quiet website handling:
+    → A long gap since the last enquiry is now treated as a business/volume signal,
+      not a pipeline-failure signal.
+    → The poller will log that the website has been quiet, but it will NOT send a
+      Telegram/system-health failure alert just because no recent enquiries exist.
+    → Pipeline failure alerts are reserved for real technical problems such as API
+      failures, HTML/error responses instead of JSON, auth issues, or write failures.
 
 CRON
 ----
@@ -310,15 +311,9 @@ def alert_api_failure(error: str) -> None:
     )
 
 
-def alert_stale_feed() -> None:
-    _send_telegram(
-        "⚠️ WEBSITE ENQUIRY FEED MAY BE BROKEN\n\n"
-        f"No new enquiries have been seen in the last {STALE_HOURS} hours.\n\n"
-        "Possible causes:\n"
-        "• Contact form not sending to the database\n"
-        "• Integration API endpoint down\n"
-        "• INTEGRATION_API_KEY expired or rotated\n\n"
-        "Action: Test the contact form manually or check the website logs."
+def log_quiet_website() -> None:
+    log(
+        f"No enquiries seen in the last {STALE_HOURS}h — treating as quiet website activity, not pipeline failure"
     )
 
 
@@ -423,31 +418,23 @@ def _parse_iso(s: str | None) -> datetime | None:
 
 def check_staleness(state: dict) -> bool:
     """
-    Returns True if a staleness alert was sent this call.
-    Fires only once per STALE_INTERVAL_HOURS.
+    Quiet-website check only.
+    Returns True if a quiet-site condition was logged this call.
+    No Telegram/system-health alert is sent from this path.
     """
-    last_seen_str       = state.get("last_enquiry_seen_at")
-    last_stale_alert_str = state.get("last_stale_alert_at")
+    last_seen_str = state.get("last_enquiry_seen_at")
 
     if last_seen_str is None:
-        # No enquiry ever seen — don't alert (system may be newly installed)
+        # No enquiry ever seen — don't treat that as breakage.
         return False
 
-    last_seen        = _parse_iso(last_seen_str)
-    last_stale_alert = _parse_iso(last_stale_alert_str)
-    now              = _now_utc()
+    last_seen = _parse_iso(last_seen_str)
+    now = _now_utc()
 
     if last_seen and (now - last_seen) < timedelta(hours=STALE_HOURS):
-        return False  # Recent enough — no stale alert
-
-    # Feed is stale. Only alert if we haven't alerted in the last STALE_INTERVAL_HOURS.
-    if last_stale_alert and (now - last_stale_alert) < timedelta(hours=STALE_INTERVAL_HOURS):
-        log(f"Feed stale but staleness alert sent within last {STALE_INTERVAL_HOURS}h — suppressing duplicate")
         return False
 
-    log(f"Staleness threshold exceeded ({STALE_HOURS}h since last enquiry) — sending alert")
-    alert_stale_feed()
-    state["last_stale_alert_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    log_quiet_website()
     return True
 
 

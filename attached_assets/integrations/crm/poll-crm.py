@@ -277,14 +277,16 @@ def main():
     last_imported = state.get("last_imported_folder")
     log(f"Last imported folder: {last_imported or 'none'}")
 
+    crm_text = load_crm()
+
     new_folders = find_new_folders(last_imported)
     if not new_folders:
-        log("No new prospect folders to import — nothing to do")
+        crm_text = update_last_updated(crm_text)
+        write_atomic(CRM_MD, crm_text)
+        log("No new prospect folders to import — refreshed crm.md timestamp only")
         return
 
     log(f"New folders to process: {new_folders}")
-
-    crm_text = load_crm()
     existing_emails = extract_existing_emails(crm_text)
     log(f"crm.md: {len(existing_emails)} existing emails loaded")
 
@@ -322,12 +324,12 @@ def main():
         save_state(folder_name)
         log(f"  State updated → {folder_name}")
 
+    crm_text = update_last_updated(crm_text)
+    write_atomic(CRM_MD, crm_text)
     if total_added > 0:
-        crm_text = update_last_updated(crm_text)
-        write_atomic(CRM_MD, crm_text)
         log(f"crm.md written — {total_added} new leads total")
     else:
-        log("crm.md unchanged — no new leads across all folders")
+        log("crm.md written — timestamp refreshed; no new leads across all folders")
 
     log("CRM import poller complete")
 

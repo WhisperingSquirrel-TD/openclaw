@@ -83,7 +83,9 @@ import fcntl
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 import urllib.error
@@ -102,6 +104,8 @@ STATE_FILE    = INTEGRATIONS / "channel-poller-state.json"
 LOCK_FILE     = Path("/tmp/openclaw-youtube-channel-poller.lock")
 LOG_PREFIX    = "[youtube-channel-poller]"
 TRANSCRIPTS_DIR = STATE_DIR / "workspace" / "reference" / "transcripts"
+YOUTUBE_VENV = INTEGRATIONS / ".venv"
+WHISPER_SCRIPT = Path.home() / "openclaw" / "skills" / "openai-whisper-api" / "scripts" / "transcribe.sh"
 
 # How far back to look for videos on first run (days)
 INITIAL_LOOKBACK_DAYS = 3
@@ -236,19 +240,15 @@ def load_channels() -> list[dict]:
     return active
 
 
-def _resolve_handle_to_channel_id(handle_or_url: str) -> str:
-    """
-    Fetch a YouTube @handle or channel page and extract the UC... channel ID.
-    YouTube embeds channelId in its page JSON — no API key needed.
-    Returns '' if resolution fails.
-    """
+def _fetch_youtube_page_html(handle_or_url: str) -> tuple[str, str]:
+    """Return (fetch_url, html) for a YouTube channel/page-like URL, or ('','') on failure."""
     handle_m = re.search(r'youtube\.com/@([\w.-]+)', handle_or_url)
     if handle_m:
         fetch_url = f"https://www.youtube.com/@{handle_m.group(1)}"
     elif handle_or_url.startswith("http"):
         fetch_url = handle_or_url.split("?")[0]
     else:
-        return ""
+        return "", ""
 
     try:
         req = urllib.request.Request(
@@ -263,8 +263,20 @@ def _resolve_handle_to_channel_id(handle_or_url: str) -> str:
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             html = resp.read().decode("utf-8", errors="replace")
+        return fetch_url, html
     except Exception as e:
         log_err(f"Handle resolution fetch failed for {fetch_url}: {e}")
+        return "", ""
+
+
+def _resolve_handle_to_channel_id(handle_or_url: str) -> str:
+    """
+    Fetch a YouTube @handle or channel page and extract the UC... channel ID.
+    YouTube embeds channelId in its page JSON — no API key needed.
+    Returns '' if resolution fails.
+    """
+    fetch_url, html = _fetch_youtube_page_html(handle_or_url)
+    if not html:
         return ""
 
     patterns = [
@@ -277,6 +289,17 @@ def _resolve_handle_to_channel_id(handle_or_url: str) -> str:
         m = re.search(pat, html)
         if m:
             return m.group(1)
+    return ""
+
+
+def _resolve_channel_feed_id(handle_or_url: str) -> str:
+    """Prefer the RSS channel_id advertised by the page itself."""
+    fetch_url, html = _fetch_youtube_page_html(handle_or_url)
+    if not html:
+        return ""
+    m = re.search(r'https://www\.youtube\.com/feeds/videos\.xml\?channel_id=([A-Za-z0-9_-]+)', html)
+    if m:
+        return m.group(1)
     return ""
 
 
@@ -310,15 +333,23 @@ def resolve_channel_id(ch: dict) -> str | None:
 def rss_url_for_channel(ch: dict) -> str:
     """
     Return the YouTube RSS feed URL for a channel entry.
-    Always prefers the ?channel_id= form (most reliable).
-    Falls back to ?user= for legacy entries only.
+    Prefer the feed ID advertised by the page itself when a channel_url exists,
+    because it can differ from page JSON channelId on some channels.
     """
+    url = (ch.get("channel_url") or "").strip().rstrip("/")
+
+    if url:
+        feed_id = _resolve_channel_feed_id(url)
+        if feed_id:
+            if ch.get("channel_id") and ch.get("channel_id").strip() != feed_id:
+                log(f"  RSS feed id differs from configured channel_id; using page-advertised feed id {feed_id} (from {url})")
+            return f"https://www.youtube.com/feeds/videos.xml?channel_id={feed_id}"
+
     channel_id = resolve_channel_id(ch)
     if channel_id:
         return f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
     # Last-resort legacy fallback for old /user/ style channels
-    url = (ch.get("channel_url") or "").strip().rstrip("/")
     m = re.search(r'/user/([\w.-]+)', url)
     if m:
         log(f"  WARNING: Using deprecated ?user= RSS endpoint for {url}")
@@ -334,15 +365,36 @@ def rss_url_for_channel(ch: dict) -> str:
 
 def fetch_rss(rss_url: str) -> list[dict]:
     """Fetch and parse YouTube RSS feed. Returns list of video dicts."""
-    try:
-        req = urllib.request.Request(rss_url, headers={"User-Agent": "OpenClaw-YouTubePoller/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read()
-    except urllib.error.HTTPError as e:
-        log_err(f"HTTP {e.code} fetching RSS {rss_url}")
-        return []
-    except Exception as e:
-        log_err(f"Error fetching RSS {rss_url}: {e}")
+    raw = None
+    headers_to_try = [
+        {"User-Agent": "OpenClaw-YouTubePoller/1.0"},
+        {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+    ]
+    last_err = None
+    for headers in headers_to_try:
+        try:
+            req = urllib.request.Request(rss_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read()
+            break
+        except urllib.error.HTTPError as e:
+            last_err = e
+            continue
+        except Exception as e:
+            last_err = e
+            continue
+
+    if raw is None:
+        if isinstance(last_err, urllib.error.HTTPError):
+            log_err(f"HTTP {last_err.code} fetching RSS {rss_url}")
+        else:
+            log_err(f"Error fetching RSS {rss_url}: {last_err}")
         return []
 
     try:
@@ -382,14 +434,119 @@ def fetch_rss(rss_url: str) -> list[dict]:
     return videos
 
 
+def fetch_videos_from_channel_page(channel_url: str, max_items: int = 15) -> list[dict]:
+    """Fallback when RSS is broken: scrape recent video IDs from the channel videos page."""
+    base_url = channel_url.split("?")[0].rstrip("/")
+    page_url = base_url if base_url.endswith("/videos") else f"{base_url}/videos"
+    try:
+        req = urllib.request.Request(
+            page_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        log_err(f"Channel page fallback failed for {page_url}: {e}")
+        return []
+
+    video_ids = []
+    for vid in re.findall(r'"videoId":"([A-Za-z0-9_-]{11})"', html):
+        if vid not in video_ids:
+            video_ids.append(vid)
+        if len(video_ids) >= max_items:
+            break
+
+    videos = []
+    for vid in video_ids:
+        meta = fetch_video_metadata(vid)
+        title = meta.get("title") or f"https://www.youtube.com/watch?v={vid}"
+        published = meta.get("published") or ""
+        videos.append({
+            "video_id": vid,
+            "channel_id": "",
+            "title": title,
+            "published": published,
+            "url": f"https://www.youtube.com/watch?v={vid}",
+        })
+    return videos
+
+
 # ---------------------------------------------------------------------------
 # Transcript fetch (via youtube-transcript-api)
 # ---------------------------------------------------------------------------
+
+def _fallback_transcribe_via_whisper(video_id: str) -> tuple[str, str]:
+    """Download audio and transcribe via the Whisper skill script."""
+    yt_dlp_bin = YOUTUBE_VENV / "bin" / "yt-dlp"
+    if not yt_dlp_bin.exists():
+        return "", "whisper fallback unavailable — yt-dlp missing"
+    if not WHISPER_SCRIPT.exists():
+        return "", "whisper fallback unavailable — script missing"
+    if not os.environ.get("OPENAI_API_KEY"):
+        return "", "whisper fallback unavailable — OPENAI_API_KEY missing"
+
+    with tempfile.TemporaryDirectory(prefix="yt-audio-") as tmpdir:
+        tmp = Path(tmpdir)
+        audio_base = tmp / video_id
+        audio_out = str(audio_base) + ".%(ext)s"
+        audio_file = tmp / f"{video_id}.mp3"
+        transcript_file = tmp / f"{video_id}.txt"
+
+        download_cmd = [
+            str(yt_dlp_bin),
+            "-x",
+            "--audio-format", "mp3",
+            "-o", audio_out,
+            f"https://www.youtube.com/watch?v={video_id}",
+        ]
+        try:
+            proc = subprocess.run(download_cmd, capture_output=True, text=True, timeout=300)
+            if proc.returncode != 0:
+                return "", f"whisper fallback download failed: {proc.stderr.strip()[:200]}"
+        except Exception as e:
+            return "", f"whisper fallback download error: {e}"
+
+        if not audio_file.exists():
+            mp3s = list(tmp.glob("*.mp3"))
+            if mp3s:
+                audio_file = mp3s[0]
+        if not audio_file.exists():
+            return "", "whisper fallback download produced no audio file"
+
+        transcribe_cmd = [
+            str(WHISPER_SCRIPT),
+            str(audio_file),
+            "--language", "en",
+            "--out", str(transcript_file),
+        ]
+        try:
+            proc = subprocess.run(transcribe_cmd, capture_output=True, text=True, timeout=900, env=os.environ.copy())
+            if proc.returncode != 0:
+                return "", f"whisper fallback transcription failed: {proc.stderr.strip()[:200]}"
+        except Exception as e:
+            return "", f"whisper fallback transcription error: {e}"
+
+        try:
+            text = transcript_file.read_text(encoding="utf-8", errors="replace").strip()
+        except Exception as e:
+            return "", f"whisper fallback read error: {e}"
+
+        if not text:
+            return "", "whisper fallback returned empty transcript"
+        return text, "whisper fallback"
+
 
 def fetch_transcript(video_id: str) -> tuple[str, str]:
     """
     Returns (transcript_text, source_info).
     transcript_text is empty string if no transcript available.
+    Supports both older and newer youtube-transcript-api interfaces.
     """
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
@@ -400,15 +557,14 @@ def fetch_transcript(video_id: str) -> tuple[str, str]:
 
     langs = [l.strip() for l in os.environ.get("YOUTUBE_POLL_LANGS", "en").split(",") if l.strip()]
 
-    if not hasattr(YouTubeTranscriptApi, "list_transcripts"):
-        log_err(
-            "youtube-transcript-api is too old — list_transcripts missing. "
-            "Fix: pip3 install --break-system-packages --upgrade youtube-transcript-api"
-        )
-        return "", "library version too old — upgrade youtube-transcript-api"
-
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        # Old API exposed classmethods like list_transcripts(); newer releases use
+        # an instance with .list() / .fetch(). Support both so the poller survives
+        # package upgrades without silently degrading to stub files.
+        if hasattr(YouTubeTranscriptApi, "list_transcripts"):
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        else:
+            transcript_list = YouTubeTranscriptApi().list(video_id)
     except Exception as e:
         err_str = str(e).lower()
         if "no transcripts" in err_str or "could not retrieve" in err_str:
@@ -435,11 +591,17 @@ def fetch_transcript(video_id: str) -> tuple[str, str]:
             continue
 
     if not transcript:
-        return "", "fetch failed"
+        fallback_text, fallback_info = _fallback_transcribe_via_whisper(video_id)
+        if fallback_text:
+            return fallback_text, fallback_info
+        return "", fallback_info or "fetch failed"
 
     parts = []
     for entry in transcript:
-        text = (entry.get("text") or "").strip()
+        if isinstance(entry, dict):
+            text = (entry.get("text") or "").strip()
+        else:
+            text = (getattr(entry, "text", "") or "").strip()
         if text:
             parts.append(text)
 
@@ -449,6 +611,55 @@ def fetch_transcript(video_id: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # Slug generation
 # ---------------------------------------------------------------------------
+
+def fetch_video_metadata(video_id: str) -> dict:
+    """Best-effort metadata lookup for title + published date."""
+    meta = {"title": "", "published": ""}
+
+    # Fast title path via oEmbed
+    try:
+        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        req = urllib.request.Request(oembed_url, headers={"User-Agent": "OpenClaw/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            meta["title"] = (data.get("title") or "").strip()
+    except Exception:
+        pass
+
+    # Publish-date path via watch page
+    try:
+        watch_url = f"https://www.youtube.com/watch?v={video_id}"
+        req = urllib.request.Request(
+            watch_url,
+            headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+
+        m = re.search(r'"dateText":\{"simpleText":"([^"]+)"\}', html)
+        if m:
+            raw_date = m.group(1).strip()
+            raw_date = re.sub(r'^Streamed live on\s+', '', raw_date)
+            raw_date = re.sub(r'^Premiered\s+', '', raw_date)
+            try:
+                dt = datetime.strptime(raw_date, "%b %d, %Y")
+                meta["published"] = dt.strftime("%Y-%m-%dT00:00:00+00:00")
+            except Exception:
+                pass
+
+        if not meta["title"]:
+            m = re.search(r'<title>(.*?)</title>', html, re.S)
+            if m:
+                meta["title"] = m.group(1).replace(" - YouTube", "").strip()
+    except Exception:
+        pass
+
+    return meta
+
+
+def fetch_video_title(video_id: str) -> str:
+    return fetch_video_metadata(video_id).get("title", "")
+
 
 def make_slug(title: str, max_len: int = 50) -> str:
     slug = title.lower()
@@ -584,7 +795,14 @@ def generate_summary(title: str, transcript: str) -> tuple[str, str]:
         )
 
     prompt = _build_summary_prompt(title, transcript)
-    raw = _call_anthropic_sync(prompt) if has_anthropic else _call_openai(prompt)
+    raw = ""
+    if has_anthropic:
+        raw = _call_anthropic_sync(prompt)
+        if not raw and has_openai:
+            log("Anthropic summary failed — falling back to OpenAI")
+            raw = _call_openai(prompt)
+    elif has_openai:
+        raw = _call_openai(prompt)
 
     if not raw:
         return (
@@ -818,29 +1036,34 @@ def _london_time(dt: datetime) -> str:
 
 
 def write_transcript_file(video: dict, transcript: str, source_info: str,
-                           summary: str, takeaways: str) -> Path:
+                           summary: str, takeaways: str,
+                           overwrite_path: Path | None = None) -> Path:
     """Write the formatted resource file. Returns the path written."""
     TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
 
     title = video.get("title") or video.get("video_id", "untitled")
     slug  = make_slug(title)
 
-    # Parse published date
+    # Parse published date for canonical file naming, but keep a separate
+    # processed timestamp so backfilled/late transcripts do not pretend they
+    # were received on publication day.
     pub_raw = video.get("published", "")
+    processed_str = _london_time(datetime.now(timezone.utc).replace(tzinfo=None))
+    published_str = ""
     try:
         dt = datetime.fromisoformat(pub_raw.replace("Z", "+00:00"))
         date_str = dt.strftime("%Y-%m-%d")
-        received_str = _london_time(dt.astimezone(timezone.utc).replace(tzinfo=None))
+        published_str = dt.strftime("%Y-%m-%d")
     except Exception:
         dt = datetime.now(timezone.utc)
         date_str = dt.strftime("%Y-%m-%d")
-        received_str = _london_time(datetime.utcnow())
 
     filename = f"{date_str} - {slug}.md"
-    path = TRANSCRIPTS_DIR / filename
+    path = overwrite_path or (TRANSCRIPTS_DIR / filename)
 
-    # Avoid overwriting if file already exists (e.g. duplicate slug)
-    if path.exists():
+    # Avoid overwriting if file already exists (e.g. duplicate slug), unless we
+    # are intentionally repairing/backfilling an existing resource file in place.
+    if overwrite_path is None and path.exists():
         suffix = 2
         while path.exists():
             path = TRANSCRIPTS_DIR / f"{date_str} - {slug}-{suffix}.md"
@@ -859,13 +1082,19 @@ def write_transcript_file(video: dict, transcript: str, source_info: str,
     else:
         transcript_status = f"unavailable — {source_info}" if source_info else "unavailable"
 
+    meta_lines = [
+        f"# {title}",
+        f"- Processed: {processed_str} Europe/London",
+        f"- Source: {url}",
+        f"- Topic: {topic}",
+        f"- Status: resource",
+        f"- Transcript: {transcript_status}",
+    ]
+    if published_str:
+        meta_lines.insert(1, f"- Published: {published_str}")
+
     content = (
-        f"# {title}\n"
-        f"- Received: {received_str} Europe/London\n"
-        f"- Source: {url}\n"
-        f"- Topic: {topic}\n"
-        f"- Status: resource\n"
-        f"- Transcript: {transcript_status}\n"
+        "\n".join(meta_lines) + "\n"
         f"\n"
         f"## Useful Summary\n"
         f"{summary}\n"
@@ -912,7 +1141,8 @@ def _get_telegram_creds() -> tuple[str, str]:
     if not chat_id:
         allow_from = tg.get("allowFrom", [])
         if allow_from:
-            chat_id = str(allow_from[0])
+            candidate = str(allow_from[0])
+            chat_id = candidate.split(":", 1)[1] if ":" in candidate else candidate
     return token, chat_id
 
 
@@ -946,7 +1176,7 @@ def notify(msg: str) -> None:
 # Process a single video — sync path (--sync / --video / OpenAI fallback)
 # ---------------------------------------------------------------------------
 
-def process_video_sync(video: dict, channel_label: str) -> bool:
+def process_video_sync(video: dict, channel_label: str, overwrite_path: Path | None = None) -> bool:
     """Fetch transcript, generate summary synchronously, write file, notify."""
     vid   = video["video_id"]
     title = video.get("title", vid)
@@ -958,7 +1188,7 @@ def process_video_sync(video: dict, channel_label: str) -> bool:
         log(f"  No transcript ({source_info}) — saving stub file")
 
     summary, takeaways = generate_summary(title, transcript)
-    path = write_transcript_file(video, transcript, source_info, summary, takeaways)
+    path = write_transcript_file(video, transcript, source_info, summary, takeaways, overwrite_path=overwrite_path)
 
     label = channel_label or "YouTube"
     notify(
@@ -998,6 +1228,8 @@ def poll_channels(state: dict, sync: bool = False) -> int:
     has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     # In batch mode we need Anthropic; OpenAI has no batch API so fall back to sync
+    # only when Anthropic is absent. If Anthropic auth is broken, let batch submit
+    # fail explicitly and then fall back, rather than silently bypassing the 50%-cheaper path.
     if not has_anthropic:
         sync = True
 
@@ -1018,6 +1250,11 @@ def poll_channels(state: dict, sync: bool = False) -> int:
         log(f"Polling channel: {label}")
         videos = fetch_rss(rss)
         log(f"  RSS returned {len(videos)} video(s)")
+        if not videos and ch.get("channel_url"):
+            fallback_videos = fetch_videos_from_channel_page(ch["channel_url"])
+            if fallback_videos:
+                videos = fallback_videos
+                log(f"  Channel page fallback returned {len(videos)} video(s)")
 
         def _pub_dt(v):
             try:
@@ -1150,22 +1387,13 @@ def process_single_video_url(url_or_id: str) -> None:
         print(f"Could not extract video ID from: {url_or_id}", file=sys.stderr)
         sys.exit(1)
 
+    meta = fetch_video_metadata(vid)
     video: dict = {
         "video_id":  vid,
-        "title":     url_or_id,
-        "published": datetime.now(timezone.utc).isoformat(),
+        "title":     meta.get("title") or url_or_id,
+        "published": meta.get("published") or datetime.now(timezone.utc).isoformat(),
         "url":       f"https://www.youtube.com/watch?v={vid}",
     }
-
-    # Try to get title from oEmbed (no API key needed)
-    try:
-        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
-        req = urllib.request.Request(oembed_url, headers={"User-Agent": "OpenClaw/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-            video["title"] = data.get("title", url_or_id)
-    except Exception:
-        pass
 
     log(f"Single-video mode: {video['title']!r} ({vid})")
     transcript, source_info = fetch_transcript(vid)
@@ -1228,12 +1456,22 @@ def backfill_stubs(filenames: list[str]) -> None:
         )
         title = title_line.lstrip("# ").strip() or vid
 
-        # Extract published from Received line (best effort)
+        # Extract published date from frontmatter when available
+        published_line = next(
+            (ln for ln in text.splitlines() if ln.strip().lower().startswith("- published:")), ""
+        )
+        processed_line = next(
+            (ln for ln in text.splitlines() if ln.strip().lower().startswith("- processed:")), ""
+        )
         received_line = next(
             (ln for ln in text.splitlines() if ln.strip().lower().startswith("- received:")), ""
         )
         published = ""
-        date_m = re.search(r'(\d{4}-\d{2}-\d{2})', received_line)
+        date_m = (
+            re.search(r'(\d{4}-\d{2}-\d{2})', published_line)
+            or re.search(r'(\d{4}-\d{2}-\d{2})', received_line)
+            or re.search(r'(\d{4}-\d{2}-\d{2})', processed_line)
+        )
         if date_m:
             published = f"{date_m.group(1)}T00:00:00Z"
 
@@ -1242,11 +1480,18 @@ def backfill_stubs(filenames: list[str]) -> None:
         if url_m:
             url = url_m.group(0).rstrip(")")
 
+        if not published:
+            meta = fetch_video_metadata(vid)
+            published = meta.get("published", "") or published
+            if title == vid and meta.get("title"):
+                title = meta["title"]
+
         to_process.append({
             "video_id":  vid,
             "title":     title,
             "published": published,
             "url":       url,
+            "overwrite_path": str(p),
         })
         log(f"Backfill: queued {vid} — {title!r}")
 
@@ -1269,7 +1514,11 @@ def backfill_stubs(filenames: list[str]) -> None:
     for video in to_process:
         vid = video["video_id"]
         try:
-            ok = process_video_sync(video, channel_label="backfill")
+            ok = process_video_sync(
+                video,
+                channel_label="backfill",
+                overwrite_path=Path(video["overwrite_path"]) if video.get("overwrite_path") else None,
+            )
             if ok:
                 written += 1
         except Exception as e:
