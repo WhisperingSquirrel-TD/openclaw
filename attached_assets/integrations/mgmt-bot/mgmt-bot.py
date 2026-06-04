@@ -163,7 +163,14 @@ def _tg(token: str, method: str, **kwargs) -> dict:
 
 
 def send(token: str, chat_id: str, text: str) -> None:
-    _tg(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="Markdown")
+    resp = _tg(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="Markdown")
+    # Telegram rejects messages whose Markdown is malformed (e.g. unbalanced
+    # backticks/underscores in an interpolated error string) with a 400, which
+    # _tg swallows and returns {}. Without this fallback the reply silently
+    # vanishes and the command appears unresponsive. Retry once as plain text
+    # so the user always gets feedback.
+    if not resp.get("ok"):
+        _tg(token, "sendMessage", chat_id=chat_id, text=text)
 
 
 def get_updates(token: str, offset: int) -> list:
@@ -186,9 +193,30 @@ def get_updates(token: str, offset: int) -> list:
     try:
         with urllib.request.urlopen(req, timeout=45) as resp:
             result = json.loads(resp.read())
+            if not result.get("ok"):
+                # HTTP 200 but Telegram reported an API-level failure
+                # (e.g. invalid token). Treat as a failure so backoff engages
+                # instead of silently spinning.
+                raise RuntimeError(
+                    f"Telegram API not ok: {result.get('description', result)}"
+                )
+            get_updates._fail_count = 0
             return result.get("result", [])
     except Exception as e:
-        print(f"[mgmt-bot] getUpdates error: {e}", file=sys.stderr)
+        # Sustained network/DNS failures (Errno -3 name resolution, Errno 101
+        # unreachable, connection reset) would otherwise make this loop spin
+        # ~once/second, flooding the log and hammering a network that's already
+        # struggling. Back off exponentially (capped at 60s) and only log the
+        # first failure and every 10th thereafter so the log stays readable.
+        get_updates._fail_count = getattr(get_updates, "_fail_count", 0) + 1
+        fails = get_updates._fail_count
+        backoff = min(60, 2 ** min(fails, 6))
+        if fails == 1 or fails % 10 == 0:
+            print(
+                f"[mgmt-bot] getUpdates error (x{fails}): {e}; backing off {backoff}s",
+                file=sys.stderr,
+            )
+        time.sleep(backoff)
         return []
 
 
@@ -452,8 +480,12 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
         "codexmini":  "OPENCLAW_CODEX_MINI_MODEL",
     }.get(provider, "OPENCLAW_OPENAI_MODEL")
 
-    # Default values if env var not explicitly set
+    # Default values if env var not explicitly set. openai/anthropic are
+    # included so /openai and /anthropic work out of the box like /codex,
+    # without requiring the user to hand-edit ~/.openclaw/.env first.
     model_defaults = {
+        "openai":    "openai/gpt-5-mini-2025-08-07",
+        "anthropic": "anthropic/claude-sonnet-4-5",
         "codex":     "openai-codex/gpt-5.4",
         "codexmini": "openai-codex/gpt-5.3-codex",
     }
