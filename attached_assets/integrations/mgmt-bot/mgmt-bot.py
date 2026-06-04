@@ -163,7 +163,14 @@ def _tg(token: str, method: str, **kwargs) -> dict:
 
 
 def send(token: str, chat_id: str, text: str) -> None:
-    _tg(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="Markdown")
+    resp = _tg(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="Markdown")
+    # Telegram rejects messages whose Markdown is malformed (e.g. unbalanced
+    # backticks/underscores in an interpolated error string) with a 400, which
+    # _tg swallows and returns {}. Without this fallback the reply silently
+    # vanishes and the command appears unresponsive. Retry once as plain text
+    # so the user always gets feedback.
+    if not resp.get("ok"):
+        _tg(token, "sendMessage", chat_id=chat_id, text=text)
 
 
 def get_updates(token: str, offset: int) -> list:
@@ -452,8 +459,12 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
         "codexmini":  "OPENCLAW_CODEX_MINI_MODEL",
     }.get(provider, "OPENCLAW_OPENAI_MODEL")
 
-    # Default values if env var not explicitly set
+    # Default values if env var not explicitly set. openai/anthropic are
+    # included so /openai and /anthropic work out of the box like /codex,
+    # without requiring the user to hand-edit ~/.openclaw/.env first.
     model_defaults = {
+        "openai":    "openai/gpt-5-mini-2025-08-07",
+        "anthropic": "anthropic/claude-sonnet-4-5",
         "codex":     "openai-codex/gpt-5.4",
         "codexmini": "openai-codex/gpt-5.3-codex",
     }
