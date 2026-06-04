@@ -193,6 +193,13 @@ def get_updates(token: str, offset: int) -> list:
     try:
         with urllib.request.urlopen(req, timeout=45) as resp:
             result = json.loads(resp.read())
+            if not result.get("ok"):
+                # HTTP 200 but Telegram reported an API-level failure
+                # (e.g. invalid token). Treat as a failure so backoff engages
+                # instead of silently spinning.
+                raise RuntimeError(
+                    f"Telegram API not ok: {result.get('description', result)}"
+                )
             get_updates._fail_count = 0
             return result.get("result", [])
     except Exception as e:
