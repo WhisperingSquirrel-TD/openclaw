@@ -1103,6 +1103,31 @@ def cmd_disk(token: str, chat_id: str) -> None:
         send(token, chat_id, f"```{r.stdout.strip()}```")
 
 
+def _run_wcp_script(script_name: str) -> str:
+    project_dir = Path.home() / ".openclaw" / "workspace" / "projects" / "workspace-control-panel"
+    script_path = project_dir / "scripts" / script_name
+    if not script_path.exists():
+        raise FileNotFoundError(f"WCP helper script not found: {script_path}")
+    if not os.access(script_path, os.X_OK):
+        raise PermissionError(f"WCP helper script is not executable: {script_path}")
+    proc = subprocess.run([str(script_path)], cwd=project_dir, capture_output=True, text=True, timeout=120)
+    combined = "\n".join(part.strip() for part in [proc.stdout, proc.stderr] if part and part.strip()).strip()
+    if proc.returncode != 0:
+        raise RuntimeError(combined or f"Script failed with exit code {proc.returncode}")
+    return combined or "Done."
+
+
+def cmd_wcp_up(token: str, chat_id: str) -> None:
+    send(token, chat_id, "🚀 Restarting WCP gateway and creating a fresh quick tunnel…")
+    out = _run_wcp_script("start-gateway-and-tunnel.sh")
+    send(token, chat_id, f"✅ *WCP up*\n\n```{out}```")
+
+
+def cmd_wcp_url(token: str, chat_id: str) -> None:
+    out = _run_wcp_script("print-tunnel-url.sh")
+    send(token, chat_id, f"🔗 *Current WCP tunnel URL*\n\n`{out}`")
+
+
 def cmd_soul_start(token: str, chat_id: str) -> None:
     """Step 1 of 2: prompt the user to send their SOUL.md file."""
     passphrase = _cfg("OPENCLAW_VAULT_PASSPHRASE")
@@ -1937,6 +1962,8 @@ MENU_COMMANDS = [
     ("health",    "Run system health check now"),
     ("logs",      "Show recent errors across all poller logs"),
     ("disk",      "Disk space on the Pi"),
+    ("wcp_up",    "Restart WCP gateway + create quick tunnel"),
+    ("wcp_url",   "Show current WCP quick tunnel URL"),
     # Control
     ("restart",   "Restart the L1 gateway service"),
     ("pull",      "Git pull latest from GitHub"),
@@ -2366,6 +2393,10 @@ COMMANDS = {
     "/ai-briefing":     lambda t, c: cmd_ai_briefing(t, c, ""),
     "/ai_briefing":     lambda t, c: cmd_ai_briefing(t, c, ""),
     "/disk":            cmd_disk,
+    "/wcp-up":          cmd_wcp_up,
+    "/wcp_up":          cmd_wcp_up,
+    "/wcp-url":         cmd_wcp_url,
+    "/wcp_url":         cmd_wcp_url,
     "/soul":       cmd_soul_start,
     "/sp-sync":    cmd_sp_sync,
     "/sp_sync":    cmd_sp_sync,
