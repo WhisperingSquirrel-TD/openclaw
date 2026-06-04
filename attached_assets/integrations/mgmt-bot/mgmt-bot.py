@@ -193,9 +193,23 @@ def get_updates(token: str, offset: int) -> list:
     try:
         with urllib.request.urlopen(req, timeout=45) as resp:
             result = json.loads(resp.read())
+            get_updates._fail_count = 0
             return result.get("result", [])
     except Exception as e:
-        print(f"[mgmt-bot] getUpdates error: {e}", file=sys.stderr)
+        # Sustained network/DNS failures (Errno -3 name resolution, Errno 101
+        # unreachable, connection reset) would otherwise make this loop spin
+        # ~once/second, flooding the log and hammering a network that's already
+        # struggling. Back off exponentially (capped at 60s) and only log the
+        # first failure and every 10th thereafter so the log stays readable.
+        get_updates._fail_count = getattr(get_updates, "_fail_count", 0) + 1
+        fails = get_updates._fail_count
+        backoff = min(60, 2 ** min(fails, 6))
+        if fails == 1 or fails % 10 == 0:
+            print(
+                f"[mgmt-bot] getUpdates error (x{fails}): {e}; backing off {backoff}s",
+                file=sys.stderr,
+            )
+        time.sleep(backoff)
         return []
 
 
