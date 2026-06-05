@@ -2152,6 +2152,42 @@ if command -v tailscale >/dev/null 2>&1 && [ -f /etc/resolv.conf ]; then
     fi
 fi
 
+# 3. Connectivity self-check (diagnostic only — never aborts the install).
+#    The mgmt-bot's getUpdates loop has been failing with a MIX of:
+#      Errno -3  Temporary failure in name resolution  -> DNS layer
+#      Errno 101 Network is unreachable                -> link/route layer
+#      Errno 104 Connection reset / read timed out     -> flaky uplink
+#    Five quick probes classify the failure so it's clear whether to fix DNS
+#    (item 2 above) or the physical link (Wi-Fi signal / move to ethernet).
+echo
+info "Connectivity self-check (5 quick probes)…"
+if command -v curl >/dev/null 2>&1; then
+    _probe_ip() { curl -sS --max-time 4 -o /dev/null https://1.1.1.1/ 2>/dev/null; }
+else
+    _probe_ip() { ping -c1 -W3 1.1.1.1 >/dev/null 2>&1; }
+fi
+CONN_IP_OK=0; CONN_DNS_OK=0
+# Probe failures are intentionally ignored under `set -e`: each probe is the
+# left side of an `&&`, so a non-zero exit only skips the counter bump and
+# never aborts the install. Keep this `<probe> && <counter>` shape on refactor.
+for _ in 1 2 3 4 5; do
+    _probe_ip && CONN_IP_OK=$((CONN_IP_OK+1))
+    getent hosts api.telegram.org >/dev/null 2>&1 && CONN_DNS_OK=$((CONN_DNS_OK+1))
+    sleep 1
+done
+info "  Link (IP 1.1.1.1): ${CONN_IP_OK}/5 ok    DNS (api.telegram.org): ${CONN_DNS_OK}/5 ok"
+if [ "$CONN_IP_OK" -lt 5 ]; then
+    warn "  Uplink FLAKY — $((5 - CONN_IP_OK))/5 raw-IP probes failed (Errno 101/104/timeout territory)."
+    warn "    This is the physical link, NOT DNS. Check Wi-Fi signal or move the Pi to ethernet."
+fi
+if [ "$CONN_IP_OK" -gt 0 ] && [ "$CONN_DNS_OK" -lt 5 ]; then
+    warn "  DNS FAILING — $((5 - CONN_DNS_OK))/5 lookups failed while raw IP works (classic Errno -3)."
+    warn "    Fix via item 2 above (OPENCLAW_TAILSCALE_DISABLE_DNS=1, or a global resolver in Tailscale)."
+fi
+if [ "$CONN_IP_OK" -eq 5 ] && [ "$CONN_DNS_OK" -eq 5 ]; then
+    info "  Connectivity OK — link and DNS both healthy on all 5 probes."
+fi
+
 # ---------------------------------------------------------------------------
 # Auto-restart mgmt-bot so newly symlinked code is live immediately.
 # Uses a 5-second deferred restart so this script can finish (and the bot can
