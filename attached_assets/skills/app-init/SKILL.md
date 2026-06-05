@@ -1,17 +1,18 @@
 ---
 name: app-init
-description: Initialise a new app project after its spec is approved. Creates the GitHub repo, scaffolds from the standard template, prepares Vercel preview deployment. Use when Tom says "initialise project X", "init X", "set up the repo for X", or "ready to start building X". Requires an approved spec file. Fails loudly if tokens or prerequisites are missing.
+description: Initialise a new app project after its spec is approved. Creates the GitHub repo, scaffolds from the standard template, stores the canonical repo link, and prepares the GitHub-backed hosted preview path (for example Vercel). Use when Tom says "initialise project X", "init X", "set up the repo for X", or "ready to start building X". Requires an approved spec file. Fails loudly if tokens or prerequisites are missing.
 ---
 
 # app-init
 
-**Purpose:** Initialise a project for build — create the GitHub repo, scaffold from template, prepare Vercel preview deployment. This skill runs once per project, after the spec is approved, before any build work begins.
+**Purpose:** Initialise a project for build — create the GitHub repo, scaffold from template, store the canonical repo details, and prepare the GitHub-backed hosted preview route. This skill runs once per project, after the spec is approved, before any build work begins.
 
 ---
 
 ## Trigger
 
 Use this skill when Tom says any of:
+
 - "Initialise project X"
 - "Init X"
 - "Set up the repo for X"
@@ -24,6 +25,7 @@ Use this skill when Tom says any of:
 ## Required inputs
 
 Before starting, confirm you have:
+
 1. **Project name** — must match an existing spec file
 2. **GitHub username / org** — where to create the repo (default: Tom's personal account)
 3. **Template repo** — the standard Next.js/Tailwind/TS template (default: stored in `~/.openclaw/workspace/reference/template-repo.txt`)
@@ -52,6 +54,7 @@ If anything is missing: **stop and report clearly. Do not continue.**
 ### Step 2 — Create GitHub repo
 
 Run the helper script:
+
 ```bash
 python3 ~/.openclaw/integrations/github/create-repo.py \
   --name <project-name> \
@@ -91,19 +94,35 @@ If `npm install` fails at this point, stop and report. Do not continue.
 ### Step 4 — Prepare .env.example
 
 Copy from template if not already present. Ensure it lists:
+
 - `NEXT_PUBLIC_APP_URL=`
 - Any integration keys the spec calls for
 
 Do not put real secrets into .env.example.
 
-### Step 5 — Prepare Vercel preview deployment
+### Step 5 — Prepare GitHub-backed hosted preview route
 
-Link the repo to Vercel so preview deploys trigger automatically on push:
+Link the repo to the hosted preview provider so preview deploys trigger from GitHub pushes:
+
 ```bash
 npx vercel link --yes --project <project-name> --token $VERCEL_TOKEN
 ```
 
 If this step fails, stop and report clearly. Do not continue.
+
+### Step 5a — Store canonical downstream linkage
+
+Record the information future build/control steps will need:
+
+- canonical local project path
+- canonical GitHub repo URL
+- remote name (`origin` unless intentionally different)
+- default branch
+- hosted preview provider
+- how preview URLs are expected to appear after push
+- whether the project must be added to the workspace dev-project registry immediately
+
+Minimum durable record: add/update the relevant project note/spec/progress file with the repo URL and preview-hosting route so future sessions do not have to rediscover it.
 
 ### Step 6 — Create session journal
 
@@ -130,17 +149,25 @@ git commit -m "chore: initial project setup from template"
 git push origin main
 ```
 
+After push, verify that:
+
+- the GitHub remote is the canonical source for hosted preview builds
+- the repo URL is stored in a durable project file
+- the downstream control-plane/GUI path knows which repo this project belongs to
+
 ---
 
 ## Output
 
 Report to Tom:
+
 ```
 Project <name> initialised.
 
 Repo: https://github.com/<owner>/<project-name>
-Vercel preview: connected (will generate preview URL on next push)
+Hosted preview: connected to GitHub-backed deploy flow (will generate preview URL on next push)
 Spec: ~/.openclaw/workspace/specs/<project-name>.md
+Canonical repo link + downstream route: recorded for future build/control-plane use
 
 Ready to build. Tell me: "Build phase 1" to start.
 ```
@@ -150,6 +177,7 @@ Ready to build. Tell me: "Build phase 1" to start.
 ## Stop conditions
 
 Stop immediately and report if:
+
 - Spec file not found
 - GITHUB_TOKEN missing
 - VERCEL_TOKEN missing
@@ -163,13 +191,13 @@ Stop immediately and report if:
 
 ## Failure modes
 
-| Situation | Action |
-|-----------|--------|
-| GITHUB_TOKEN missing | Stop — "GITHUB_TOKEN not found in .env. Add it and retry." |
-| VERCEL_TOKEN missing | Stop — "VERCEL_TOKEN not found in .env. Add it and retry." |
-| Repo name already taken | Stop — "Repo <name> already exists. Choose a different name or delete the existing one." |
-| GitHub API 401 | Stop — "GitHub token rejected. Check token scope (needs: repo)." |
-| GitHub API 422 | Stop — "Repo creation failed (validation error). Check token scope and repo name." |
+| Situation               | Action                                                                                    |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| GITHUB_TOKEN missing    | Stop — "GITHUB_TOKEN not found in .env. Add it and retry."                                |
+| VERCEL_TOKEN missing    | Stop — "VERCEL_TOKEN not found in .env. Add it and retry."                                |
+| Repo name already taken | Stop — "Repo <name> already exists. Choose a different name or delete the existing one."  |
+| GitHub API 401          | Stop — "GitHub token rejected. Check token scope (needs: repo)."                          |
+| GitHub API 422          | Stop — "Repo creation failed (validation error). Check token scope and repo name."        |
 | Template repo not found | Stop — "Template repo not found. Check ~/.openclaw/workspace/reference/template-repo.txt" |
-| Vercel link fails | Stop — report exact error from Vercel CLI |
-| projects/ dir missing | Create it: `mkdir -p ~/.openclaw/workspace/projects/` |
+| Vercel link fails       | Stop — report exact error from Vercel CLI                                                 |
+| projects/ dir missing   | Create it: `mkdir -p ~/.openclaw/workspace/projects/`                                     |

@@ -15,7 +15,18 @@ Verify that the built change works before Tom sees it as ready.
 2. Run the relevant self-test workflow for the project or Pi/internal change.
 3. Record pass/fail clearly.
 4. Record what was tested, what was not tested, and what still depends on live deployment/runtime verification.
-5. If the test fails, route back to build rather than passing failure forward.
+5. For external/client projects, test both layers explicitly where relevant:
+   - project/runtime layer: build/test/deploy/preview service itself
+   - workspace control-plane layer: registry/path/env/URL discovery/GUI panel actions if applicable
+6. **Classify the failing layer before proposing the next action**:
+   - project/runtime/app code failure
+   - hosted preview provider/deployment failure
+   - control-plane/backend failure
+   - GUI/frontend failure
+     Do not widen the fix to another layer unless there is evidence that layer is also broken.
+7. Add an end-to-end verdict whenever relevant:
+   - can Tom go from asking for the project to actually opening/controlling the preview through the GUI/control plane?
+8. If the test fails, route back to build rather than passing failure forward.
 
 ## Rules
 
@@ -23,3 +34,9 @@ Verify that the built change works before Tom sees it as ready.
 - Testing is part of the build workflow, not an optional extra.
 - Be explicit about what was tested and what was not.
 - For Pi/internal work, include whether the git/update path is ready for push or still blocked.
+- For external/client projects with hosted preview environments, distinguish clearly between:
+  - local build/test pass
+  - GitHub push/update path healthy
+  - hosted preview reachable from the GitHub-backed provider
+  - workspace GUI/control-plane able to surface the real public URL and actions
+  - Tom actually having a usable end-to-end path from request → project → preview/control surface

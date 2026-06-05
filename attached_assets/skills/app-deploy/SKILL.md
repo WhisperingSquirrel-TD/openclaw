@@ -15,7 +15,12 @@ Move a tested build to the approved destination without skipping sign-off, while
 2. Confirm which branch of work this is: internal Pi/self-build, new standalone app/system, or external/client/project.
 3. Confirm Tom explicitly approved deployment when a real deploy/restart/merge is involved.
 4. Follow the project’s deployment route.
-5. Report outcome clearly, including commit/push/deploy state.
+5. For GitHub-backed hosted-preview projects, report the full chain explicitly:
+   - what was built on the Pi
+   - what commit/branch was pushed to GitHub
+   - which hosted preview provider picked it up
+   - what preview URL or deploy status resulted
+6. Report outcome clearly, including commit/push/deploy state.
 
 ## Rules
 
@@ -23,3 +28,4 @@ Move a tested build to the approved destination without skipping sign-off, while
 - No merge/deploy just because the app looks ready.
 - Separate preview/review from production deployment.
 - Internal Pi work may only need restart/reload rather than a separate public deployment, but the outcome still needs to state whether GitHub/repo state was updated.
+- For deployable external/client projects, GitHub repo linkage is not optional context: the deploy report must name the canonical repo URL/remote and whether the hosted preview is building from that repo as intended.
