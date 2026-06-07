@@ -47,6 +47,7 @@ LOG_FILE       = OPENCLAW / "workspace" / "memory" / "poll-garmin-log.txt"
 LOG_MAX_LINES     = 1000
 LOG_TRIM_TO       = 800
 ARCHIVE_RETAIN_DAYS = 28
+LOG_TO_STDOUT     = False  # keep Garmin chatter out of aggregated runtime logs; use poll-garmin-log.txt for diagnosis
 
 BASE_URL = "https://connect.garmin.com"
 
@@ -70,7 +71,8 @@ def log(msg: str):
         tmp.replace(LOG_FILE)
     except Exception:
         tmp.unlink(missing_ok=True)
-    print(line, end="", flush=True)
+    if LOG_TO_STDOUT:
+        print(line, end="", flush=True)
 
 
 # ── Atomic write ───────────────────────────────────────────────────────────────
