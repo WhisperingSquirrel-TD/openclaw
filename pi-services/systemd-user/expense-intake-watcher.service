@@ -1,0 +1,8 @@
+[Unit]
+Description=Expense intake watcher
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/tomdean88/openclaw/pi-services/expense-intake-watcher/watcher.py
+WorkingDirectory=/home/tomdean88/openclaw/pi-services/expense-intake-watcher
