@@ -59,6 +59,7 @@ OUTPUT_MD  = WORKSPACE / "SYSTEM_HEALTH.md"
 CODE_REPO  = HOME / "openclaw"
 WORKSPACE_REPO = WORKSPACE
 SP_BACKUP_STATE = OPENCLAW / "integrations/microsoft/sharepoint-backup-state.json"
+SP_BACKUP_LOG = WORKSPACE / "memory/sharepoint-backup-log.txt"
 SP_BACKUP_TIMER = "openclaw-sharepoint-backup.timer"
 
 # ---------------------------------------------------------------------------
@@ -300,6 +301,7 @@ def check_github_sync() -> list[str]:
 
 def check_sharepoint_backup_health() -> list[str]:
     issues = []
+    recent_success = False
     age = _mtime_age_minutes(SP_BACKUP_STATE)
     if age is None:
         issues.append("SharePoint backup: state file missing — backup may never have completed")
@@ -312,16 +314,33 @@ def check_sharepoint_backup_health() -> list[str]:
             state = json.loads(SP_BACKUP_STATE.read_text())
             if state.get('status') != 'ok':
                 issues.append("SharePoint backup: latest recorded state is not OK")
+            else:
+                recent_success = age <= (26 * 60)
         except Exception as e:
             issues.append(f"SharePoint backup: state unreadable ({e})")
 
+    log_age = _mtime_age_minutes(SP_BACKUP_LOG)
+    if log_age is not None and log_age <= (26 * 60):
+        try:
+            lines = SP_BACKUP_LOG.read_text(encoding='utf-8', errors='replace').splitlines()[-200:]
+            if any('SharePoint backup completed successfully.' in line for line in lines):
+                recent_success = True
+        except Exception:
+            pass
+
     rc, out, err = _run(["systemctl", "--user", "is-enabled", SP_BACKUP_TIMER])
     if rc != 0 or out.strip() != 'enabled':
-        issues.append("SharePoint backup: timer not enabled")
+        if recent_success:
+            issues.append("SharePoint backup: timer state not readable as enabled, but recent backup success is proven by state/log")
+        else:
+            issues.append("SharePoint backup: timer not enabled")
 
     rc, out, err = _run(["systemctl", "--user", "show", SP_BACKUP_TIMER, "--property=NextElapseUSecRealtime", "--property=LastTriggerUSec"], cwd=WORKSPACE)
     if rc != 0:
-        issues.append("SharePoint backup: could not read timer state")
+        if recent_success:
+            issues.append("SharePoint backup: could not read timer state, but recent backup success is proven by state/log")
+        else:
+            issues.append("SharePoint backup: could not read timer state")
     return issues
 
 

@@ -30,6 +30,17 @@ Implement the agreed build in a disciplined way, using the same checklist whethe
 10. Stop and surface uncertainty instead of silently improvising architecture.
 11. Before calling implementation complete, state the git/update path: commit, push, and any deploy/restart requirement.
 12. For external/client projects, also state whether the project has been wired into the workspace control plane yet, and if not, what is still missing (registry entry, runnable root, GitHub push route, preview URL discovery, auth/env, GUI action support).
+13. **Chat-usable completion rule (MANDATORY):** if Tom asks to build something so it can be run/used "from chat", do not stop at a backend bridge or control-plane route alone. Completion requires one of:
+
+- an existing first-class tool in the current runtime can actually call the new path end-to-end, or
+- the build explicitly includes the chat/runtime wiring layer that makes it callable from this session class, or
+- you clearly say the work is only the backend foundation and that it is **not yet usable from chat** before implying success.
+
+14. **Outcome-over-layer rule:** when Tom's request is phrased as an outcome (e.g. "so you can run it from chat"), treat that outcome as the acceptance criterion. Do not present a lower layer (API, gateway route, config, internal bridge) as the solved thing unless that lower layer actually delivers the requested user-facing capability.
+15. **Discriminating-debug rule (MANDATORY):** when an integration still fails after one plausible fix, stop proposing adjacent guesses and isolate the failing layer with the smallest direct test. For a chat/runtime tool path, the required chain is: (a) plugin discovered, (b) tool exposed in live agent tool catalog, (c) tool invocation succeeds, (d) downstream service responds, (e) requested end-to-end action succeeds. After each step, state exactly which layer is now proven and which remains unproven.
+16. **No-premature-success rule (MANDATORY):** do not say "usable", "working", "fixed", or equivalent until the exact requested workflow has completed successfully at least once. For this class of task, that means the real requested action must run end-to-end; partial progress (tool visible, API reachable, job submitted, etc.) must be described only as partial progress.
+17. **No-gated-shortcut-while-building-ungated-path rule (MANDATORY):** if Tom asks to build a route that avoids a gate/tool/dependency (for example "without exec"), do not use the gated route to complete the user-facing task unless Tom explicitly approves that as a temporary workaround. A gated workaround may be used only for tightly scoped diagnostics to isolate a failing layer, and it must be labelled as temporary containment, not completion.
+18. **Goal-protection rule (MANDATORY):** when debugging a system whose purpose is to remove friction, do not defeat the purpose by bypassing the target path just to get the immediate outcome. Protect the build goal first; if a workaround undermines the architecture Tom asked for, stop and ask before using it.
 
 ## Rules
 

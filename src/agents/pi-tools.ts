@@ -3,7 +3,7 @@ import type { OpenClawConfig } from "../config/config.js";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
 import { resolveMergedSafeBinProfileFixtures } from "../infra/exec-safe-bin-runtime-policy.js";
 import { logWarn } from "../logger.js";
-import { getPluginToolMeta } from "../plugins/tools.js";
+import { getPluginToolMeta, resolvePluginTools } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
 import { resolveAgentConfig } from "./agent-scope.js";
@@ -513,6 +513,22 @@ export function createOpenClawCodingTools(options?: {
       requesterSenderId: options?.senderId,
       senderIsOwner: options?.senderIsOwner,
       sessionId: options?.sessionId,
+    }),
+    ...resolvePluginTools({
+      context: {
+        config: options?.config,
+        workspaceDir: workspaceRoot,
+        agentDir: options?.agentDir,
+        agentId,
+        sessionKey: options?.sessionKey,
+        sessionId: options?.sessionId,
+        messageChannel: options?.messageProvider,
+        agentAccountId: options?.agentAccountId,
+        requesterSenderId: options?.senderId ?? undefined,
+        senderIsOwner: options?.senderIsOwner,
+        sandboxed: !!sandbox,
+      },
+      existingToolNames: new Set(),
     }),
   ];
   const toolsForMessageProvider = applyMessageProviderToolPolicy(tools, options?.messageProvider);
