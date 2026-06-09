@@ -40,3 +40,5 @@ Verify that the built change works before Tom sees it as ready.
   - hosted preview reachable from the GitHub-backed provider
   - workspace GUI/control-plane able to surface the real public URL and actions
   - Tom actually having a usable end-to-end path from request → project → preview/control surface
+- **Ungated-proof rule (MANDATORY):** if the feature being tested is specifically meant to work without exec/TOTP (or without some other gate/dependency), the proof test must use that ungated path. Do not use the gated route to prove the ungated feature. If a gated route is used only for diagnosis or deployment, label it explicitly as deployment/containment and keep it out of the proof verdict.
+- **Proof-evidence rule (MANDATORY):** when reporting a test result, state exactly what artifact proves it and tie that proof to the specific test instance you are claiming. For example: run id, job id, message id, send timestamp, or exact outbox row. Do not use older matching artifacts as proof for a newer test. If the evidence cannot uniquely identify the tested action, the verdict must be "not yet proven".

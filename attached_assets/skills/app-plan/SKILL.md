@@ -5,7 +5,7 @@ description: Plan a new app before any build work. Use when Tom wants a new app/
 
 # App Plan
 
-_Last updated: 2026-06-05 10:18_
+_Last updated: 2026-06-09 11:42_
 
 Use this skill at the start of any new app request.
 
@@ -74,14 +74,22 @@ Use when the build is for another person, client, or project context.
    - what workspace registry/control entry will point to it
    - what commands the control plane should be allowed to run
    - how the public preview/test environment URL will be surfaced back to the GUI
-7. Include an end-to-end sentence in the plan covering the full path:
+7. **Complex-system design/documentation rule (MANDATORY):** if the work is a multi-part system (for example CRM + queue + gateway + chat tool + send path), planning must define and point to one canonical design/operating document before implementation sprawls. That document must state:
+   - the system goal and non-goals
+   - the component boundaries/responsibilities
+   - the user-facing acceptance criteria
+   - the no-exec / control-plane expectation if relevant
+   - the current phase/status
+   - which docs must be kept in sync when the design changes
+     If no such document exists yet, create or update it as part of planning rather than leaving the architecture implicit in chat.
+8. Include an end-to-end sentence in the plan covering the full path:
    - Tom prompts for a project
    - project is created in the right code home
    - runtime/preview environment can be started
    - workspace control plane can discover/control it
    - GUI can surface/open the real preview URL
-8. Produce a concise implementation plan with clear phases.
-9. Route implementation to the right next skill (`app-build`, `app-patch`, `app-test`, `app-deploy`) rather than building from vague intent.
+9. Produce a concise implementation plan with clear phases.
+10. Route implementation to the right next skill (`app-build`, `app-patch`, `app-test`, `app-deploy`) rather than building from vague intent.
 
 ## Notes
 

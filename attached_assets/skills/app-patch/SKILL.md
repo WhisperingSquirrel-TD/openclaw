@@ -5,6 +5,8 @@ description: Patch an existing app safely. Use when Tom wants a specific change 
 
 # App Patch
 
+_Last updated: 2026-06-09 11:42_
+
 ## Goal
 
 Make a controlled change to an existing system without confusing "patch" with "new app", while still using the same development checklist spine.
@@ -31,3 +33,8 @@ Make a controlled change to an existing system without confusing "patch" with "n
   3. whether it was pushed,
   4. whether deploy/restart/reload happened,
   5. what is blocked if any of those did not happen.
+- **Chat-usable completion rule (MANDATORY):** if Tom asked for functionality so it can be used from chat/runtime, do not call the patch complete just because the backend/service code exists. Before claiming done, verify the requested capability is actually callable through the user-facing surface Tom will use. If the backend is patched but the live chat/tool surface is still missing, say the work is not complete and keep going or state the exact blocker.
+- **Exec-gate preparation rule (MANDATORY):** if a patch may need exec/TOTP, do all non-gated work first: read the relevant files, make the code/document edits, decide the exact gated commands, and reduce the gated phase to the minimum necessary validation/restart/apply step. Do not ask for or consume exec gate while still figuring out the plan. Before requesting gate, be able to state the exact minimal gated action list in one sentence.
+- **Self-restart verification rule (MANDATORY):** if the gated step restarts the current OpenClaw/gateway/control-plane path, do not rely on the same live exec flow surviving long enough to prove success. Use a restart pattern that survives self-restart (detached restart, then separate fresh status check). If that still cannot be verified safely from the live runtime, stop and give Tom the exact one-line manual command instead of burning more gate windows.
+- **No-exec intent preservation rule (MANDATORY):** if Tom is explicitly building a system so it can be operated from chat without exec/TOTP, then any path that still requires exec is incomplete by definition. Do not present an exec-dependent workaround as completion. Before calling the patch done, verify that Tom can perform the intended operation through the live chat/tool surface without exec gate.
+- **Complex-system patch documentation rule (MANDATORY):** if a patch changes the architecture, operator route, or control surface of a complex system, update the canonical system document in the same pass. Do not leave the real design fragmented across code diffs and chat history. A patch is incomplete if the code changed the way Tom is supposed to operate the system but the durable design/operating document still describes the old route.

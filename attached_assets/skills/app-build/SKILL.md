@@ -5,6 +5,8 @@ description: Build a new app after planning/init are complete. Use when the app 
 
 # App Build
 
+_Last updated: 2026-06-09 11:42_
+
 ## Goal
 
 Implement the agreed build in a disciplined way, using the same checklist whether this is an internal Pi change, a new standalone app, or an external/client project.
@@ -41,6 +43,14 @@ Implement the agreed build in a disciplined way, using the same checklist whethe
 16. **No-premature-success rule (MANDATORY):** do not say "usable", "working", "fixed", or equivalent until the exact requested workflow has completed successfully at least once. For this class of task, that means the real requested action must run end-to-end; partial progress (tool visible, API reachable, job submitted, etc.) must be described only as partial progress.
 17. **No-gated-shortcut-while-building-ungated-path rule (MANDATORY):** if Tom asks to build a route that avoids a gate/tool/dependency (for example "without exec"), do not use the gated route to complete the user-facing task unless Tom explicitly approves that as a temporary workaround. A gated workaround may be used only for tightly scoped diagnostics to isolate a failing layer, and it must be labelled as temporary containment, not completion.
 18. **Goal-protection rule (MANDATORY):** when debugging a system whose purpose is to remove friction, do not defeat the purpose by bypassing the target path just to get the immediate outcome. Protect the build goal first; if a workaround undermines the architecture Tom asked for, stop and ask before using it.
+19. **Complex-system documentation sync rule (MANDATORY):** when building a system with multiple layers (for example CRM selection, generation queue, gateway, chat tool, review/send path), do not let the architecture live only in code and chat. Update the canonical design/operating document as the build evolves so it stays truthful about:
+
+- what the system is
+- how it is meant to be operated
+- which layers are live vs partial
+- what first-class no-exec path exists
+- what still depends on restart/reload/manual steps
+  If the implementation changes the operator route or architecture, the documentation update is part of the build, not optional polish.
 
 ## Rules
 
