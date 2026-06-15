@@ -1,7 +1,7 @@
 import { writeFileSync } from 'fs';
 
 const W = 1600;
-const H = 1100;
+const H = 900;
 
 const colors = {
   bg: '#0d1117',
@@ -19,6 +19,8 @@ const colors = {
   infraBorder: '#da3633',
   agentBg: '#0d1f3c',
   agentBorder: '#388bfd',
+  secBg: '#1f1206',
+  secBorder: '#f0883e',
   textPrimary: '#e6edf3',
   textSecondary: '#8b949e',
   textAccent: '#58a6ff',
@@ -35,8 +37,12 @@ function rect(x, y, w, h, fill, stroke, rx = 8, opacity = 1) {
   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" opacity="${opacity}"/>`;
 }
 
+function xmlEscape(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function text(x, y, content, size = 13, fill = colors.textPrimary, weight = 'normal', anchor = 'middle') {
-  return `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" font-weight="${weight}" text-anchor="${anchor}" font-family="'Segoe UI', system-ui, sans-serif">${content}</text>`;
+  return `<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" font-weight="${weight}" text-anchor="${anchor}" font-family="'Segoe UI', system-ui, sans-serif">${xmlEscape(content)}</text>`;
 }
 
 function badge(x, y, w, h, label, bg, border, textColor = colors.textPrimary, fontSize = 11) {
@@ -69,13 +75,42 @@ function arrow(x1, y1, x2, y2, color = colors.piBorder) {
   `;
 }
 
-function component(x, y, w, h, title, subtitle, bg, border, titleColor = colors.textPrimary) {
-  return `
-    ${rect(x, y, w, h, bg, border, 6)}
-    ${text(x + w/2, y + 16, title, 12, titleColor, '600', 'middle')}
-    ${subtitle ? text(x + w/2, y + 30, subtitle, 10, colors.textSecondary, 'normal', 'middle') : ''}
-  `;
-}
+// ── Management bot commands (real, from mgmt-bot.py dispatch table) ──
+const mgmtCommands = [
+  ['/status', '/health', '/logs', '/disk'],
+  ['/restart', '/reboot', '/pull', '/install'],
+  ['/openai', '/anthropic', '/codex', '/codexmini'],
+  ['/garmin', '/sp-sync', '/sp-house', '/soul'],
+  ['/ms-reauth', '/ms-reauthP', '/yt-add', '/yt-run'],
+  ['/dev-run', '/dev-test', '/wcp-up', '/wcp-url'],
+];
+
+// ── Security & control features (from replit.md / src/infra) ──
+const securityFeatures = [
+  ['🔐 TOTP Approval', 'RFC 6238 · replay-protected · 5-min window'],
+  ['🛡 Trust Gate', 'trustLevel ≥ 1 → owner approval'],
+  ['👁 Watch Mode', 'WhatsApp read-only · JSONL transcript'],
+  ['📝 Outbound Audit Log', 'append-only JSONL · chattr +a'],
+  ['⏱ Rate Limiter', 'per-minute / per-hour · queue | drop'],
+  ['🧱 Session Isolation', 'channel-isolated outbound context'],
+  ['📌 Immutable System Prompt', 'injected before SOUL.md'],
+  ['🔒 SOUL.md Integrity', 'SHA-256 verified every session'],
+  ['🗝 Encrypted SOUL at Rest', 'AES-256-GCM · vault passphrase'],
+  ['⛔ Exec Denylist', 'chattr / config / totp / audit blocked'],
+  ['🕵 Obfuscation Detector', 'base64 / heredoc / eval hard-block'],
+  ['🚫 Per-Channel denyCommands', 'calendar.* · react · camera · contacts'],
+];
+
+// ── Ops notes & gotchas (durable, from replit.md + incident lessons) ──
+const opsNotes = [
+  ['⏰', 'No cron 06:xx–07:xx (CRM / prospector) · jobs ≥ 08:00', colors.yellow],
+  ['🔑', 'Codex OAuth refresh nightly → fallback to gpt-5.4', colors.yellow],
+  ['📧', 'Microsoft: one /ms-reauth grants ALL scopes (unified)', colors.orange],
+  ['🧩', 'Plugin manifest needs id — bad stub aborts all channels', colors.orange],
+  ['📄', 'Triage via ~/.openclaw/gateway.log (not /logs — Garmin noise)', colors.blue],
+  ['🗓', 'SharePoint housekeeping 02:00 · Anthropic batch API', colors.green],
+  ['✅', '"active" service ≠ assistant working — always send a test msg', colors.orange],
+];
 
 const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
@@ -91,15 +126,15 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
 
   <!-- Title -->
   ${text(W/2, 36, 'OpenClaw — Personal AI Gateway', 22, colors.textAccent, '700', 'middle')}
-  ${text(W/2, 56, 'Raspberry Pi 4 · 8 GB · L1 Agent (GPT-5.4 / Codex) · Multi-channel · Telegram-controlled', 13, colors.textSecondary, 'normal', 'middle')}
+  ${text(W/2, 56, 'Raspberry Pi 4 · 8 GB · Multi-channel L1 Agent · Telegram-controlled · TOTP-gated · audit-logged', 12.5, colors.textSecondary, 'normal', 'middle')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- Pi outer box -->
-  ${rect(20, 70, W - 40, H - 90, colors.piBox, colors.piBorder, 12)}
-  ${text(45, 90, '🖥  Raspberry Pi 4 — 8 GB', 12, colors.textSecondary, '600', 'start')}
+  ${rect(20, 70, W - 40, 805, colors.piBox, colors.piBorder, 12)}
+  ${text(45, 90, '🖥  Raspberry Pi 4 — 8 GB · systemd user services (linger enabled)', 12, colors.textSecondary, '600', 'start')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- CHANNELS section (left column) -->
+  <!-- CHANNELS section (left column, top) -->
   ${rect(40, 100, 280, 320, colors.channelBg, colors.channelBorder, 8)}
   ${sectionLabel(55, 108, 'CHANNELS', colors.channelBorder)}
 
@@ -129,7 +164,33 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   ${text(178, 332, '🎮  Discord', 12, '#7289da', '600', 'middle')}
   ${text(178, 347, 'owner-locked DM only', 10, colors.textSecondary, 'normal', 'middle')}
 
-  <!-- WhatsApp -->
+  <!-- More channels -->
+  ${rect(55, 367, 245, 45, '#0c1018', '#30363d', 6)}
+  ${text(178, 384, '＋ Signal · Slack · iMessage · Matrix', 10, colors.textSecondary, 'normal', 'middle')}
+  ${text(178, 399, 'IRC · LINE · Feishu · Google Chat (plugins)', 9, colors.textSecondary, 'normal', 'middle')}
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- MANAGEMENT BOT (left column, bottom) -->
+  ${rect(40, 440, 280, 360, colors.infraBg, colors.infraBorder, 8)}
+  ${sectionLabel(55, 448, 'MANAGEMENT BOT', colors.infraBorder)}
+  ${text(180, 470, 'Python Telegram bot · shell / git / npm executor', 9, colors.textSecondary, 'normal', 'middle')}
+
+  ${mgmtCommands.map((row, ri) =>
+    row.map((cmd, ci) =>
+      badge(50 + ci * 66, 482 + ri * 26, 62, 22, cmd, '#1a0d0d', colors.infraBorder, colors.red, 8.5)
+    ).join('')
+  ).join('')}
+
+  ${text(180, 654, '＋ /yt-list · /ai-briefing · /dev-queue/pause/resume · /help', 8.5, colors.textSecondary, 'normal', 'middle')}
+  ${text(180, 666, '(grid labels abbreviated: /sp-house=/sp-housekeep · /ms-reauthP=/ms-reauth-personal)', 7.5, colors.textSecondary, 'normal', 'middle')}
+
+  <!-- WCP -->
+  ${rect(50, 674, 260, 46, '#0a1628', colors.channelBorder, 5)}
+  ${text(180, 691, '🌐  WCP — Workspace Control Panel', 10, colors.blue, '600', 'middle')}
+  ${text(180, 706, 'on-demand quick tunnel · /wcp-up · /wcp-url', 9, colors.textSecondary, 'normal', 'middle')}
+
+  ${text(180, 736, 'All shell / git / npm execution runs through mgmt-bot', 9, colors.textSecondary, 'normal', 'middle')}
+  ${text(180, 750, 'Out-of-band control even if the gateway is down', 9, colors.textSecondary, 'normal', 'middle')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- L1 AGENT (centre top) -->
@@ -142,8 +203,8 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   ${text(455, 158, 'openai / gpt-5.4', 13, colors.blue, '700', 'middle')}
 
   ${rect(565, 128, 240, 38, '#0a1628', '#30363d', 6)}
-  ${text(685, 143, 'Daily Reset 04:00', 10, colors.textSecondary, 'normal', 'middle')}
-  ${text(685, 158, 'openai-codex / codex-1', 11, colors.textSecondary, 'normal', 'middle')}
+  ${text(685, 143, 'Switchable · Ollama local fallback', 10, colors.textSecondary, 'normal', 'middle')}
+  ${text(685, 158, 'anthropic · codex · gemini · copilot', 11, colors.textSecondary, 'normal', 'middle')}
 
   <!-- Tools profile -->
   ${rect(355, 174, 200, 28, '#0c1520', '#30363d', 5)}
@@ -167,7 +228,7 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
 
   <!-- Systemd -->
   ${rect(355, 274, 450, 22, '#0a0d10', '#30363d', 5)}
-  ${text(580, 289, 'openclaw-gateway.service  (systemd user unit)', 9, colors.textSecondary, 'normal', 'middle')}
+  ${text(580, 289, 'openclaw-gateway.service  (Fastify ws + http · systemd user unit)', 9, colors.textSecondary, 'normal', 'middle')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- MEMORY section (centre, below agent) -->
@@ -188,98 +249,10 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
 
   ${rect(355, 396, 450, 34, '#0d0a14', '#30363d', 5)}
   ${text(580, 410, 'memory_search · memory_get · sessions_list · sessions_history', 10, colors.textSecondary, 'normal', 'middle')}
-  ${text(580, 424, 'Vector embeddings · hybrid BM25 + vector · SQLite store', 9, colors.textSecondary, 'normal', 'middle')}
+  ${text(580, 424, 'Vector embeddings · hybrid BM25 + vector · LanceDB / SQLite store', 9, colors.textSecondary, 'normal', 'middle')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- INTEGRATIONS section (right column, top) -->
-  ${rect(840, 100, 400, 460, colors.integrationBg, colors.integrationBorder, 8)}
-  ${sectionLabel(858, 108, 'INTEGRATIONS & POLLERS', colors.integrationBorder)}
-
-  <!-- SharePoint -->
-  ${rect(855, 128, 370, 80, '#0a1a10', colors.integrationBorder, 6)}
-  ${text(1040, 145, '📁  SharePoint — seerepeat.sharepoint.com', 12, colors.green, '600', 'middle')}
-  ${badge(860, 154, 60, 18, 'cache/15m', '#0a1a10', colors.integrationBorder, colors.green, 9)}
-  ${badge(926, 154, 60, 18, 'queue/1m', '#0a1a10', colors.integrationBorder, colors.green, 9)}
-  ${badge(992, 154, 80, 18, 'binary extract', '#0a1a10', colors.integrationBorder, colors.green, 9)}
-  ${badge(1078, 154, 50, 18, 'read', '#0a1a10', colors.integrationBorder, colors.green, 9)}
-  ${badge(1134, 154, 80, 18, '⚠ write: needs reauth', '#1a0d00', colors.orange, colors.orange, 8)}
-  ${text(1040, 198, 'Files.ReadWrite + Sites.ReadWrite.All scopes req. re-auth on assistant@', 9, colors.yellow, 'normal', 'middle')}
-
-  <!-- Google Tasks -->
-  ${rect(855, 216, 175, 50, '#0a140d', '#34a853', 6)}
-  ${text(942, 234, '✅  Google Tasks', 12, '#34a853', '600', 'middle')}
-  ${text(942, 249, 'create · list · complete', 10, colors.textSecondary, 'normal', 'middle')}
-
-  <!-- Garmin -->
-  ${rect(1040, 216, 185, 50, '#0d1a10', '#00b4d8', 6)}
-  ${text(1132, 234, '💓  Garmin Health', 12, '#00b4d8', '600', 'middle')}
-  ${text(1132, 249, 'poller: 09:00 daily', 10, colors.textSecondary, 'normal', 'middle')}
-
-  <!-- Stackstone -->
-  ${rect(855, 274, 370, 80, '#0d1a10', '#2ea043', 6)}
-  ${text(1040, 292, '🏢  Stackstone Consulting', 12, colors.green, '600', 'middle')}
-  ${badge(860, 302, 110, 20, 'enquiry_poller.py', '#0a1a10', '#2ea043', colors.green, 9)}
-  ${badge(978, 302, 100, 20, 'report_poller.py', '#0a1a10', '#2ea043', colors.green, 9)}
-  ${badge(1086, 302, 130, 20, 'retry on HTML/timeout', '#0a1a10', '#2ea043', colors.teal, 9)}
-  ${text(1040, 342, 'alert suppression · Content-Type check · Stackstone CRM via SharePoint', 9, colors.textSecondary, 'normal', 'middle')}
-
-  <!-- Microsoft email -->
-  ${rect(855, 362, 175, 60, '#0d0d1a', '#0078d4', 6)}
-  ${text(942, 380, '📨  Microsoft Email', 11, '#0078d4', '600', 'middle')}
-  ${text(942, 395, 'assistant@ + tom@', 10, colors.textSecondary, 'normal', 'middle')}
-  ${text(942, 408, '⚠ assistant token missing', 9, colors.orange, 'normal', 'middle')}
-
-  <!-- Gmail integration -->
-  ${rect(1040, 362, 185, 60, '#1a0d0d', '#ea4335', 6)}
-  ${text(1132, 380, '📨  Gmail', 11, '#ea4335', '600', 'middle')}
-  ${text(1132, 395, 'polling + send', 10, colors.textSecondary, 'normal', 'middle')}
-  ${text(1132, 408, 'prospector: skip 06–07h', 9, colors.textSecondary, 'normal', 'middle')}
-
-  <!-- YouTube -->
-  ${rect(855, 430, 175, 50, '#1a0d0d', '#ff0000', 6)}
-  ${text(942, 448, '▶  YouTube Transcript', 11, '#ff6b6b', '600', 'middle')}
-  ${text(942, 463, 'native tool · Gemini fallback', 10, colors.textSecondary, 'normal', 'middle')}
-
-  <!-- Dev command queue -->
-  ${rect(1040, 430, 185, 50, '#0d1020', '#8957e5', 6)}
-  ${text(1132, 448, '⚙  Dev Cmd Queue', 11, colors.purple, '600', 'middle')}
-  ${text(1132, 463, '.dev-cmd.json · never exec', 10, colors.textSecondary, 'normal', 'middle')}
-
-  <!-- Provider switch -->
-  ${rect(855, 488, 370, 62, '#1a0d00', colors.orange, 6)}
-  ${text(1040, 506, '🔄  Provider Switch — daily-reset.py · 04:00 cron', 12, colors.orange, '600', 'middle')}
-  ${text(1040, 521, 'DBUS env vars · switches primary ↔ Codex · systemd user session', 10, colors.textSecondary, 'normal', 'middle')}
-  ${text(1040, 536, 'Codex OAuth token must be refreshed or falls back to OpenAI gpt-5.4', 9, colors.yellow, 'normal', 'middle')}
-
-  <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- MANAGEMENT BOT (bottom left) -->
-  ${rect(40, 450, 280, 300, colors.infraBg, colors.infraBorder, 8)}
-  ${sectionLabel(55, 458, 'MANAGEMENT BOT', colors.infraBorder)}
-
-  ${text(180, 485, 'Telegram-controlled shell/git/npm executor', 10, colors.textSecondary, 'normal', 'middle')}
-
-  ${[
-    ['/status', '/openai', '/anthropic', '/restart'],
-    ['/reboot', '/pull', '/install', '/health'],
-    ['/logs', '/garmin', '/disk', '/soul'],
-    ['/sp-sync', '/dev-run', '/codex', '/elevated'],
-  ].map((row, ri) =>
-    row.map((cmd, ci) =>
-      badge(55 + ci * 65, 498 + ri * 28, 60, 22, cmd, '#1a0d0d', colors.infraBorder, colors.red, 9)
-    ).join('')
-  ).join('')}
-
-  ${text(180, 615, 'All shell / git / npm execution runs through mgmt-bot', 9.5, colors.textSecondary, 'normal', 'middle')}
-  ${text(180, 630, 'Gateway log: ~/.openclaw/gateway.log', 9.5, colors.textSecondary, 'normal', 'middle')}
-
-  <!-- Scheduling constraints -->
-  ${rect(55, 640, 245, 50, '#1a0d00', colors.orange, 5)}
-  ${text(178, 658, '⏰  Scheduling Rules', 11, colors.orange, '600', 'middle')}
-  ${text(178, 673, 'NEVER 06:xx–07:xx (prospector) · SP cache=*/15', 9, colors.textSecondary, 'normal', 'middle')}
-  ${text(178, 685, 'SP queue=every min · Garmin=09:00', 9, colors.textSecondary, 'normal', 'middle')}
-
-  <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- SKILLS / TOOLS (bottom centre) -->
+  <!-- SKILLS / TOOLS (centre, below memory) -->
   ${rect(340, 450, 480, 210, colors.toolsBg, colors.toolsBorder, 8)}
   ${sectionLabel(358, 458, 'SKILLS & TOOLS (L1 Callable)', colors.toolsBorder)}
 
@@ -310,20 +283,110 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   ${text(585, 653, 'web_search · web_fetch · browser · canvas — NOT in coding profile', 9, colors.textSecondary, 'normal', 'middle')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- PENDING / KNOWN ISSUES (bottom right) -->
-  ${rect(840, 570, 400, 170, '#0d0d10', '#da3633', 8)}
-  ${sectionLabel(858, 578, 'KNOWN ISSUES / PENDING', '#da3633')}
+  <!-- DEPLOYMENT & GIT SYNC (centre, bottom) -->
+  ${rect(340, 675, 480, 175, '#0a140d', colors.integrationBorder, 8)}
+  ${sectionLabel(358, 683, 'DEPLOYMENT & GIT SYNC', colors.integrationBorder)}
 
-  ${[
-    { icon: '⚠', label: 'assistant@ Microsoft token missing — needs re-auth', color: colors.orange },
-    { icon: '⚠', label: 'SharePoint write: needs Files.ReadWrite reauth on assistant@', color: colors.orange },
-    { icon: '🔑', label: 'Codex OAuth: expires nightly — fallback to gpt-5.4 active', color: colors.yellow },
-    { icon: '🗑', label: 'Cleanup: ~/.openclaw/integrations/tavily/ — delete', color: colors.red },
-    { icon: '🗑', label: 'Cleanup: ~/.openclaw/integrations/youtube/ (old Python) — delete', color: colors.red },
-  ].map((item, i) => `
-    ${text(865, 604 + i * 24, item.icon, 11, item.color, 'normal', 'start')}
-    ${text(882, 604 + i * 24, item.label, 10, item.color, 'normal', 'start')}
+  ${rect(355, 702, 450, 24, '#0a0f0a', '#30363d', 5)}
+  ${text(580, 718, 'install-forked-openclaw.sh — single source of truth (pull → build → config → restart)', 8.8, colors.green, 'normal', 'middle')}
+
+  ${rect(355, 730, 450, 22, '#0c1218', '#30363d', 5)}
+  ${text(580, 745, 'systemd user units: gateway · email-microsoft · email-gmail · pollers', 9, colors.textSecondary, 'normal', 'middle')}
+
+  ${text(580, 772, 'Sync:  Workspace ──Git pane──▶ GitHub ──git pull──▶ Pi', 10, colors.blue, '600', 'middle')}
+  ${text(580, 788, 'reverse: Pi ──push──▶ GitHub ──Pull──▶ Workspace  (workspace CLI push blocked)', 9, colors.textSecondary, 'normal', 'middle')}
+
+  ${rect(355, 800, 450, 28, '#0a0f0a', colors.integrationBorder, 5)}
+  ${text(580, 818, '📌  cd ~/openclaw && git pull && bash ~/install-forked-openclaw.sh   ( or /install )', 9.2, colors.green, 'normal', 'middle')}
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- INTEGRATIONS section (col 3, top) -->
+  ${rect(840, 100, 400, 455, colors.integrationBg, colors.integrationBorder, 8)}
+  ${sectionLabel(858, 108, 'INTEGRATIONS & POLLERS', colors.integrationBorder)}
+
+  <!-- SharePoint -->
+  ${rect(855, 128, 370, 80, '#0a1a10', colors.integrationBorder, 6)}
+  ${text(1040, 145, '📁  SharePoint — Stackstone CRM mirror', 12, colors.green, '600', 'middle')}
+  ${badge(860, 154, 60, 18, 'cache/15m', '#0a1a10', colors.integrationBorder, colors.green, 9)}
+  ${badge(926, 154, 60, 18, 'queue/1m', '#0a1a10', colors.integrationBorder, colors.green, 9)}
+  ${badge(992, 154, 84, 18, 'binary extract', '#0a1a10', colors.integrationBorder, colors.green, 9)}
+  ${badge(1082, 154, 132, 18, 'housekeep 02:00 · batch API', '#0a1a10', colors.integrationBorder, colors.teal, 8.5)}
+  ${text(1040, 198, 'Files.ReadWrite + Sites.ReadWrite.All · /ms-reauth grants all scopes', 9, colors.yellow, 'normal', 'middle')}
+
+  <!-- Google Tasks -->
+  ${rect(855, 216, 175, 50, '#0a140d', '#34a853', 6)}
+  ${text(942, 234, '✅  Google Tasks', 12, '#34a853', '600', 'middle')}
+  ${text(942, 249, 'create · list · complete', 10, colors.textSecondary, 'normal', 'middle')}
+
+  <!-- Garmin -->
+  ${rect(1040, 216, 185, 50, '#0d1a10', '#00b4d8', 6)}
+  ${text(1132, 234, '💓  Garmin Health', 12, '#00b4d8', '600', 'middle')}
+  ${text(1132, 249, '09:00 · garth creds self-heal', 9.5, colors.textSecondary, 'normal', 'middle')}
+
+  <!-- Microsoft email -->
+  ${rect(855, 274, 175, 60, '#0d0d1a', '#0078d4', 6)}
+  ${text(942, 292, '📨  Microsoft Email', 11, '#0078d4', '600', 'middle')}
+  ${text(942, 307, 'assistant@ + tom@', 10, colors.textSecondary, 'normal', 'middle')}
+  ${text(942, 320, 'systemd: email-microsoft', 9, colors.textSecondary, 'normal', 'middle')}
+
+  <!-- Gmail integration -->
+  ${rect(1040, 274, 185, 60, '#1a0d0d', '#ea4335', 6)}
+  ${text(1132, 292, '📨  Gmail', 11, '#ea4335', '600', 'middle')}
+  ${text(1132, 307, 'polling + send', 10, colors.textSecondary, 'normal', 'middle')}
+  ${text(1132, 320, 'systemd: email-gmail', 9, colors.textSecondary, 'normal', 'middle')}
+
+  <!-- Calendar / Tasks -->
+  ${rect(855, 342, 370, 46, '#0d0d1a', '#0078d4', 6)}
+  ${text(1040, 360, '📅  Microsoft Calendar + Tasks (poll-calendar.py)', 11, '#4ea3e0', '600', 'middle')}
+  ${text(1040, 375, 'calendar writes go ONLY through MS integration (calendar.* denied)', 8.8, colors.yellow, 'normal', 'middle')}
+
+  <!-- YouTube -->
+  ${rect(855, 396, 175, 50, '#1a0d0d', '#ff0000', 6)}
+  ${text(942, 414, '▶  YouTube Transcript', 11, '#ff6b6b', '600', 'middle')}
+  ${text(942, 429, 'native tool · channel poller', 10, colors.textSecondary, 'normal', 'middle')}
+
+  <!-- Dev command queue -->
+  ${rect(1040, 396, 185, 50, '#0d1020', '#8957e5', 6)}
+  ${text(1132, 414, '⚙  Dev Cmd Queue', 11, colors.purple, '600', 'middle')}
+  ${text(1132, 429, '.dev-cmd.json · review/exec', 9.5, colors.textSecondary, 'normal', 'middle')}
+
+  <!-- Provider switch -->
+  ${rect(855, 454, 370, 62, '#1a0d00', colors.orange, 6)}
+  ${text(1040, 472, '🔄  Provider Switch — daily-reset.py · 04:00 cron', 12, colors.orange, '600', 'middle')}
+  ${text(1040, 487, 'switches primary ↔ Codex via systemd user-session env (DBUS)', 9.5, colors.textSecondary, 'normal', 'middle')}
+  ${text(1040, 502, 'Codex OAuth must be fresh, else falls back to OpenAI gpt-5.4', 9, colors.yellow, 'normal', 'middle')}
+
+  <!-- AI briefing -->
+  ${rect(855, 524, 370, 24, '#0a140d', '#2ea043', 5)}
+  ${text(1040, 540, '🗞  AI Briefing — /ai-briefing (status · run · read)', 9.5, colors.green, 'normal', 'middle')}
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- OPS NOTES & GOTCHAS (col 3, bottom) -->
+  ${rect(840, 570, 400, 280, '#0d0d10', '#da3633', 8)}
+  ${sectionLabel(858, 578, 'OPS NOTES & GOTCHAS', '#da3633')}
+
+  ${opsNotes.map((item, i) => `
+    ${text(865, 606 + i * 27, item[0], 11, item[2], 'normal', 'start')}
+    ${text(884, 606 + i * 27, item[1], 9.3, item[2], 'normal', 'start')}
   `).join('')}
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- SECURITY & CONTROL (col 4, full height) -->
+  ${rect(1250, 100, 325, 750, colors.secBg, colors.secBorder, 8)}
+  ${sectionLabel(1268, 108, 'SECURITY & CONTROL', colors.secBorder)}
+
+  ${securityFeatures.map((f, i) => {
+    const y = 128 + i * 54;
+    return `
+      ${rect(1262, y, 300, 46, '#160d04', colors.secBorder, 5)}
+      ${text(1272, y + 18, f[0], 11, colors.orange, '600', 'start')}
+      ${text(1272, y + 34, f[1], 9, colors.textSecondary, 'normal', 'start')}
+    `;
+  }).join('')}
+
+  ${text(1412, 798, 'config chattr +i · audit chattr +a · totp secret chattr +i', 8.5, colors.textSecondary, 'normal', 'middle')}
+  ${text(1412, 814, 'denylist evaluated BEFORE TOTP — even an open window cannot bypass', 8.5, colors.red, 'normal', 'middle')}
+  ${text(1412, 832, 'Telegram owner-only · unauthorized senders rejected', 8.5, colors.textSecondary, 'normal', 'middle')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- Connection arrows (selected key flows) -->
@@ -334,18 +397,17 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   ${arrow(300, 223, 340, 200, colors.green)}
   <!-- L1 ↔ Integrations -->
   ${arrow(820, 200, 840, 200, colors.integrationBorder)}
+  <!-- Integrations ↔ Security -->
+  ${arrow(1240, 200, 1250, 200, colors.secBorder)}
   <!-- L1 ↔ Memory -->
   ${arrow(580, 300, 580, 310, colors.memoryBorder)}
   <!-- L1 ↔ Mgmt bot -->
-  ${arrow(340, 420, 240, 460, colors.infraBorder)}
-
-  <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- Deploy rule reminder -->
-  ${rect(40, 760, 760, 28, '#0a0f0a', '#238636', 5)}
-  ${text(420, 779, '📌  After every code change: cd ~/openclaw && git pull && bash ~/install-forked-openclaw.sh', 9.5, colors.green, 'normal', 'middle')}
+  ${arrow(340, 420, 240, 440, colors.infraBorder)}
+  <!-- Memory ↔ Skills -->
+  ${arrow(580, 440, 580, 450, colors.toolsBorder)}
 
   <!-- Version stamp -->
-  ${text(W - 30, H - 15, 'OpenClaw Architecture · Generated 14 Apr 2026', 9, colors.textSecondary, 'normal', 'end')}
+  ${text(W - 30, H - 12, 'OpenClaw Architecture · Generated 15 Jun 2026', 9, colors.textSecondary, 'normal', 'end')}
 </svg>`;
 
 writeFileSync('attached_assets/openclaw-architecture.svg', svg);

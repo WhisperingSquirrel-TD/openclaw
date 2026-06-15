@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
   <defs>
     <filter id="glow">
       <feGaussianBlur stdDeviation="2" result="blur"/>
@@ -8,19 +8,19 @@
   </defs>
 
   <!-- Background -->
-  <rect width="1600" height="1100" fill="#0d1117"/>
+  <rect width="1600" height="900" fill="#0d1117"/>
 
   <!-- Title -->
   <text x="800" y="36" font-size="22" fill="#58a6ff" font-weight="700" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">OpenClaw — Personal AI Gateway</text>
-  <text x="800" y="56" font-size="13" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Raspberry Pi 4 · 8 GB · L1 Agent (GPT-5.4 / Codex) · Multi-channel · Telegram-controlled</text>
+  <text x="800" y="56" font-size="12.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Raspberry Pi 4 · 8 GB · Multi-channel L1 Agent · Telegram-controlled · TOTP-gated · audit-logged</text>
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- Pi outer box -->
-  <rect x="20" y="70" width="1560" height="1010" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5" opacity="1"/>
-  <text x="45" y="90" font-size="12" fill="#8b949e" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🖥  Raspberry Pi 4 — 8 GB</text>
+  <rect x="20" y="70" width="1560" height="805" rx="12" fill="#161b22" stroke="#30363d" stroke-width="1.5" opacity="1"/>
+  <text x="45" y="90" font-size="12" fill="#8b949e" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🖥  Raspberry Pi 4 — 8 GB · systemd user services (linger enabled)</text>
 
   <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- CHANNELS section (left column) -->
+  <!-- CHANNELS section (left column, top) -->
   <rect x="40" y="100" width="280" height="320" rx="8" fill="#0d2137" stroke="#1f6feb" stroke-width="1.5" opacity="1"/>
   
     <rect x="55" y="108" width="10" height="14" rx="2" fill="#1f6feb"/>
@@ -56,7 +56,104 @@
   <text x="178" y="332" font-size="12" fill="#7289da" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">🎮  Discord</text>
   <text x="178" y="347" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">owner-locked DM only</text>
 
-  <!-- WhatsApp -->
+  <!-- More channels -->
+  <rect x="55" y="367" width="245" height="45" rx="6" fill="#0c1018" stroke="#30363d" stroke-width="1.5" opacity="1"/>
+  <text x="178" y="384" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">＋ Signal · Slack · iMessage · Matrix</text>
+  <text x="178" y="399" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">IRC · LINE · Feishu · Google Chat (plugins)</text>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- MANAGEMENT BOT (left column, bottom) -->
+  <rect x="40" y="440" width="280" height="360" rx="8" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+  
+    <rect x="55" y="448" width="10" height="14" rx="2" fill="#da3633"/>
+    <text x="71" y="459" font-size="12" fill="#da3633" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">MANAGEMENT BOT</text>
+  
+  <text x="180" y="470" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Python Telegram bot · shell / git / npm executor</text>
+
+  
+    <rect x="50" y="482" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="81" y="497" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/status</text>
+  
+    <rect x="116" y="482" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="147" y="497" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/health</text>
+  
+    <rect x="182" y="482" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="213" y="497" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/logs</text>
+  
+    <rect x="248" y="482" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="279" y="497" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/disk</text>
+  
+    <rect x="50" y="508" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="81" y="523" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/restart</text>
+  
+    <rect x="116" y="508" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="147" y="523" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/reboot</text>
+  
+    <rect x="182" y="508" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="213" y="523" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/pull</text>
+  
+    <rect x="248" y="508" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="279" y="523" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/install</text>
+  
+    <rect x="50" y="534" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="81" y="549" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/openai</text>
+  
+    <rect x="116" y="534" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="147" y="549" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/anthropic</text>
+  
+    <rect x="182" y="534" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="213" y="549" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/codex</text>
+  
+    <rect x="248" y="534" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="279" y="549" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/codexmini</text>
+  
+    <rect x="50" y="560" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="81" y="575" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/garmin</text>
+  
+    <rect x="116" y="560" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="147" y="575" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/sp-sync</text>
+  
+    <rect x="182" y="560" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="213" y="575" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/sp-house</text>
+  
+    <rect x="248" y="560" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="279" y="575" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/soul</text>
+  
+    <rect x="50" y="586" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="81" y="601" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/ms-reauth</text>
+  
+    <rect x="116" y="586" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="147" y="601" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/ms-reauthP</text>
+  
+    <rect x="182" y="586" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="213" y="601" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/yt-add</text>
+  
+    <rect x="248" y="586" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="279" y="601" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/yt-run</text>
+  
+    <rect x="50" y="612" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="81" y="627" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/dev-run</text>
+  
+    <rect x="116" y="612" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="147" y="627" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/dev-test</text>
+  
+    <rect x="182" y="612" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="213" y="627" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/wcp-up</text>
+  
+    <rect x="248" y="612" width="62" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+    <text x="279" y="627" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/wcp-url</text>
+  
+
+  <text x="180" y="654" font-size="8.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">＋ /yt-list · /ai-briefing · /dev-queue/pause/resume · /help</text>
+  <text x="180" y="666" font-size="7.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">(grid labels abbreviated: /sp-house=/sp-housekeep · /ms-reauthP=/ms-reauth-personal)</text>
+
+  <!-- WCP -->
+  <rect x="50" y="674" width="260" height="46" rx="5" fill="#0a1628" stroke="#1f6feb" stroke-width="1.5" opacity="1"/>
+  <text x="180" y="691" font-size="10" fill="#79c0ff" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">🌐  WCP — Workspace Control Panel</text>
+  <text x="180" y="706" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">on-demand quick tunnel · /wcp-up · /wcp-url</text>
+
+  <text x="180" y="736" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">All shell / git / npm execution runs through mgmt-bot</text>
+  <text x="180" y="750" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Out-of-band control even if the gateway is down</text>
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- L1 AGENT (centre top) -->
@@ -72,8 +169,8 @@
   <text x="455" y="158" font-size="13" fill="#79c0ff" font-weight="700" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">openai / gpt-5.4</text>
 
   <rect x="565" y="128" width="240" height="38" rx="6" fill="#0a1628" stroke="#30363d" stroke-width="1.5" opacity="1"/>
-  <text x="685" y="143" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Daily Reset 04:00</text>
-  <text x="685" y="158" font-size="11" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">openai-codex / codex-1</text>
+  <text x="685" y="143" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Switchable · Ollama local fallback</text>
+  <text x="685" y="158" font-size="11" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">anthropic · codex · gemini · copilot</text>
 
   <!-- Tools profile -->
   <rect x="355" y="174" width="200" height="28" rx="5" fill="#0c1520" stroke="#30363d" stroke-width="1.5" opacity="1"/>
@@ -97,7 +194,7 @@
 
   <!-- Systemd -->
   <rect x="355" y="274" width="450" height="22" rx="5" fill="#0a0d10" stroke="#30363d" stroke-width="1.5" opacity="1"/>
-  <text x="580" y="289" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">openclaw-gateway.service  (systemd user unit)</text>
+  <text x="580" y="289" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">openclaw-gateway.service  (Fastify ws + http · systemd user unit)</text>
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- MEMORY section (centre, below agent) -->
@@ -121,171 +218,14 @@
 
   <rect x="355" y="396" width="450" height="34" rx="5" fill="#0d0a14" stroke="#30363d" stroke-width="1.5" opacity="1"/>
   <text x="580" y="410" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">memory_search · memory_get · sessions_list · sessions_history</text>
-  <text x="580" y="424" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Vector embeddings · hybrid BM25 + vector · SQLite store</text>
+  <text x="580" y="424" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Vector embeddings · hybrid BM25 + vector · LanceDB / SQLite store</text>
 
   <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- INTEGRATIONS section (right column, top) -->
-  <rect x="840" y="100" width="400" height="460" rx="8" fill="#0d2218" stroke="#238636" stroke-width="1.5" opacity="1"/>
-  
-    <rect x="858" y="108" width="10" height="14" rx="2" fill="#238636"/>
-    <text x="874" y="119" font-size="12" fill="#238636" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">INTEGRATIONS & POLLERS</text>
-  
-
-  <!-- SharePoint -->
-  <rect x="855" y="128" width="370" height="80" rx="6" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
-  <text x="1040" y="145" font-size="12" fill="#3fb950" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📁  SharePoint — seerepeat.sharepoint.com</text>
-  
-    <rect x="860" y="154" width="60" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
-    <text x="890" y="167" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">cache/15m</text>
-  
-  
-    <rect x="926" y="154" width="60" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
-    <text x="956" y="167" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">queue/1m</text>
-  
-  
-    <rect x="992" y="154" width="80" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
-    <text x="1032" y="167" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">binary extract</text>
-  
-  
-    <rect x="1078" y="154" width="50" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
-    <text x="1103" y="167" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">read</text>
-  
-  
-    <rect x="1134" y="154" width="80" height="18" rx="5" fill="#1a0d00" stroke="#ffa657" stroke-width="1.5" opacity="1"/>
-    <text x="1174" y="167" font-size="8" fill="#ffa657" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">⚠ write: needs reauth</text>
-  
-  <text x="1040" y="198" font-size="9" fill="#d29922" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Files.ReadWrite + Sites.ReadWrite.All scopes req. re-auth on assistant@</text>
-
-  <!-- Google Tasks -->
-  <rect x="855" y="216" width="175" height="50" rx="6" fill="#0a140d" stroke="#34a853" stroke-width="1.5" opacity="1"/>
-  <text x="942" y="234" font-size="12" fill="#34a853" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">✅  Google Tasks</text>
-  <text x="942" y="249" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">create · list · complete</text>
-
-  <!-- Garmin -->
-  <rect x="1040" y="216" width="185" height="50" rx="6" fill="#0d1a10" stroke="#00b4d8" stroke-width="1.5" opacity="1"/>
-  <text x="1132" y="234" font-size="12" fill="#00b4d8" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">💓  Garmin Health</text>
-  <text x="1132" y="249" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">poller: 09:00 daily</text>
-
-  <!-- Stackstone -->
-  <rect x="855" y="274" width="370" height="80" rx="6" fill="#0d1a10" stroke="#2ea043" stroke-width="1.5" opacity="1"/>
-  <text x="1040" y="292" font-size="12" fill="#3fb950" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">🏢  Stackstone Consulting</text>
-  
-    <rect x="860" y="302" width="110" height="20" rx="5" fill="#0a1a10" stroke="#2ea043" stroke-width="1.5" opacity="1"/>
-    <text x="915" y="316" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">enquiry_poller.py</text>
-  
-  
-    <rect x="978" y="302" width="100" height="20" rx="5" fill="#0a1a10" stroke="#2ea043" stroke-width="1.5" opacity="1"/>
-    <text x="1028" y="316" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">report_poller.py</text>
-  
-  
-    <rect x="1086" y="302" width="130" height="20" rx="5" fill="#0a1a10" stroke="#2ea043" stroke-width="1.5" opacity="1"/>
-    <text x="1151" y="316" font-size="9" fill="#39d353" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">retry on HTML/timeout</text>
-  
-  <text x="1040" y="342" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">alert suppression · Content-Type check · Stackstone CRM via SharePoint</text>
-
-  <!-- Microsoft email -->
-  <rect x="855" y="362" width="175" height="60" rx="6" fill="#0d0d1a" stroke="#0078d4" stroke-width="1.5" opacity="1"/>
-  <text x="942" y="380" font-size="11" fill="#0078d4" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📨  Microsoft Email</text>
-  <text x="942" y="395" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">assistant@ + tom@</text>
-  <text x="942" y="408" font-size="9" fill="#ffa657" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">⚠ assistant token missing</text>
-
-  <!-- Gmail integration -->
-  <rect x="1040" y="362" width="185" height="60" rx="6" fill="#1a0d0d" stroke="#ea4335" stroke-width="1.5" opacity="1"/>
-  <text x="1132" y="380" font-size="11" fill="#ea4335" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📨  Gmail</text>
-  <text x="1132" y="395" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">polling + send</text>
-  <text x="1132" y="408" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">prospector: skip 06–07h</text>
-
-  <!-- YouTube -->
-  <rect x="855" y="430" width="175" height="50" rx="6" fill="#1a0d0d" stroke="#ff0000" stroke-width="1.5" opacity="1"/>
-  <text x="942" y="448" font-size="11" fill="#ff6b6b" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">▶  YouTube Transcript</text>
-  <text x="942" y="463" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">native tool · Gemini fallback</text>
-
-  <!-- Dev command queue -->
-  <rect x="1040" y="430" width="185" height="50" rx="6" fill="#0d1020" stroke="#8957e5" stroke-width="1.5" opacity="1"/>
-  <text x="1132" y="448" font-size="11" fill="#bc8cff" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">⚙  Dev Cmd Queue</text>
-  <text x="1132" y="463" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">.dev-cmd.json · never exec</text>
-
-  <!-- Provider switch -->
-  <rect x="855" y="488" width="370" height="62" rx="6" fill="#1a0d00" stroke="#ffa657" stroke-width="1.5" opacity="1"/>
-  <text x="1040" y="506" font-size="12" fill="#ffa657" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">🔄  Provider Switch — daily-reset.py · 04:00 cron</text>
-  <text x="1040" y="521" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">DBUS env vars · switches primary ↔ Codex · systemd user session</text>
-  <text x="1040" y="536" font-size="9" fill="#d29922" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Codex OAuth token must be refreshed or falls back to OpenAI gpt-5.4</text>
-
-  <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- MANAGEMENT BOT (bottom left) -->
-  <rect x="40" y="450" width="280" height="300" rx="8" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-  
-    <rect x="55" y="458" width="10" height="14" rx="2" fill="#da3633"/>
-    <text x="71" y="469" font-size="12" fill="#da3633" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">MANAGEMENT BOT</text>
-  
-
-  <text x="180" y="485" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Telegram-controlled shell/git/npm executor</text>
-
-  
-    <rect x="55" y="498" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="85" y="513" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/status</text>
-  
-    <rect x="120" y="498" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="150" y="513" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/openai</text>
-  
-    <rect x="185" y="498" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="215" y="513" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/anthropic</text>
-  
-    <rect x="250" y="498" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="280" y="513" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/restart</text>
-  
-    <rect x="55" y="526" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="85" y="541" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/reboot</text>
-  
-    <rect x="120" y="526" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="150" y="541" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/pull</text>
-  
-    <rect x="185" y="526" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="215" y="541" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/install</text>
-  
-    <rect x="250" y="526" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="280" y="541" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/health</text>
-  
-    <rect x="55" y="554" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="85" y="569" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/logs</text>
-  
-    <rect x="120" y="554" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="150" y="569" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/garmin</text>
-  
-    <rect x="185" y="554" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="215" y="569" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/disk</text>
-  
-    <rect x="250" y="554" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="280" y="569" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/soul</text>
-  
-    <rect x="55" y="582" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="85" y="597" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/sp-sync</text>
-  
-    <rect x="120" y="582" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="150" y="597" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/dev-run</text>
-  
-    <rect x="185" y="582" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="215" y="597" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/codex</text>
-  
-    <rect x="250" y="582" width="60" height="22" rx="5" fill="#1a0d0d" stroke="#da3633" stroke-width="1.5" opacity="1"/>
-    <text x="280" y="597" font-size="9" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">/elevated</text>
-  
-
-  <text x="180" y="615" font-size="9.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">All shell / git / npm execution runs through mgmt-bot</text>
-  <text x="180" y="630" font-size="9.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Gateway log: ~/.openclaw/gateway.log</text>
-
-  <!-- Scheduling constraints -->
-  <rect x="55" y="640" width="245" height="50" rx="5" fill="#1a0d00" stroke="#ffa657" stroke-width="1.5" opacity="1"/>
-  <text x="178" y="658" font-size="11" fill="#ffa657" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">⏰  Scheduling Rules</text>
-  <text x="178" y="673" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">NEVER 06:xx–07:xx (prospector) · SP cache=*/15</text>
-  <text x="178" y="685" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">SP queue=every min · Garmin=09:00</text>
-
-  <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- SKILLS / TOOLS (bottom centre) -->
+  <!-- SKILLS / TOOLS (centre, below memory) -->
   <rect x="340" y="450" width="480" height="210" rx="8" fill="#1a1000" stroke="#d29922" stroke-width="1.5" opacity="1"/>
   
     <rect x="358" y="458" width="10" height="14" rx="2" fill="#d29922"/>
-    <text x="374" y="469" font-size="12" fill="#d29922" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">SKILLS & TOOLS (L1 Callable)</text>
+    <text x="374" y="469" font-size="12" fill="#d29922" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">SKILLS &amp; TOOLS (L1 Callable)</text>
   
 
   
@@ -325,29 +265,193 @@
   <text x="585" y="653" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">web_search · web_fetch · browser · canvas — NOT in coding profile</text>
 
   <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- PENDING / KNOWN ISSUES (bottom right) -->
-  <rect x="840" y="570" width="400" height="170" rx="8" fill="#0d0d10" stroke="#da3633" stroke-width="1.5" opacity="1"/>
+  <!-- DEPLOYMENT & GIT SYNC (centre, bottom) -->
+  <rect x="340" y="675" width="480" height="175" rx="8" fill="#0a140d" stroke="#238636" stroke-width="1.5" opacity="1"/>
+  
+    <rect x="358" y="683" width="10" height="14" rx="2" fill="#238636"/>
+    <text x="374" y="694" font-size="12" fill="#238636" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">DEPLOYMENT &amp; GIT SYNC</text>
+  
+
+  <rect x="355" y="702" width="450" height="24" rx="5" fill="#0a0f0a" stroke="#30363d" stroke-width="1.5" opacity="1"/>
+  <text x="580" y="718" font-size="8.8" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">install-forked-openclaw.sh — single source of truth (pull → build → config → restart)</text>
+
+  <rect x="355" y="730" width="450" height="22" rx="5" fill="#0c1218" stroke="#30363d" stroke-width="1.5" opacity="1"/>
+  <text x="580" y="745" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">systemd user units: gateway · email-microsoft · email-gmail · pollers</text>
+
+  <text x="580" y="772" font-size="10" fill="#79c0ff" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Sync:  Workspace ──Git pane──▶ GitHub ──git pull──▶ Pi</text>
+  <text x="580" y="788" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">reverse: Pi ──push──▶ GitHub ──Pull──▶ Workspace  (workspace CLI push blocked)</text>
+
+  <rect x="355" y="800" width="450" height="28" rx="5" fill="#0a0f0a" stroke="#238636" stroke-width="1.5" opacity="1"/>
+  <text x="580" y="818" font-size="9.2" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📌  cd ~/openclaw &amp;&amp; git pull &amp;&amp; bash ~/install-forked-openclaw.sh   ( or /install )</text>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- INTEGRATIONS section (col 3, top) -->
+  <rect x="840" y="100" width="400" height="455" rx="8" fill="#0d2218" stroke="#238636" stroke-width="1.5" opacity="1"/>
+  
+    <rect x="858" y="108" width="10" height="14" rx="2" fill="#238636"/>
+    <text x="874" y="119" font-size="12" fill="#238636" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">INTEGRATIONS &amp; POLLERS</text>
+  
+
+  <!-- SharePoint -->
+  <rect x="855" y="128" width="370" height="80" rx="6" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
+  <text x="1040" y="145" font-size="12" fill="#3fb950" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📁  SharePoint — Stackstone CRM mirror</text>
+  
+    <rect x="860" y="154" width="60" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
+    <text x="890" y="167" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">cache/15m</text>
+  
+  
+    <rect x="926" y="154" width="60" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
+    <text x="956" y="167" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">queue/1m</text>
+  
+  
+    <rect x="992" y="154" width="84" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
+    <text x="1034" y="167" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">binary extract</text>
+  
+  
+    <rect x="1082" y="154" width="132" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
+    <text x="1148" y="167" font-size="8.5" fill="#39d353" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">housekeep 02:00 · batch API</text>
+  
+  <text x="1040" y="198" font-size="9" fill="#d29922" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Files.ReadWrite + Sites.ReadWrite.All · /ms-reauth grants all scopes</text>
+
+  <!-- Google Tasks -->
+  <rect x="855" y="216" width="175" height="50" rx="6" fill="#0a140d" stroke="#34a853" stroke-width="1.5" opacity="1"/>
+  <text x="942" y="234" font-size="12" fill="#34a853" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">✅  Google Tasks</text>
+  <text x="942" y="249" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">create · list · complete</text>
+
+  <!-- Garmin -->
+  <rect x="1040" y="216" width="185" height="50" rx="6" fill="#0d1a10" stroke="#00b4d8" stroke-width="1.5" opacity="1"/>
+  <text x="1132" y="234" font-size="12" fill="#00b4d8" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">💓  Garmin Health</text>
+  <text x="1132" y="249" font-size="9.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">09:00 · garth creds self-heal</text>
+
+  <!-- Microsoft email -->
+  <rect x="855" y="274" width="175" height="60" rx="6" fill="#0d0d1a" stroke="#0078d4" stroke-width="1.5" opacity="1"/>
+  <text x="942" y="292" font-size="11" fill="#0078d4" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📨  Microsoft Email</text>
+  <text x="942" y="307" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">assistant@ + tom@</text>
+  <text x="942" y="320" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">systemd: email-microsoft</text>
+
+  <!-- Gmail integration -->
+  <rect x="1040" y="274" width="185" height="60" rx="6" fill="#1a0d0d" stroke="#ea4335" stroke-width="1.5" opacity="1"/>
+  <text x="1132" y="292" font-size="11" fill="#ea4335" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📨  Gmail</text>
+  <text x="1132" y="307" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">polling + send</text>
+  <text x="1132" y="320" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">systemd: email-gmail</text>
+
+  <!-- Calendar / Tasks -->
+  <rect x="855" y="342" width="370" height="46" rx="6" fill="#0d0d1a" stroke="#0078d4" stroke-width="1.5" opacity="1"/>
+  <text x="1040" y="360" font-size="11" fill="#4ea3e0" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📅  Microsoft Calendar + Tasks (poll-calendar.py)</text>
+  <text x="1040" y="375" font-size="8.8" fill="#d29922" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">calendar writes go ONLY through MS integration (calendar.* denied)</text>
+
+  <!-- YouTube -->
+  <rect x="855" y="396" width="175" height="50" rx="6" fill="#1a0d0d" stroke="#ff0000" stroke-width="1.5" opacity="1"/>
+  <text x="942" y="414" font-size="11" fill="#ff6b6b" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">▶  YouTube Transcript</text>
+  <text x="942" y="429" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">native tool · channel poller</text>
+
+  <!-- Dev command queue -->
+  <rect x="1040" y="396" width="185" height="50" rx="6" fill="#0d1020" stroke="#8957e5" stroke-width="1.5" opacity="1"/>
+  <text x="1132" y="414" font-size="11" fill="#bc8cff" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">⚙  Dev Cmd Queue</text>
+  <text x="1132" y="429" font-size="9.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">.dev-cmd.json · review/exec</text>
+
+  <!-- Provider switch -->
+  <rect x="855" y="454" width="370" height="62" rx="6" fill="#1a0d00" stroke="#ffa657" stroke-width="1.5" opacity="1"/>
+  <text x="1040" y="472" font-size="12" fill="#ffa657" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">🔄  Provider Switch — daily-reset.py · 04:00 cron</text>
+  <text x="1040" y="487" font-size="9.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">switches primary ↔ Codex via systemd user-session env (DBUS)</text>
+  <text x="1040" y="502" font-size="9" fill="#d29922" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Codex OAuth must be fresh, else falls back to OpenAI gpt-5.4</text>
+
+  <!-- AI briefing -->
+  <rect x="855" y="524" width="370" height="24" rx="5" fill="#0a140d" stroke="#2ea043" stroke-width="1.5" opacity="1"/>
+  <text x="1040" y="540" font-size="9.5" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">🗞  AI Briefing — /ai-briefing (status · run · read)</text>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- OPS NOTES & GOTCHAS (col 3, bottom) -->
+  <rect x="840" y="570" width="400" height="280" rx="8" fill="#0d0d10" stroke="#da3633" stroke-width="1.5" opacity="1"/>
   
     <rect x="858" y="578" width="10" height="14" rx="2" fill="#da3633"/>
-    <text x="874" y="589" font-size="12" fill="#da3633" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">KNOWN ISSUES / PENDING</text>
+    <text x="874" y="589" font-size="12" fill="#da3633" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">OPS NOTES &amp; GOTCHAS</text>
   
 
   
-    <text x="865" y="604" font-size="11" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">⚠</text>
-    <text x="882" y="604" font-size="10" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">assistant@ Microsoft token missing — needs re-auth</text>
+    <text x="865" y="606" font-size="11" fill="#d29922" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">⏰</text>
+    <text x="884" y="606" font-size="9.3" fill="#d29922" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">No cron 06:xx–07:xx (CRM / prospector) · jobs ≥ 08:00</text>
   
-    <text x="865" y="628" font-size="11" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">⚠</text>
-    <text x="882" y="628" font-size="10" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">SharePoint write: needs Files.ReadWrite reauth on assistant@</text>
+    <text x="865" y="633" font-size="11" fill="#d29922" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🔑</text>
+    <text x="884" y="633" font-size="9.3" fill="#d29922" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">Codex OAuth refresh nightly → fallback to gpt-5.4</text>
   
-    <text x="865" y="652" font-size="11" fill="#d29922" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🔑</text>
-    <text x="882" y="652" font-size="10" fill="#d29922" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">Codex OAuth: expires nightly — fallback to gpt-5.4 active</text>
+    <text x="865" y="660" font-size="11" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">📧</text>
+    <text x="884" y="660" font-size="9.3" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">Microsoft: one /ms-reauth grants ALL scopes (unified)</text>
   
-    <text x="865" y="676" font-size="11" fill="#ff7b72" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🗑</text>
-    <text x="882" y="676" font-size="10" fill="#ff7b72" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">Cleanup: ~/.openclaw/integrations/tavily/ — delete</text>
+    <text x="865" y="687" font-size="11" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🧩</text>
+    <text x="884" y="687" font-size="9.3" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">Plugin manifest needs id — bad stub aborts all channels</text>
   
-    <text x="865" y="700" font-size="11" fill="#ff7b72" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🗑</text>
-    <text x="882" y="700" font-size="10" fill="#ff7b72" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">Cleanup: ~/.openclaw/integrations/youtube/ (old Python) — delete</text>
+    <text x="865" y="714" font-size="11" fill="#79c0ff" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">📄</text>
+    <text x="884" y="714" font-size="9.3" fill="#79c0ff" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">Triage via ~/.openclaw/gateway.log (not /logs — Garmin noise)</text>
   
+    <text x="865" y="741" font-size="11" fill="#3fb950" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🗓</text>
+    <text x="884" y="741" font-size="9.3" fill="#3fb950" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">SharePoint housekeeping 02:00 · Anthropic batch API</text>
+  
+    <text x="865" y="768" font-size="11" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">✅</text>
+    <text x="884" y="768" font-size="9.3" fill="#ffa657" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">"active" service ≠ assistant working — always send a test msg</text>
+  
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- SECURITY & CONTROL (col 4, full height) -->
+  <rect x="1250" y="100" width="325" height="750" rx="8" fill="#1f1206" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+  
+    <rect x="1268" y="108" width="10" height="14" rx="2" fill="#f0883e"/>
+    <text x="1284" y="119" font-size="12" fill="#f0883e" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">SECURITY &amp; CONTROL</text>
+  
+
+  
+      <rect x="1262" y="128" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="146" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🔐 TOTP Approval</text>
+      <text x="1272" y="162" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">RFC 6238 · replay-protected · 5-min window</text>
+    
+      <rect x="1262" y="182" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="200" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🛡 Trust Gate</text>
+      <text x="1272" y="216" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">trustLevel ≥ 1 → owner approval</text>
+    
+      <rect x="1262" y="236" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="254" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">👁 Watch Mode</text>
+      <text x="1272" y="270" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">WhatsApp read-only · JSONL transcript</text>
+    
+      <rect x="1262" y="290" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="308" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">📝 Outbound Audit Log</text>
+      <text x="1272" y="324" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">append-only JSONL · chattr +a</text>
+    
+      <rect x="1262" y="344" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="362" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">⏱ Rate Limiter</text>
+      <text x="1272" y="378" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">per-minute / per-hour · queue | drop</text>
+    
+      <rect x="1262" y="398" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="416" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🧱 Session Isolation</text>
+      <text x="1272" y="432" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">channel-isolated outbound context</text>
+    
+      <rect x="1262" y="452" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="470" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">📌 Immutable System Prompt</text>
+      <text x="1272" y="486" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">injected before SOUL.md</text>
+    
+      <rect x="1262" y="506" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="524" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🔒 SOUL.md Integrity</text>
+      <text x="1272" y="540" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">SHA-256 verified every session</text>
+    
+      <rect x="1262" y="560" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="578" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🗝 Encrypted SOUL at Rest</text>
+      <text x="1272" y="594" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">AES-256-GCM · vault passphrase</text>
+    
+      <rect x="1262" y="614" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="632" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">⛔ Exec Denylist</text>
+      <text x="1272" y="648" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">chattr / config / totp / audit blocked</text>
+    
+      <rect x="1262" y="668" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="686" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🕵 Obfuscation Detector</text>
+      <text x="1272" y="702" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">base64 / heredoc / eval hard-block</text>
+    
+      <rect x="1262" y="722" width="300" height="46" rx="5" fill="#160d04" stroke="#f0883e" stroke-width="1.5" opacity="1"/>
+      <text x="1272" y="740" font-size="11" fill="#ffa657" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🚫 Per-Channel denyCommands</text>
+      <text x="1272" y="756" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">calendar.* · react · camera · contacts</text>
+    
+
+  <text x="1412" y="798" font-size="8.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">config chattr +i · audit chattr +a · totp secret chattr +i</text>
+  <text x="1412" y="814" font-size="8.5" fill="#ff7b72" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">denylist evaluated BEFORE TOTP — even an open window cannot bypass</text>
+  <text x="1412" y="832" font-size="8.5" fill="#8b949e" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Telegram owner-only · unauthorized senders rejected</text>
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- Connection arrows (selected key flows) -->
@@ -367,6 +471,11 @@
     <line x1="820" y1="200" x2="840" y2="200" stroke="#238636" stroke-width="1.2" opacity="0.7"/>
     <polygon points="840,200 832,205 832,195" fill="#238636" opacity="0.7"/>
   
+  <!-- Integrations ↔ Security -->
+  
+    <line x1="1240" y1="200" x2="1250" y2="200" stroke="#f0883e" stroke-width="1.2" opacity="0.7"/>
+    <polygon points="1250,200 1242,205 1242,195" fill="#f0883e" opacity="0.7"/>
+  
   <!-- L1 ↔ Memory -->
   
     <line x1="580" y1="300" x2="580" y2="310" stroke="#8957e5" stroke-width="1.2" opacity="0.7"/>
@@ -374,15 +483,15 @@
   
   <!-- L1 ↔ Mgmt bot -->
   
-    <line x1="340" y1="420" x2="240" y2="460" stroke="#da3633" stroke-width="1.2" opacity="0.7"/>
-    <polygon points="240,460 245.57086014531154,452.3864911347409 249.2847669088526,461.67125804359347" fill="#da3633" opacity="0.7"/>
+    <line x1="340" y1="420" x2="240" y2="440" stroke="#da3633" stroke-width="1.2" opacity="0.7"/>
+    <polygon points="240,440 246.86406472983643,433.52816754043994 248.8252260812183,443.33397429734913" fill="#da3633" opacity="0.7"/>
+  
+  <!-- Memory ↔ Skills -->
+  
+    <line x1="580" y1="440" x2="580" y2="450" stroke="#d29922" stroke-width="1.2" opacity="0.7"/>
+    <polygon points="580,450 575,442 585,442" fill="#d29922" opacity="0.7"/>
   
 
-  <!-- ═══════════════════════════════════════════════════════ -->
-  <!-- Deploy rule reminder -->
-  <rect x="40" y="760" width="760" height="28" rx="5" fill="#0a0f0a" stroke="#238636" stroke-width="1.5" opacity="1"/>
-  <text x="420" y="779" font-size="9.5" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📌  After every code change: cd ~/openclaw && git pull && bash ~/install-forked-openclaw.sh</text>
-
   <!-- Version stamp -->
-  <text x="1570" y="1085" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="end" font-family="'Segoe UI', system-ui, sans-serif">OpenClaw Architecture · Generated 14 Apr 2026</text>
+  <text x="1570" y="888" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="end" font-family="'Segoe UI', system-ui, sans-serif">OpenClaw Architecture · Generated 15 Jun 2026</text>
 </svg>
