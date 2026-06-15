@@ -61,6 +61,9 @@ WORKSPACE_REPO = WORKSPACE
 SP_BACKUP_STATE = OPENCLAW / "integrations/microsoft/sharepoint-backup-state.json"
 SP_BACKUP_LOG = WORKSPACE / "memory/sharepoint-backup-log.txt"
 SP_BACKUP_TIMER = "openclaw-sharepoint-backup.timer"
+EXPENSE_WATCHER_STATE = OPENCLAW / "runtime/expense-intake-watcher/state.json"
+EXPENSE_WATCHER_LOG = OPENCLAW / "runtime/expense-intake-watcher/watcher.log"
+EXPENSE_WATCHER_TIMER = "expense-intake-watcher.timer"
 
 # ---------------------------------------------------------------------------
 # Monitored services
@@ -231,6 +234,38 @@ def check_feed_freshness() -> list[str]:
     return issues
 
 
+def check_expense_watcher_health() -> list[str]:
+    issues = []
+
+    age = _mtime_age_minutes(EXPENSE_WATCHER_STATE)
+    if age is None:
+        issues.append("Expense watcher: runtime state missing — expense auto-capture may not be running")
+        return issues
+
+    if age > T15:
+        age_h = int(age // 60)
+        age_m = int(age % 60)
+        age_str = f"{age_h}h {age_m}m" if age_h else f"{age_m}m"
+        issues.append(f"Expense watcher: runtime state stale ({age_str} since last update) — expense auto-capture may be stuck")
+
+    try:
+        state = json.loads(EXPENSE_WATCHER_STATE.read_text())
+        last_run = state.get('last_run')
+        if not last_run:
+            issues.append("Expense watcher: runtime state has no last_run timestamp")
+        summary = state.get('last_summary') or {}
+        if summary.get('blocked', 0) > 0:
+            issues.append(f"Expense watcher: {summary.get('blocked')} blocked item(s) in latest run — review expense intake blockers")
+    except Exception as e:
+        issues.append(f"Expense watcher: runtime state unreadable ({e})")
+
+    timer_rc, timer_out, timer_err = _run(["systemctl", "--user", "is-enabled", EXPENSE_WATCHER_TIMER])
+    if timer_rc != 0 or timer_out.strip() != "enabled":
+        issues.append("Expense watcher: timer is not enabled")
+
+    return issues
+
+
 def check_enquiry_pipeline() -> list[str]:
     """
     Specific revenue-critical check for the website enquiry pipeline.
@@ -396,6 +431,7 @@ def main() -> None:
 
     log_issues  = check_log_health()
     feed_issues = check_feed_freshness()
+    exp_issues  = check_expense_watcher_health()
     enq_issues  = check_enquiry_pipeline()
     rem_issues  = check_reminder_failures()
     git_issues  = check_github_sync()
@@ -403,6 +439,7 @@ def main() -> None:
 
     issues.extend(log_issues)
     issues.extend(feed_issues)
+    issues.extend(exp_issues)
     issues.extend(enq_issues)
     issues.extend(rem_issues)
     issues.extend(git_issues)

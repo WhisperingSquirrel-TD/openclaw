@@ -1,5 +1,5 @@
 [Unit]
-Description=Expense intake watcher
+Description=Inbound watch router (legacy expense-intake-watcher path)
 After=network-online.target
 
 [Service]

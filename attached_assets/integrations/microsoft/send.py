@@ -25,6 +25,7 @@ Options:
   --subject-file <path>    Read subject from this file (overrides subject positional arg)
   --body-file <path>       Read body from this file (overrides body positional arg).
                            Avoids passing large/sensitive content as a shell argument.
+  --body-content-type <t>  Body type: text (default) or html.
   --whoami                 Print the authenticated email address for the resolved
                            token file and exit. Use to verify which account a token
                            file actually belongs to.
@@ -75,6 +76,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--body-file",        default=None,
                    help="Read body from this file (overrides body positional arg). "
                         "Avoids passing large/sensitive content as a shell argument.")
+    p.add_argument("--body-content-type", default="text", choices=["text","html"],
+                   help="Body type for Microsoft Graph message body")
     p.add_argument("--attachment", action="append", default=[],
                    help="Path to file to attach. Can be repeated.")
     return p.parse_args()
@@ -257,6 +260,7 @@ def send_email(
     from_name: str,
     subject: str,
     body: str,
+    body_content_type: str = "text",
     reply_to_message_id: str | None = None,
     attachments: list[dict] | None = None,
     reply_all: bool = False,
@@ -273,11 +277,12 @@ def send_email(
     # All recipients go on ONE email — never loop and send separately.
     to_recipients = [{"emailAddress": {"address": addr}} for addr in recipients]
 
+    graph_body_type = "HTML" if body_content_type.lower() == "html" else "Text"
     message: dict = {
         "subject": subject,
         "body": {
-            "contentType": "Text",
-            "content":      body.replace("\\n", "\n"),
+            "contentType": graph_body_type,
+            "content": body if graph_body_type == "HTML" else body.replace("\\n", "\n"),
         },
         "toRecipients": to_recipients,
     }
@@ -397,6 +402,7 @@ def main() -> None:
         from_name=args.from_name,
         subject=subject,
         body=body,
+        body_content_type=args.body_content_type,
         reply_to_message_id=args.reply_to_message_id,
         attachments=attachments,
         reply_all=args.reply_all,

@@ -1,5 +1,5 @@
 [Unit]
-Description=Run expense intake watcher every 5 minutes
+Description=Run inbound watch router every 5 minutes (legacy expense-intake-watcher unit name)
 
 [Timer]
 OnBootSec=2min

@@ -7,6 +7,14 @@
 #
 # Format of each log line:
 #   [YYYY-MM-DD HH:MM] optional-group-name sender: body
+#
+# Recent-view normalization:
+#   - direct inbound stays:  [ts] Lauren: hi
+#   - direct outbound rewrites ambiguous `Me:` to: [ts] Tom -> Lauren: hi
+#   - group outbound stays group-scoped: [ts] [Family] Me: hi
+#
+# Note: the full log remains append-only source data; this script adds thread-explicit
+# direct-outbound labels in WHATSAPP_RECENT.md for safer downstream monitoring.
 
 WORKSPACE="$HOME/.openclaw/workspace"
 SOURCE_LOG="$WORKSPACE/WHATSAPP_LOG.md"
@@ -38,6 +46,48 @@ else
     if [ "$LINE_COUNT" -gt "$MAX_LINES" ]; then
         RECENT=$(echo "$RECENT" | tail -n "$MAX_LINES")
     fi
+fi
+
+if [ -n "$RECENT" ]; then
+    # Rewrite ambiguous direct outbound `Me:` lines into an explicit thread form for
+    # downstream readers. We only rewrite non-group lines; group lines keep their
+    # existing `[Group] Me:` shape. Heuristic: direct-chat context follows the most
+    # recent direct inbound sender visible in the recent slice.
+    RECENT=$(printf '%s\n' "$RECENT" | awk '
+        function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+        {
+            line = $0
+            rest = line
+            sub(/^\[[0-9-]+ [0-9:]+\][[:space:]]*/, "", rest)
+
+            if (rest ~ /^\[[^]]+\][[:space:]]+Me:[[:space:]]*/) {
+                print line
+                next
+            }
+
+            if (rest ~ /^\[[^]]+\][[:space:]]+/) {
+                print line
+                next
+            }
+
+            if (rest ~ /^Me:[[:space:]]*/) {
+                if (last_direct_contact != "") {
+                    sub(/Me:/, "Tom -> " last_direct_contact ":", line)
+                } else {
+                    sub(/Me:/, "Tom -> Direct chat:", line)
+                }
+                print line
+                next
+            }
+
+            split(rest, parts, ":")
+            sender = trim(parts[1])
+            if (sender != "") {
+                last_direct_contact = sender
+            }
+            print line
+        }
+    ')
 fi
 
 if [ -z "$RECENT" ]; then
