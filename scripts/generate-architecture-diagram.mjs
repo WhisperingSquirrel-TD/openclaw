@@ -84,9 +84,8 @@ const mgmtCommands = [
   ['/status', '/health', '/logs', '/disk'],
   ['/restart', '/reboot', '/pull', '/install'],
   ['/openai', '/anthropic', '/codex', '/codexmini'],
-  ['/garmin', '/sp-sync', '/sp-house', '/soul'],
-  ['/ms-reauth', '/ms-reauthP', '/yt-add', '/yt-run'],
-  ['/dev-run', '/dev-test', '/wcp-up', '/wcp-url'],
+  ['/garmin', '/sp-sync', '/soul', '/yt-list'],
+  ['/yt-run', '/dev-run', '/dev-test', '/cancel'],
 ];
 
 // ── Security & control features (from replit.md / src/infra) ──
@@ -98,10 +97,10 @@ const securityFeatures = [
   ['⏱ Rate Limiter', 'per-minute / per-hour · queue | drop'],
   ['🧱 Session Isolation', 'channel-isolated outbound context'],
   ['📌 Immutable System Prompt', 'injected before SOUL.md'],
-  ['🔒 SOUL.md Integrity', 'SHA-256 verified every session'],
+  ['🔒 SOUL.md Integrity', 'SHA-256 integrity check per session'],
   ['🗝 Encrypted SOUL at Rest', 'AES-256-GCM · vault passphrase'],
   ['⛔ Exec Denylist', 'chattr / config / totp / audit blocked'],
-  ['🕵 Obfuscation Detector', 'base64 / heredoc / eval hard-block'],
+  ['🕵 Obfuscation Detector', 'base64 / heredoc / eval (hardened mode)'],
   ['🚫 Per-Channel denyCommands', 'calendar.* · react · camera · contacts'],
 ];
 
@@ -132,6 +131,12 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   ${text(W/2, 36, 'OpenClaw — Personal AI Gateway', 22, colors.textAccent, '700', 'middle')}
   ${text(W/2, 56, 'Raspberry Pi 4 · 8 GB · Multi-channel L1 Agent · Telegram-controlled · TOTP-gated · audit-logged', 12.5, colors.textSecondary, 'normal', 'middle')}
 
+  <!-- Confidence legend (this is a working sketch, not a verified source-of-truth diagram) -->
+  ${rect(1185, 11, 392, 52, '#0c1117', '#30363d', 6)}
+  ${text(1195, 26, 'CONFIDENCE — working draft, not source-of-truth', 8.2, colors.textSecondary, '700', 'start')}
+  ${text(1195, 42, '✅ live / verified        🟠 designed (in code)', 9, colors.textSecondary, 'normal', 'start')}
+  ${text(1195, 57, '🔌 pluggable / unverified        🚧 evolving', 9, colors.textSecondary, 'normal', 'start')}
+
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- Pi outer box -->
   ${rect(20, 70, W - 40, 805, colors.piBox, colors.piBorder, 12)}
@@ -151,7 +156,7 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <!-- WhatsApp -->
   ${rect(55, 198, 245, 50, '#0d1f0d', '#25d366', 6)}
   ${text(178, 216, '📱  WhatsApp', 13, colors.green, '600', 'middle')}
-  ${text(178, 231, 'Read-only watch mode · action scanner', 10, colors.textSecondary, 'normal', 'middle')}
+  ${text(178, 231, 'Watch mode · action scanner · 🚧 evolving', 10, colors.textSecondary, 'normal', 'middle')}
 
   <!-- Gmail -->
   ${rect(55, 256, 116, 50, '#1a0d0d', '#ea4335', 6)}
@@ -171,7 +176,7 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <!-- More channels -->
   ${rect(55, 367, 245, 45, '#0c1018', '#30363d', 6)}
   ${text(178, 384, '＋ Signal · Slack · iMessage · Matrix', 10, colors.textSecondary, 'normal', 'middle')}
-  ${text(178, 399, 'IRC · LINE · Feishu · Google Chat (plugins)', 9, colors.textSecondary, 'normal', 'middle')}
+  ${text(178, 399, 'IRC · LINE · Feishu · Google Chat · 🔌 pluggable', 9, colors.textSecondary, 'normal', 'middle')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- MANAGEMENT BOT (left column, bottom) -->
@@ -185,8 +190,9 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
     ).join('')
   ).join('')}
 
-  ${text(180, 654, '＋ /yt-list · /ai-briefing · /dev-queue/pause/resume · /help', 8.5, colors.textSecondary, 'normal', 'middle')}
-  ${text(180, 666, '(grid labels abbreviated: /sp-house=/sp-housekeep · /ms-reauthP=/ms-reauth-personal)', 7.5, colors.textSecondary, 'normal', 'middle')}
+  ${text(180, 626, '＋ /sp-housekeep · /ms-reauth · /ms-reauth-personal · /ai-briefing', 8.3, colors.textSecondary, 'normal', 'middle')}
+  ${text(180, 640, '＋ /wcp-up · /wcp-url · /dev-pause/resume/queue · /help · /start', 8.3, colors.textSecondary, 'normal', 'middle')}
+  ${text(180, 656, '✅ real commands from mgmt-bot dispatch — run /help for the live list', 8, colors.green, 'normal', 'middle')}
 
   <!-- WCP -->
   ${rect(50, 674, 260, 46, '#0a1628', colors.channelBorder, 5)}
@@ -302,11 +308,12 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
 
   ${rect(355, 800, 450, 28, '#0a0f0a', colors.integrationBorder, 5)}
   ${text(580, 818, '📌  cd ~/openclaw && git pull && bash ~/install-forked-openclaw.sh   ( or /install )', 9.2, colors.green, 'normal', 'middle')}
+  ${text(580, 843, '🚧 push / backup health visibility recently tightened — still stabilising', 8.2, colors.yellow, 'normal', 'middle')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- INTEGRATIONS section (col 3, top) -->
   ${rect(840, 100, 400, 455, colors.integrationBg, colors.integrationBorder, 8)}
-  ${sectionLabel(858, 108, 'INTEGRATIONS & POLLERS', colors.integrationBorder)}
+  ${sectionLabel(858, 108, 'INTEGRATIONS & POLLERS  ✅', colors.integrationBorder)}
 
   <!-- SharePoint -->
   ${rect(855, 128, 370, 80, '#0a1a10', colors.integrationBorder, 6)}
@@ -356,7 +363,7 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
 
   <!-- Provider switch -->
   ${rect(855, 454, 370, 62, '#1a0d00', colors.orange, 6)}
-  ${text(1040, 472, '🔄  Provider Switch — daily-reset.py · 04:00 cron', 12, colors.orange, '600', 'middle')}
+  ${text(1040, 472, '🔄  Provider Switch 🟠 — daily-reset.py · 04:00 cron', 12, colors.orange, '600', 'middle')}
   ${text(1040, 487, 'switches primary ↔ Codex via systemd user-session env (DBUS)', 9.5, colors.textSecondary, 'normal', 'middle')}
   ${text(1040, 502, 'Codex OAuth must be fresh, else falls back to OpenAI gpt-5.4', 9, colors.yellow, 'normal', 'middle')}
 
@@ -377,7 +384,7 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- SECURITY & CONTROL (col 4, full height) -->
   ${rect(1250, 100, 325, 750, colors.secBg, colors.secBorder, 8)}
-  ${sectionLabel(1268, 108, 'SECURITY & CONTROL', colors.secBorder)}
+  ${sectionLabel(1268, 108, 'SECURITY & CONTROL  🟠 DESIGNED', colors.secBorder)}
 
   ${securityFeatures.map((f, i) => {
     const y = 128 + i * 54;
@@ -388,8 +395,9 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
     `;
   }).join('')}
 
+  ${text(1412, 782, '🟠 implemented in code — verify live on the Pi before relying on these', 8.2, colors.yellow, 'normal', 'middle')}
   ${text(1412, 798, 'config chattr +i · audit chattr +a · totp secret chattr +i', 8.5, colors.textSecondary, 'normal', 'middle')}
-  ${text(1412, 814, 'denylist evaluated BEFORE TOTP — even an open window cannot bypass', 8.5, colors.red, 'normal', 'middle')}
+  ${text(1412, 814, 'denylist intended to run before TOTP (open window should not bypass)', 8.5, colors.red, 'normal', 'middle')}
   ${text(1412, 832, 'Telegram owner-only · unauthorized senders rejected', 8.5, colors.textSecondary, 'normal', 'middle')}
 
   <!-- ═══════════════════════════════════════════════════════ -->
