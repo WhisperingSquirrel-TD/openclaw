@@ -50,3 +50,8 @@ Set `OPENAI_API_KEY`, or configure it in `~/.openclaw/openclaw.json`:
   },
 }
 ```
+
+## Mandatory end-of-use review _(Updated: 2026-06-14 22:19)_
+
+After every real use of this skill, do a short explicit pass with Tom on whether anything in the skill itself should be updated.
+Treat that review as part of completion, even if the outcome is "no skill changes needed".

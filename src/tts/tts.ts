@@ -470,6 +470,11 @@ export function getTtsMaxLength(prefsPath: string): number {
   return prefs.tts?.maxLength ?? DEFAULT_TTS_MAX_LENGTH;
 }
 
+export function getTtsAutoTriggerLength(prefsPath: string): number {
+  const prefs = readPrefs(prefsPath);
+  return prefs.tts?.autoTriggerLength ?? 1000;
+}
+
 export function setTtsMaxLength(prefsPath: string, maxLength: number): void {
   updatePrefs(prefsPath, (prefs) => {
     prefs.tts = { ...prefs.tts, maxLength };
@@ -642,6 +647,9 @@ export async function textToSpeech(params: {
 
         scheduleCleanup(tempDir);
         const voiceCompatible = isVoiceCompatibleAudio({ fileName: edgeResult.audioPath });
+        logVerbose(
+          `TTS: generated audio provider=${provider} channel=${channelId ?? "unknown"} outputFormat=${edgeResult.outputFormat} voiceCompatible=${voiceCompatible} path=${edgeResult.audioPath}`,
+        );
 
         return {
           success: true,
@@ -705,6 +713,9 @@ export async function textToSpeech(params: {
       const audioPath = path.join(tempDir, `voice-${Date.now()}${output.extension}`);
       writeFileSync(audioPath, audioBuffer);
       scheduleCleanup(tempDir);
+      logVerbose(
+        `TTS: generated audio provider=${provider} channel=${channelId ?? "unknown"} outputFormat=${provider === "openai" ? output.openai : output.elevenlabs} voiceCompatible=${output.voiceCompatible} bytes=${audioBuffer.length} path=${audioPath}`,
+      );
 
       return {
         success: true,
@@ -851,6 +862,14 @@ export async function maybeApplyTtsToPayload(params: {
     return nextPayload;
   }
   if (autoMode === "inbound" && params.inboundAudio !== true) {
+    return nextPayload;
+  }
+  const autoTriggerLength = getTtsAutoTriggerLength(prefsPath);
+  if (
+    autoMode === "always" &&
+    params.inboundAudio !== true &&
+    ttsText.trim().length < autoTriggerLength
+  ) {
     return nextPayload;
   }
 

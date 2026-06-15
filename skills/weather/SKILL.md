@@ -110,3 +110,8 @@ curl "wttr.in/London?format=v2"
 - Rate limited; don't spam requests
 - Works for most global cities
 - Supports airport codes: `curl wttr.in/ORD`
+
+## Mandatory end-of-use review _(Updated: 2026-06-14 22:19)_
+
+After every real use of this skill, do a short explicit pass with Tom on whether anything in the skill itself should be updated.
+Treat that review as part of completion, even if the outcome is "no skill changes needed".

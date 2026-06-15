@@ -243,3 +243,8 @@ also update `MEMORY.md` (long-term memory is optional and only used in private s
 
 If the session cannot write to the workspace, ask for permission or provide exact entries
 the user can paste into the memory files.
+
+## Mandatory end-of-use review _(Updated: 2026-06-14 22:19)_
+
+After every real use of this skill, do a short explicit pass with Tom on whether anything in the skill itself should be updated.
+Treat that review as part of completion, even if the outcome is "no skill changes needed".

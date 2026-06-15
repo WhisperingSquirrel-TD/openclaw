@@ -351,6 +351,9 @@ async function deliverMediaReply(params: {
           if (firstDeliveredMessageId == null) {
             firstDeliveredMessageId = result.message_id;
           }
+          params.runtime.log?.(
+            `telegram sendVoice ok chat=${params.chatId} message=${result.message_id} file=${fileName ?? "<unknown>"} contentType=${media.contentType ?? "<unknown>"}`,
+          );
           markDelivered(params.progress);
         } catch (voiceErr) {
           if (isVoiceMessagesForbidden(voiceErr)) {
@@ -403,6 +406,9 @@ async function deliverMediaReply(params: {
             if (firstDeliveredMessageId == null) {
               firstDeliveredMessageId = result.message_id;
             }
+            params.runtime.log?.(
+              `telegram sendVoice ok chat=${params.chatId} message=${result.message_id} file=${fileName ?? "<unknown>"} contentType=${media.contentType ?? "<unknown>"} caption=fallback_text_split`,
+            );
             markDelivered(params.progress);
             const fallbackText = params.reply.text;
             if (fallbackText?.trim()) {
@@ -435,6 +441,9 @@ async function deliverMediaReply(params: {
         if (firstDeliveredMessageId == null) {
           firstDeliveredMessageId = result.message_id;
         }
+        params.runtime.log?.(
+          `telegram sendAudio ok chat=${params.chatId} message=${result.message_id} file=${fileName ?? "<unknown>"} contentType=${media.contentType ?? "<unknown>"}`,
+        );
         markDelivered(params.progress);
       }
     } else {

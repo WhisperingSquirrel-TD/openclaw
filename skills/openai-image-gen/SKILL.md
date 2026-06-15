@@ -87,3 +87,8 @@ Different models support different parameter values. The script automatically se
 - `*.png`, `*.jpeg`, or `*.webp` images (output format depends on model + `--output-format`)
 - `prompts.json` (prompt → file mapping)
 - `index.html` (thumbnail gallery)
+
+## Mandatory end-of-use review _(Updated: 2026-06-14 22:19)_
+
+After every real use of this skill, do a short explicit pass with Tom on whether anything in the skill itself should be updated.
+Treat that review as part of completion, even if the outcome is "no skill changes needed".

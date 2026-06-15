@@ -391,9 +391,18 @@ When creating a new durable operational/planning/reference document during syste
 
 After testing the skill, users may request improvements. Often this happens right after using the skill, with fresh context of how the skill performed.
 
+**Mandatory end-of-use review:**
+After every real use of a skill, do a short explicit pass with Tom on whether anything in the skill itself should be updated.
+
+- Treat this as part of completion, not an optional retrospective.
+- Check for: missing triggers, missing examples, unclear steps, fragile instructions, over-verbose sections, reusable outputs worth promoting into references/assets, and any mistake/near-miss that should be prevented next time.
+- If a useful improvement is identified, update the skill in the same workstream whenever practical rather than leaving it as implied learning.
+- If no change is needed, that is still a valid outcome — but the review step must happen.
+
 **Iteration workflow:**
 
 1. Use the skill on real tasks
-2. Notice struggles or inefficiencies
-3. Identify how SKILL.md or bundled resources should be updated
-4. Implement changes and test again
+2. Do an explicit end-of-use review with Tom: what should change in the skill itself?
+3. Notice struggles or inefficiencies
+4. Identify how SKILL.md or bundled resources should be updated
+5. Implement changes and test again
