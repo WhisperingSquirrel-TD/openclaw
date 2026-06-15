@@ -1,7 +1,7 @@
 import { writeFileSync } from 'fs';
 
 const W = 1600;
-const H = 900;
+const H = 1065;
 
 const colors = {
   bg: '#0d1117',
@@ -21,6 +21,10 @@ const colors = {
   agentBorder: '#388bfd',
   secBg: '#1f1206',
   secBorder: '#f0883e',
+  l2Bg: '#07222a',
+  l2Border: '#56d4dd',
+  cyan: '#7ee8f2',
+  sharepointBg: '#0a1a10',
   textPrimary: '#e6edf3',
   textSecondary: '#8b949e',
   textAccent: '#58a6ff',
@@ -306,12 +310,12 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
 
   <!-- SharePoint -->
   ${rect(855, 128, 370, 80, '#0a1a10', colors.integrationBorder, 6)}
-  ${text(1040, 145, '📁  SharePoint — Stackstone CRM mirror', 12, colors.green, '600', 'middle')}
+  ${text(1040, 145, '📁  SharePoint — shared store (mirror + tidy)', 12, colors.green, '600', 'middle')}
   ${badge(860, 154, 60, 18, 'cache/15m', '#0a1a10', colors.integrationBorder, colors.green, 9)}
   ${badge(926, 154, 60, 18, 'queue/1m', '#0a1a10', colors.integrationBorder, colors.green, 9)}
   ${badge(992, 154, 84, 18, 'binary extract', '#0a1a10', colors.integrationBorder, colors.green, 9)}
   ${badge(1082, 154, 132, 18, 'housekeep 02:00 · batch API', '#0a1a10', colors.integrationBorder, colors.teal, 8.5)}
-  ${text(1040, 198, 'Files.ReadWrite + Sites.ReadWrite.All · /ms-reauth grants all scopes', 9, colors.yellow, 'normal', 'middle')}
+  ${text(1040, 198, 'fed by L2 · tidied by L1 (shared store below) · Files.ReadWrite + Sites.ReadWrite.All', 9, colors.yellow, 'normal', 'middle')}
 
   <!-- Google Tasks -->
   ${rect(855, 216, 175, 50, '#0a140d', '#34a853', 6)}
@@ -405,6 +409,46 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   ${arrow(340, 420, 240, 440, colors.infraBorder)}
   <!-- Memory ↔ Skills -->
   ${arrow(580, 440, 580, 450, colors.toolsBorder)}
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- EXTERNAL: L2 AGENT ↔ SHARED SHAREPOINT ↔ L1 (below the Pi) -->
+  ${rect(40, 895, W - 80, 150, '#08161a', '#2a5b63', 12)}
+  ${sectionLabel(60, 905, 'EXTERNAL AGENT & SHARED SHAREPOINT STORE', colors.cyan)}
+
+  <!-- L2 Agent (separate system) -->
+  ${rect(70, 932, 380, 96, colors.l2Bg, colors.l2Border, 8)}
+  ${text(86, 954, '🤖  L2 Agent — Meeting Minutes', 13, colors.cyan, '700', 'start')}
+  ${badge(364, 938, 78, 17, 'SEPARATE', '#07222a', colors.l2Border, colors.cyan, 8)}
+  ${text(86, 976, 'captures meeting minutes · tips · stories', 10, colors.textSecondary, 'normal', 'start')}
+  ${text(86, 994, 'writes .md + files into the SharePoint folder', 10, colors.textSecondary, 'normal', 'start')}
+  ${text(86, 1014, 'runs outside the Pi · its own agent / LLM', 9, colors.textSecondary, 'normal', 'start')}
+
+  <!-- SharePoint shared store (hub) -->
+  ${rect(610, 924, 380, 112, colors.sharepointBg, colors.integrationBorder, 10)}
+  ${text(626, 948, '📁  SharePoint — Shared Store', 14, colors.green, '700', 'start')}
+  ${badge(906, 932, 70, 17, 'SHARED', '#0a1a10', colors.integrationBorder, colors.green, 8)}
+  ${text(626, 972, 'meeting-minutes folder · Stackstone CRM', 10, colors.textSecondary, 'normal', 'start')}
+  ${text(626, 990, 'Microsoft 365 · Files.ReadWrite · Sites.ReadWrite.All', 9.5, colors.textSecondary, 'normal', 'start')}
+  ${text(626, 1012, 'L2 fills it ▸ L1 tidies it · gateway mirrors this store', 9, colors.yellow, 'normal', 'start')}
+
+  <!-- L1 housekeeping (this Pi) -->
+  ${rect(1150, 932, 380, 96, '#0d1f3c', colors.agentBorder, 8)}
+  ${text(1166, 954, '🧹  L1 Housekeeping — tidies up', 13, colors.blue, '700', 'start')}
+  ${badge(1462, 938, 52, 17, 'ON PI', '#0a1628', colors.agentBorder, colors.blue, 8)}
+  ${text(1166, 976, 'sharepoint_housekeeping.py · 02:00 · batch API', 9.5, colors.textSecondary, 'normal', 'start')}
+  ${text(1166, 994, 'rename → canonical dates · create/refresh Current.md', 9.5, colors.textSecondary, 'normal', 'start')}
+  ${text(1166, 1014, 'safe auto-writes · ambiguous items reported', 9, colors.textSecondary, 'normal', 'start')}
+
+  <!-- Flow: L2 → SharePoint → L1 -->
+  ${text(530, 968, 'writes', 9, colors.cyan, '600', 'middle')}
+  ${arrow(452, 980, 608, 980, colors.l2Border)}
+  ${text(1070, 962, 'reads', 9, colors.green, '600', 'middle')}
+  ${arrow(992, 974, 1148, 974, colors.integrationBorder)}
+  ${text(1070, 1004, 'tidies back', 9, colors.blue, '600', 'middle')}
+  ${arrow(1148, 992, 992, 992, colors.agentBorder)}
+  <!-- shared store ↔ gateway mirror (connects up to the Pi box) -->
+  ${line(990, 924, 1040, 877, colors.integrationBorder, '5 4')}
+  ${text(1052, 905, '↕ same store mirrored by the gateway above', 8.5, colors.integrationBorder, 'normal', 'start')}
 
   <!-- Version stamp -->
   ${text(W - 30, H - 12, 'OpenClaw Architecture · Generated 15 Jun 2026', 9, colors.textSecondary, 'normal', 'end')}

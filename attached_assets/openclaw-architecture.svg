@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1065" viewBox="0 0 1600 1065">
   <defs>
     <filter id="glow">
       <feGaussianBlur stdDeviation="2" result="blur"/>
@@ -8,7 +8,7 @@
   </defs>
 
   <!-- Background -->
-  <rect width="1600" height="900" fill="#0d1117"/>
+  <rect width="1600" height="1065" fill="#0d1117"/>
 
   <!-- Title -->
   <text x="800" y="36" font-size="22" fill="#58a6ff" font-weight="700" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">OpenClaw — Personal AI Gateway</text>
@@ -294,7 +294,7 @@
 
   <!-- SharePoint -->
   <rect x="855" y="128" width="370" height="80" rx="6" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
-  <text x="1040" y="145" font-size="12" fill="#3fb950" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📁  SharePoint — Stackstone CRM mirror</text>
+  <text x="1040" y="145" font-size="12" fill="#3fb950" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">📁  SharePoint — shared store (mirror + tidy)</text>
   
     <rect x="860" y="154" width="60" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
     <text x="890" y="167" font-size="9" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">cache/15m</text>
@@ -311,7 +311,7 @@
     <rect x="1082" y="154" width="132" height="18" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
     <text x="1148" y="167" font-size="8.5" fill="#39d353" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">housekeep 02:00 · batch API</text>
   
-  <text x="1040" y="198" font-size="9" fill="#d29922" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">Files.ReadWrite + Sites.ReadWrite.All · /ms-reauth grants all scopes</text>
+  <text x="1040" y="198" font-size="9" fill="#d29922" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">fed by L2 · tidied by L1 (shared store below) · Files.ReadWrite + Sites.ReadWrite.All</text>
 
   <!-- Google Tasks -->
   <rect x="855" y="216" width="175" height="50" rx="6" fill="#0a140d" stroke="#34a853" stroke-width="1.5" opacity="1"/>
@@ -492,6 +492,67 @@
     <polygon points="580,450 575,442 585,442" fill="#d29922" opacity="0.7"/>
   
 
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- EXTERNAL: L2 AGENT ↔ SHARED SHAREPOINT ↔ L1 (below the Pi) -->
+  <rect x="40" y="895" width="1520" height="150" rx="12" fill="#08161a" stroke="#2a5b63" stroke-width="1.5" opacity="1"/>
+  
+    <rect x="60" y="905" width="10" height="14" rx="2" fill="#7ee8f2"/>
+    <text x="76" y="916" font-size="12" fill="#7ee8f2" font-weight="600" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">EXTERNAL AGENT &amp; SHARED SHAREPOINT STORE</text>
+  
+
+  <!-- L2 Agent (separate system) -->
+  <rect x="70" y="932" width="380" height="96" rx="8" fill="#07222a" stroke="#56d4dd" stroke-width="1.5" opacity="1"/>
+  <text x="86" y="954" font-size="13" fill="#7ee8f2" font-weight="700" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🤖  L2 Agent — Meeting Minutes</text>
+  
+    <rect x="364" y="938" width="78" height="17" rx="5" fill="#07222a" stroke="#56d4dd" stroke-width="1.5" opacity="1"/>
+    <text x="403" y="950.5" font-size="8" fill="#7ee8f2" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">SEPARATE</text>
+  
+  <text x="86" y="976" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">captures meeting minutes · tips · stories</text>
+  <text x="86" y="994" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">writes .md + files into the SharePoint folder</text>
+  <text x="86" y="1014" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">runs outside the Pi · its own agent / LLM</text>
+
+  <!-- SharePoint shared store (hub) -->
+  <rect x="610" y="924" width="380" height="112" rx="10" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
+  <text x="626" y="948" font-size="14" fill="#3fb950" font-weight="700" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">📁  SharePoint — Shared Store</text>
+  
+    <rect x="906" y="932" width="70" height="17" rx="5" fill="#0a1a10" stroke="#238636" stroke-width="1.5" opacity="1"/>
+    <text x="941" y="944.5" font-size="8" fill="#3fb950" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">SHARED</text>
+  
+  <text x="626" y="972" font-size="10" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">meeting-minutes folder · Stackstone CRM</text>
+  <text x="626" y="990" font-size="9.5" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">Microsoft 365 · Files.ReadWrite · Sites.ReadWrite.All</text>
+  <text x="626" y="1012" font-size="9" fill="#d29922" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">L2 fills it ▸ L1 tidies it · gateway mirrors this store</text>
+
+  <!-- L1 housekeeping (this Pi) -->
+  <rect x="1150" y="932" width="380" height="96" rx="8" fill="#0d1f3c" stroke="#388bfd" stroke-width="1.5" opacity="1"/>
+  <text x="1166" y="954" font-size="13" fill="#79c0ff" font-weight="700" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">🧹  L1 Housekeeping — tidies up</text>
+  
+    <rect x="1462" y="938" width="52" height="17" rx="5" fill="#0a1628" stroke="#388bfd" stroke-width="1.5" opacity="1"/>
+    <text x="1488" y="950.5" font-size="8" fill="#79c0ff" font-weight="normal" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">ON PI</text>
+  
+  <text x="1166" y="976" font-size="9.5" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">sharepoint_housekeeping.py · 02:00 · batch API</text>
+  <text x="1166" y="994" font-size="9.5" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">rename → canonical dates · create/refresh Current.md</text>
+  <text x="1166" y="1014" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">safe auto-writes · ambiguous items reported</text>
+
+  <!-- Flow: L2 → SharePoint → L1 -->
+  <text x="530" y="968" font-size="9" fill="#7ee8f2" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">writes</text>
+  
+    <line x1="452" y1="980" x2="608" y2="980" stroke="#56d4dd" stroke-width="1.2" opacity="0.7"/>
+    <polygon points="608,980 600,985 600,975" fill="#56d4dd" opacity="0.7"/>
+  
+  <text x="1070" y="962" font-size="9" fill="#3fb950" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">reads</text>
+  
+    <line x1="992" y1="974" x2="1148" y2="974" stroke="#238636" stroke-width="1.2" opacity="0.7"/>
+    <polygon points="1148,974 1140,979 1140,969" fill="#238636" opacity="0.7"/>
+  
+  <text x="1070" y="1004" font-size="9" fill="#79c0ff" font-weight="600" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif">tidies back</text>
+  
+    <line x1="1148" y1="992" x2="992" y2="992" stroke="#388bfd" stroke-width="1.2" opacity="0.7"/>
+    <polygon points="992,992 1000,987 1000,997" fill="#388bfd" opacity="0.7"/>
+  
+  <!-- shared store ↔ gateway mirror (connects up to the Pi box) -->
+  <line x1="990" y1="924" x2="1040" y2="877" stroke="#238636" stroke-width="1.2" stroke-dasharray="5 4" opacity="0.7"/>
+  <text x="1052" y="905" font-size="8.5" fill="#238636" font-weight="normal" text-anchor="start" font-family="'Segoe UI', system-ui, sans-serif">↕ same store mirrored by the gateway above</text>
+
   <!-- Version stamp -->
-  <text x="1570" y="888" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="end" font-family="'Segoe UI', system-ui, sans-serif">OpenClaw Architecture · Generated 15 Jun 2026</text>
+  <text x="1570" y="1053" font-size="9" fill="#8b949e" font-weight="normal" text-anchor="end" font-family="'Segoe UI', system-ui, sans-serif">OpenClaw Architecture · Generated 15 Jun 2026</text>
 </svg>
