@@ -5,7 +5,7 @@ description: Plan a new app before any build work. Use when Tom wants a new app/
 
 # App Plan
 
-_Last updated: 2026-06-15 14:41_
+_Last updated: 2026-06-16 10:01_
 
 Use this skill at the start of any new app request.
 
@@ -87,15 +87,30 @@ Use when the build is for another person, client, or project context.
    - the current phase/status
    - which docs must be kept in sync when the design changes
      If no such document exists yet, create or update it as part of planning rather than leaving the architecture implicit in chat.
-9. Include an end-to-end sentence in the plan covering the full path:
-   - Tom prompts for a project
-   - project is created in the right code home
-   - runtime/preview environment can be started
-   - workspace control plane can discover/control it
-   - GUI can surface/open the real preview URL
-10. Produce a concise implementation plan with clear phases.
-11. Bound the automation up front: state which decisions/actions L1 may take without re-approval, which require Tom's confirmation, and what counts as a stop-and-ask condition.
-12. Route implementation to the right next skill (`app-build`, `app-patch`, `app-test`, `app-deploy`) rather than building from vague intent.
+9. Define the verification and observability spine before implementation starts:
+   - what behavior will be proven by fast unit/repository tests
+   - what behavior will be proven by integration tests
+   - what end-to-end proof is actually needed
+   - what logs/signals must exist to diagnose failure in production or on the Pi
+10. Include an end-to-end sentence in the plan covering the full path:
+
+- Tom prompts for a project
+- project is created in the right code home
+- runtime/preview environment can be started
+- workspace control plane can discover/control it
+- GUI can surface/open the real preview URL
+
+11. Produce a concise implementation plan with clear phases.
+12. Bound the automation up front: state which decisions/actions L1 may take without re-approval, which require Tom's confirmation, and what counts as a stop-and-ask condition.
+13. Route implementation to the right next skill (`app-build`, `app-patch`, `app-test`, `app-deploy`) rather than building from vague intent.
+
+## Additional mandatory rules for planning
+
+- Use `reference/APP-ENGINEERING-TDD-LOGGING.md` when deciding how much TDD, integration coverage, and observability a system needs.
+- For critical systems, do not leave test strategy or logging strategy implicit.
+- Name the proof for both the happy path and at least the most important failure path.
+- If the system has persistence, state transitions, APIs/gateway routes, or operational consequences when wrong, integration tests are mandatory by default.
+- Planning is incomplete if it defines features but not how confidence and diagnosis will work.
 
 ## Notes
 

@@ -5,7 +5,7 @@ description: Patch an existing app safely. Use when Tom wants a specific change 
 
 # App Patch
 
-_Last updated: 2026-06-15 14:41_
+_Last updated: 2026-06-16 10:01_
 
 ## Goal
 
@@ -19,17 +19,21 @@ Make a controlled change to an existing system without confusing "patch" with "n
 4. Name the proof of completion for this patch before editing: what exact behavior, artifact, or state change would prove the request is done.
 5. Treat it as a patch, not a rebuild.
 6. Keep the scope tight.
-7. Test before asking for deploy approval.
-8. Before calling the patch complete, handle the repo/update path: commit, push, and any deploy/restart step — or explicitly say what is still blocked.
+7. For changed behavior, add the proving tests before or alongside the code change rather than treating tests as optional cleanup.
+8. Add or improve logging/observability for the changed path when diagnosis would otherwise be weak.
+9. Test before asking for deploy approval.
+10. Before calling the patch complete, handle the repo/update path: commit, push, and any deploy/restart step — or explicitly say what is still blocked.
 
 ## Rules
 
 - Do not reinitialise an existing project as if it were new.
 - Do not widen the patch beyond the agreed change.
+- Use `reference/APP-ENGINEERING-TDD-LOGGING.md` when deciding the right testing and logging depth for the patch.
 - Separate raw source from interpreted state: inspect the live code, repo state, and verification output before summarising what changed or whether it worked.
 - Tom remains the architect for non-obvious product/flow trade-offs; L1 is the operator for execution and verification. Stop and ask before silently making architectural choices under the banner of "small patch".
 - Route deploy/merge through explicit approval where appropriate.
 - Internal Pi patches still go through the checklist; they just skip the irrelevant new-app/repo-creation parts.
+- **Patch discipline rule (MANDATORY):** do not assume a patch is too small to need tests or logs. If the patch changes behavior, state transitions, persistence, or a user-facing route, the patch must include targeted automated coverage and enough logging to diagnose regression.
 - **Completion-status rule (MANDATORY):** before saying a patch is complete, explicitly state:
   1. where the code lives,
   2. whether it was committed,
