@@ -416,10 +416,23 @@ def _write_atomic(path: Path, data: dict) -> None:
 def load_state() -> dict:
     try:
         if STATE_FILE.exists():
-            return json.loads(STATE_FILE.read_text())
+            state = json.loads(STATE_FILE.read_text())
+            if isinstance(state, dict):
+                state.setdefault("consecutive_failures", 0)
+                state.setdefault("last_success_at", None)
+                state.setdefault("last_successful_fetch_at", None)
+                state.setdefault("last_failure_at", None)
+                state.setdefault("last_failure_summary", None)
+                return state
     except Exception as e:
         log(f"WARNING: Could not read state file: {e} — starting fresh")
-    return {"consecutive_failures": 0}
+    return {
+        "consecutive_failures": 0,
+        "last_success_at": None,
+        "last_successful_fetch_at": None,
+        "last_failure_at": None,
+        "last_failure_summary": None,
+    }
 
 
 def save_state(state: dict) -> None:
@@ -616,6 +629,8 @@ def main() -> None:
         log_err(f"Failed to fetch reports: {e}")
         failures = state.get("consecutive_failures", 0) + 1
         state["consecutive_failures"] = failures
+        state["last_failure_at"] = datetime.utcnow().isoformat() + "Z"
+        state["last_failure_summary"] = str(e)[:500]
         save_state(state)
         # Only Telegram-alert on the 1st failure and every ALERT_EVERY_N_FAILURES
         # runs thereafter — avoids a Telegram storm when the site is down for an hour.
@@ -625,15 +640,20 @@ def main() -> None:
             log(f"Suppressing Telegram alert — failure #{failures} (alerts on 1 and every {ALERT_EVERY_N_FAILURES})")
         return
 
-    # Successful fetch — reset failure counter
-    if state.get("consecutive_failures", 0) > 0:
-        log(f"API recovered after {state['consecutive_failures']} consecutive failure(s)")
-        state["consecutive_failures"] = 0
-        save_state(state)
+    # Successful fetch — reset failure counter and record healthy poll state
+    previous_failures = state.get("consecutive_failures", 0)
+    if previous_failures > 0:
+        log(f"API recovered after {previous_failures} consecutive failure(s)")
+    state["consecutive_failures"] = 0
+    state["last_successful_fetch_at"] = datetime.utcnow().isoformat() + "Z"
+    state["last_failure_summary"] = None
+    save_state(state)
 
     if not reports:
         log("No unsent reports.")
         _touch_reports_log()
+        state["last_success_at"] = datetime.utcnow().isoformat() + "Z"
+        save_state(state)
         return
 
     log(f"Found {len(reports)} unsent report(s). Refreshing Graph token...")
@@ -667,6 +687,12 @@ def main() -> None:
             notify(f"FAILED to send report to {to_name} ({company}): {e}")
             failed += 1
             time.sleep(2)
+
+    if sent > 0 and failed == 0:
+        state["last_success_at"] = datetime.utcnow().isoformat() + "Z"
+    elif sent > 0:
+        state["last_success_at"] = datetime.utcnow().isoformat() + "Z"
+    save_state(state)
 
     log(f"Poll complete \u2014 sent: {sent}, failed: {failed}")
 

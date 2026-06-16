@@ -233,7 +233,17 @@ def _write_atomic(path: Path, data: dict) -> None:
 def load_state() -> dict:
     try:
         if STATE_FILE.exists():
-            return json.loads(STATE_FILE.read_text())
+            state = json.loads(STATE_FILE.read_text())
+            if isinstance(state, dict):
+                state.setdefault("alerted_ids", [])
+                state.setdefault("last_enquiry_seen_at", None)
+                state.setdefault("last_stale_alert_at", None)
+                state.setdefault("total_alerted", 0)
+                state.setdefault("consecutive_api_failures", 0)
+                state.setdefault("last_successful_poll_at", None)
+                state.setdefault("last_failure_at", None)
+                state.setdefault("last_failure_summary", None)
+                return state
     except Exception as e:
         log(f"WARNING: Could not read state file: {e} — starting fresh")
     return {
@@ -242,6 +252,9 @@ def load_state() -> dict:
         "last_stale_alert_at":      None,
         "total_alerted":            0,
         "consecutive_api_failures": 0,
+        "last_successful_poll_at":  None,
+        "last_failure_at":          None,
+        "last_failure_summary":     None,
     }
 
 
@@ -576,6 +589,8 @@ def main() -> None:
         # Avoids a Telegram flood when the website is down for an extended period.
         failures = state.get("consecutive_api_failures", 0) + 1
         state["consecutive_api_failures"] = failures
+        state["last_failure_at"] = _now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        state["last_failure_summary"] = "Could not reach /api/integration/enquiries"
         save_state(state)
         if failures == 1 or failures % ALERT_EVERY_N_FAILURES == 0:
             alert_api_failure(
@@ -586,10 +601,13 @@ def main() -> None:
             log(f"Suppressing Telegram alert — failure #{failures} (alerts on 1 and every {ALERT_EVERY_N_FAILURES})")
         return
 
-    # Successful fetch — reset failure counter
+    # Successful fetch — reset failure counter and clear obsolete stale/failure alerts
     if state.get("consecutive_api_failures", 0) > 0:
         log(f"API recovered after {state['consecutive_api_failures']} consecutive failure(s)")
-        state["consecutive_api_failures"] = 0
+    state["consecutive_api_failures"] = 0
+    state["last_successful_poll_at"] = _now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+    state["last_failure_summary"] = None
+    state["last_stale_alert_at"] = None
 
     log(f"API returned {len(enquiries)} enquiry record(s)")
 

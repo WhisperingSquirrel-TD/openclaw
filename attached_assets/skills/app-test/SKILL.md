@@ -5,6 +5,8 @@ description: Test a built app before preview/deploy. Use when implementation exi
 
 # App Test
 
+_Last updated: 2026-06-15 14:41_
+
 ## Goal
 
 Verify that the built change works before Tom sees it as ready.
@@ -12,26 +14,28 @@ Verify that the built change works before Tom sees it as ready.
 ## Process
 
 1. Check the build/patch against the planned acceptance criteria.
-2. Run the relevant self-test workflow for the project or Pi/internal change.
-3. Record pass/fail clearly.
-4. Record what was tested, what was not tested, and what still depends on live deployment/runtime verification.
-5. For external/client projects, test both layers explicitly where relevant:
+2. Confirm the proof target for this test pass: what exact artifact or observable behavior would count as completion.
+3. Run the relevant self-test workflow for the project or Pi/internal change.
+4. Record pass/fail clearly.
+5. Record what was tested, what was not tested, and what still depends on live deployment/runtime verification.
+6. For external/client projects, test both layers explicitly where relevant:
    - project/runtime layer: build/test/deploy/preview service itself
    - workspace control-plane layer: registry/path/env/URL discovery/GUI panel actions if applicable
-6. **Classify the failing layer before proposing the next action**:
+7. **Classify the failing layer before proposing the next action**:
    - project/runtime/app code failure
    - hosted preview provider/deployment failure
    - control-plane/backend failure
    - GUI/frontend failure
      Do not widen the fix to another layer unless there is evidence that layer is also broken.
-7. Add an end-to-end verdict whenever relevant:
+8. Add an end-to-end verdict whenever relevant:
    - can Tom go from asking for the project to actually opening/controlling the preview through the GUI/control plane?
-8. If the test fails, route back to build rather than passing failure forward.
+9. If the test fails, route back to build rather than passing failure forward.
 
 ## Rules
 
 - Do not call something ready because it mostly works.
 - Testing is part of the build workflow, not an optional extra.
+- Separate raw source from interpreted state: test verdicts should come from current outputs, logs, screenshots, deployed behavior, or other direct evidence — not from expectation or prior runs.
 - Be explicit about what was tested and what was not.
 - For Pi/internal work, include whether the git/update path is ready for push or still blocked.
 - For external/client projects with hosted preview environments, distinguish clearly between:

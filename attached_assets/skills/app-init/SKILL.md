@@ -5,6 +5,8 @@ description: Initialise a new app project after its spec is approved. Creates th
 
 # app-init
 
+_Last updated: 2026-06-15 14:41_
+
 **Purpose:** Initialise a project for build — create the GitHub repo, scaffold from template, store the canonical repo details, and prepare the GitHub-backed hosted preview route. This skill runs once per project, after the spec is approved, before any build work begins.
 
 ---
@@ -38,7 +40,14 @@ If any are missing, stop and report. Do not proceed.
 
 ## Process
 
+Before starting, state the bounded automation line explicitly:
+
+- L1 may perform the approved initialisation mechanics (checks, repo creation, scaffold, linking, durable recording)
+- L1 may not silently change product scope, template choice, repo ownership, hosting strategy, or downstream operator workflow without Tom's approval
+
 ### Step 1 — Verify prerequisites
+
+Use the raw sources directly for prerequisite status (`spec` file, `.env`, helper output, repo state). Do not infer readiness from memory or from a previous successful project.
 
 ```bash
 # Check spec exists
@@ -154,6 +163,7 @@ After push, verify that:
 - the GitHub remote is the canonical source for hosted preview builds
 - the repo URL is stored in a durable project file
 - the downstream control-plane/GUI path knows which repo this project belongs to
+- the proof artifacts for successful init are captured clearly enough that a later resume can verify them without guesswork (for example repo URL, local path, branch, link status, initial commit/push evidence)
 
 ---
 

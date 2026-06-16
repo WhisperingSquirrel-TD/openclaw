@@ -64,6 +64,8 @@ SP_BACKUP_TIMER = "openclaw-sharepoint-backup.timer"
 EXPENSE_WATCHER_STATE = OPENCLAW / "runtime/expense-intake-watcher/state.json"
 EXPENSE_WATCHER_LOG = OPENCLAW / "runtime/expense-intake-watcher/watcher.log"
 EXPENSE_WATCHER_TIMER = "expense-intake-watcher.timer"
+REPORT_POLLER_STATE = OPENCLAW / "integrations/stackstone/report-poller-state.json"
+ENQUIRY_POLLER_STATE = OPENCLAW / "integrations/stackstone/enquiry-poller-state.json"
 
 # ---------------------------------------------------------------------------
 # Monitored services
@@ -85,8 +87,6 @@ LOG_CHECKS = [
     ("Outlook calendar poller",  MEMORY / "poll-calendar-log.txt",         T15),
     ("Garmin poller",            MEMORY / "poll-garmin-log.txt",           T24H),
     ("CRM lead importer",        MEMORY / "poll-crm-log.txt",              T24H),
-    ("Stackstone report poller", OPENCLAW / "integrations/stackstone/poller.log", T5),
-    ("Website enquiry poller",   OPENCLAW / "integrations/stackstone/enquiry-poller.log", T2),
 ]
 
 # Feed files L1 depends on — stale if not updated within window
@@ -98,6 +98,8 @@ FEED_CHECKS = [
     ("GMAIL_INBOX.md",          WORKSPACE / "GMAIL_INBOX.md",          T5,   0),
     ("OUTLOOK_CALENDAR.md",     WORKSPACE / "OUTLOOK_CALENDAR.md",     T15,  0),
     ("WHATSAPP_RECENT.md",      WORKSPACE / "WHATSAPP_RECENT.md",      T15,  0),
+    ("STACKSTONE_REPORTS.md",   WORKSPACE / "STACKSTONE_REPORTS.md",   T5,   0),
+    ("STACKSTONE_ENQUIRIES.md", WORKSPACE / "STACKSTONE_ENQUIRIES.md", T2,   0),
     ("GARMIN_DAILY.md",         WORKSPACE / "GARMIN_DAILY.md",         T24H, 10),  # only flag after 10:00
 ]
 
@@ -129,6 +131,49 @@ def _mtime_age_minutes(path: Path) -> float | None:
         age_s = (_now().timestamp() - mtime)
         return age_s / 60
     except FileNotFoundError:
+        return None
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _age_minutes_from_iso(value: str | None) -> float | None:
+    dt = _parse_iso_datetime(value)
+    if dt is None:
+        return None
+    return (_now() - dt).total_seconds() / 60
+
+
+def _format_age_minutes(age: float | None) -> str:
+    if age is None:
+        return "unknown age"
+    total_minutes = max(0, int(age))
+    age_h = total_minutes // 60
+    age_m = total_minutes % 60
+    return f"{age_h}h {age_m}m" if age_h else f"{age_m}m"
+
+
+def _load_json_file(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, dict) else None
+    except FileNotFoundError:
+        return None
+    except Exception:
         return None
 
 
@@ -267,30 +312,24 @@ def check_expense_watcher_health() -> list[str]:
 
 
 def check_enquiry_pipeline() -> list[str]:
-    """
-    Specific revenue-critical check for the website enquiry pipeline.
-    Reads the state file to see when the last enquiry was seen, and whether
-    the last stale alert has already fired (in which case suppress this check
-    to avoid double-alerting — the poller already sends Telegram).
-    """
+    """Use state + feed freshness to detect real enquiry-pipeline failures."""
     issues = []
-    state_file = OPENCLAW / "integrations/stackstone/enquiry-poller-state.json"
-
-    try:
-        state = json.loads(state_file.read_text())
-    except FileNotFoundError:
-        # State file not created yet (no enquiries ever seen) — not an issue
+    state = _load_json_file(ENQUIRY_POLLER_STATE)
+    if state is None:
         return []
-    except Exception as e:
-        issues.append(f"Website enquiry pipeline: state file unreadable ({e})")
+
+    failures = int(state.get("consecutive_api_failures", 0) or 0)
+    if failures > 0:
+        summary = state.get("last_failure_summary") or "see enquiry-poller.log"
+        issues.append(
+            f"Website enquiry pipeline: {failures} consecutive API failure(s) — {summary}"
+        )
         return issues
 
-    last_stale_alert = state.get("last_stale_alert_at")
-    if last_stale_alert:
-        # The poller already sent a Telegram stale alert — note it here too
+    success_age = _age_minutes_from_iso(state.get("last_successful_poll_at"))
+    if success_age is not None and success_age > T2:
         issues.append(
-            "Website enquiry pipeline: staleness alert was sent — "
-            "check enquiry-poller.log and website contact form"
+            f"Website enquiry pipeline: last successful poll was {_format_age_minutes(success_age)} ago"
         )
 
     return issues
@@ -304,8 +343,9 @@ def _run(cmd: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
         return 1, "", str(e)
 
 
-def check_github_sync() -> list[str]:
+def check_github_sync() -> tuple[list[str], list[str]]:
     issues = []
+    info = []
     for label, repo in [("openclaw repo", CODE_REPO), ("workspace repo", WORKSPACE_REPO)]:
         if not repo.exists():
             issues.append(f"{label}: repo path missing ({repo})")
@@ -314,45 +354,63 @@ def check_github_sync() -> list[str]:
         if rc != 0:
             issues.append(f"{label}: git status failed ({err or out})")
             continue
-        if out.strip():
+        dirty = bool(out.strip())
+        if dirty:
             issues.append(f"{label}: local changes present — GitHub may not reflect latest Pi state")
-        # Fetch-less ahead/behind using existing remote refs
+
         rc, branch, err = _run(["git", "branch", "--show-current"], cwd=repo)
         branch = branch.strip() or "main"
-        rc, out, err = _run(["git", "rev-list", "--left-right", "--count", f"origin/{branch}...{branch}"], cwd=repo)
-        if rc == 0 and out.strip():
+
+        rc, compare, err = _run(["git", "rev-list", "--left-right", "--count", f"origin/{branch}...{branch}"], cwd=repo)
+        ahead = behind = None
+        if rc == 0 and compare.strip():
             try:
-                behind, ahead = [int(x) for x in out.split()[:2]]
-                if ahead > 0:
-                    issues.append(f"{label}: {ahead} unpushed commit(s) on {branch}")
-                if behind > 0:
-                    issues.append(f"{label}: local {branch} is {behind} commit(s) behind origin/{branch}")
+                behind, ahead = [int(x) for x in compare.split()[:2]]
             except Exception:
-                pass
+                behind = ahead = None
         else:
             issues.append(f"{label}: could not compare local branch to remote tracking branch")
-    return issues
+
+        rc, pushed_ts, err = _run(["git", "log", "-1", "--format=%cI", f"origin/{branch}"], cwd=repo)
+        pushed_age = _age_minutes_from_iso(pushed_ts.strip()) if rc == 0 and pushed_ts.strip() else None
+        summary_bits = []
+        if pushed_age is not None:
+            summary_bits.append(f"last successful push {_format_age_minutes(pushed_age)} ago")
+        else:
+            summary_bits.append("last successful push unknown")
+        if ahead is not None:
+            summary_bits.append(f"ahead {ahead}")
+        if behind is not None:
+            summary_bits.append(f"behind {behind}")
+        summary_bits.append("dirty" if dirty else "clean")
+        info.append(f"{label}: {', '.join(summary_bits)}")
+
+        if ahead is not None and ahead > 0:
+            issues.append(f"{label}: {ahead} unpushed commit(s) on {branch}")
+        if behind is not None and behind > 0:
+            issues.append(f"{label}: local {branch} is {behind} commit(s) behind origin/{branch}")
+    return issues, info
 
 
-def check_sharepoint_backup_health() -> list[str]:
+def check_sharepoint_backup_health() -> tuple[list[str], list[str]]:
     issues = []
+    info = []
     recent_success = False
     age = _mtime_age_minutes(SP_BACKUP_STATE)
-    if age is None:
-        issues.append("SharePoint backup: state file missing — backup may never have completed")
+    state = _load_json_file(SP_BACKUP_STATE)
+
+    if age is None or state is None:
+        issues.append("SharePoint backup: state file missing or unreadable — backup may never have completed")
     else:
-        if age > (26 * 60):
-            age_h = int(age // 60)
-            age_m = int(age % 60)
-            issues.append(f"SharePoint backup: state stale ({age_h}h {age_m}m since last successful state update)")
-        try:
-            state = json.loads(SP_BACKUP_STATE.read_text())
-            if state.get('status') != 'ok':
-                issues.append("SharePoint backup: latest recorded state is not OK")
-            else:
-                recent_success = age <= (26 * 60)
-        except Exception as e:
-            issues.append(f"SharePoint backup: state unreadable ({e})")
+        updated_age = _age_minutes_from_iso(state.get("updated_utc")) or age
+        status = state.get("status") or "unknown"
+        info.append(f"SharePoint backup: {status} — last successful state update {_format_age_minutes(updated_age)} ago")
+        if updated_age > (26 * 60):
+            issues.append(f"SharePoint backup: stale ({_format_age_minutes(updated_age)} since last successful state update)")
+        if status != 'ok':
+            issues.append("SharePoint backup: latest recorded state is not OK")
+        else:
+            recent_success = updated_age <= (26 * 60)
 
     log_age = _mtime_age_minutes(SP_BACKUP_LOG)
     if log_age is not None and log_age <= (26 * 60):
@@ -376,6 +434,25 @@ def check_sharepoint_backup_health() -> list[str]:
             issues.append("SharePoint backup: could not read timer state, but recent backup success is proven by state/log")
         else:
             issues.append("SharePoint backup: could not read timer state")
+    return issues, info
+
+
+def check_stackstone_report_poller_state() -> list[str]:
+    issues = []
+    state = _load_json_file(REPORT_POLLER_STATE)
+    if state is None:
+        return issues
+
+    failures = int(state.get("consecutive_failures", 0) or 0)
+    if failures > 0:
+        summary = state.get("last_failure_summary") or "see poller.log"
+        issues.append(f"Stackstone report poller: {failures} consecutive failure(s) — {summary}")
+        return issues
+
+    success_age = _age_minutes_from_iso(state.get("last_successful_fetch_at") or state.get("last_success_at"))
+    if success_age is not None and success_age > T5:
+        issues.append(f"Stackstone report poller: last successful poll was {_format_age_minutes(success_age)} ago")
+
     return issues
 
 
@@ -398,13 +475,15 @@ def check_reminder_failures() -> list[str]:
 # Output
 # ---------------------------------------------------------------------------
 
-def build_health_report(issues: list[str]) -> str:
-    if not issues:
+def build_health_report(issues: list[str], info: list[str]) -> str:
+    if not issues and not info:
         return ""
 
     lines = ["⚙️ SYSTEM HEALTH\n"]
     for issue in issues:
         lines.append(f"• {issue}")
+    for item in info:
+        lines.append(f"• {item}")
     return "\n".join(lines) + "\n"
 
 
@@ -428,24 +507,29 @@ def main() -> None:
     print(f"[{ts}] [health-check] Starting system health check", flush=True)
 
     issues: list[str] = []
+    info: list[str] = []
 
     log_issues  = check_log_health()
     feed_issues = check_feed_freshness()
     exp_issues  = check_expense_watcher_health()
     enq_issues  = check_enquiry_pipeline()
+    report_issues = check_stackstone_report_poller_state()
     rem_issues  = check_reminder_failures()
-    git_issues  = check_github_sync()
-    spb_issues  = check_sharepoint_backup_health()
+    git_issues, git_info  = check_github_sync()
+    spb_issues, spb_info  = check_sharepoint_backup_health()
 
     issues.extend(log_issues)
     issues.extend(feed_issues)
     issues.extend(exp_issues)
     issues.extend(enq_issues)
+    issues.extend(report_issues)
     issues.extend(rem_issues)
     issues.extend(git_issues)
     issues.extend(spb_issues)
+    info.extend(git_info)
+    info.extend(spb_info)
 
-    report = build_health_report(issues)
+    report = build_health_report(issues, info)
     write_output(report)
 
     if issues:
@@ -453,6 +537,8 @@ def main() -> None:
               flush=True)
         for issue in issues:
             print(f"  • {issue}", flush=True)
+    elif info:
+        print(f"[{ts}] [health-check] No active issues — wrote freshness summary to SYSTEM_HEALTH.md", flush=True)
     else:
         print(f"[{ts}] [health-check] All systems OK — SYSTEM_HEALTH.md cleared", flush=True)
 

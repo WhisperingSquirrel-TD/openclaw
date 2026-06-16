@@ -5,7 +5,7 @@ description: Plan a new app before any build work. Use when Tom wants a new app/
 
 # App Plan
 
-_Last updated: 2026-06-09 11:42_
+_Last updated: 2026-06-15 14:41_
 
 Use this skill at the start of any new app request.
 
@@ -22,8 +22,9 @@ Run these questions for **all** development requests, even if some steps later b
 3. Where should the runnable code live?
 4. Is this a brand new app/system, or a patch to an existing one?
 5. What acceptance criteria prove it works?
-6. What repo/backup/update path should protect it afterwards?
-7. What is the control-plane/GUI path from Tom's prompt to a usable preview/control surface?
+6. What evidence would count as proof of completion for this specific request?
+7. What repo/backup/update path should protect it afterwards?
+8. What is the control-plane/GUI path from Tom's prompt to a usable preview/control surface?
 
 ## Branching logic
 
@@ -74,7 +75,11 @@ Use when the build is for another person, client, or project context.
    - what workspace registry/control entry will point to it
    - what commands the control plane should be allowed to run
    - how the public preview/test environment URL will be surfaced back to the GUI
-7. **Complex-system design/documentation rule (MANDATORY):** if the work is a multi-part system (for example CRM + queue + gateway + chat tool + send path), planning must define and point to one canonical design/operating document before implementation sprawls. That document must state:
+7. State the architect/operator split explicitly:
+   - Tom owns product intent, trade-offs, and approval of the target shape
+   - L1 owns disciplined execution, file updates, verification, and surfacing ambiguity early
+     Do not let L1 silently become the architect by making unapproved product or workflow decisions.
+8. **Complex-system design/documentation rule (MANDATORY):** if the work is a multi-part system (for example CRM + queue + gateway + chat tool + send path), planning must define and point to one canonical design/operating document before implementation sprawls. That document must state:
    - the system goal and non-goals
    - the component boundaries/responsibilities
    - the user-facing acceptance criteria
@@ -82,19 +87,21 @@ Use when the build is for another person, client, or project context.
    - the current phase/status
    - which docs must be kept in sync when the design changes
      If no such document exists yet, create or update it as part of planning rather than leaving the architecture implicit in chat.
-8. Include an end-to-end sentence in the plan covering the full path:
+9. Include an end-to-end sentence in the plan covering the full path:
    - Tom prompts for a project
    - project is created in the right code home
    - runtime/preview environment can be started
    - workspace control plane can discover/control it
    - GUI can surface/open the real preview URL
-9. Produce a concise implementation plan with clear phases.
-10. Route implementation to the right next skill (`app-build`, `app-patch`, `app-test`, `app-deploy`) rather than building from vague intent.
+10. Produce a concise implementation plan with clear phases.
+11. Bound the automation up front: state which decisions/actions L1 may take without re-approval, which require Tom's confirmation, and what counts as a stop-and-ask condition.
+12. Route implementation to the right next skill (`app-build`, `app-patch`, `app-test`, `app-deploy`) rather than building from vague intent.
 
 ## Notes
 
 - These app skills are a **checklist framework**, not a claim that every task is a brand new app.
 - Do not start coding from an unclear idea.
-- Prefer a smaller first version with explicit acceptance criteria.
+- Prefer a smaller first version with explicit acceptance criteria and named proof artifacts.
+- Separate raw source from interpreted state: when stating status, route, repo, preview URL, task state, or deployment expectation, identify the primary source that will later be checked rather than relying on memory summaries.
 - Keep the plan lightweight and practical.
 - For Pi/internal work, lightweight planning is fine — but never skip repo-home and post-build update thinking.

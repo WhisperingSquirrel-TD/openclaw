@@ -5,7 +5,7 @@ description: Patch an existing app safely. Use when Tom wants a specific change 
 
 # App Patch
 
-_Last updated: 2026-06-09 11:42_
+_Last updated: 2026-06-15 14:41_
 
 ## Goal
 
@@ -16,15 +16,18 @@ Make a controlled change to an existing system without confusing "patch" with "n
 1. Confirm the exact requested change in plain English.
 2. Confirm what system/repo this patch belongs to.
 3. Re-state the branch: internal Pi/self-build, Tom-owned system, or external/client/project.
-4. Treat it as a patch, not a rebuild.
-5. Keep the scope tight.
-6. Test before asking for deploy approval.
-7. Before calling the patch complete, handle the repo/update path: commit, push, and any deploy/restart step — or explicitly say what is still blocked.
+4. Name the proof of completion for this patch before editing: what exact behavior, artifact, or state change would prove the request is done.
+5. Treat it as a patch, not a rebuild.
+6. Keep the scope tight.
+7. Test before asking for deploy approval.
+8. Before calling the patch complete, handle the repo/update path: commit, push, and any deploy/restart step — or explicitly say what is still blocked.
 
 ## Rules
 
 - Do not reinitialise an existing project as if it were new.
 - Do not widen the patch beyond the agreed change.
+- Separate raw source from interpreted state: inspect the live code, repo state, and verification output before summarising what changed or whether it worked.
+- Tom remains the architect for non-obvious product/flow trade-offs; L1 is the operator for execution and verification. Stop and ask before silently making architectural choices under the banner of "small patch".
 - Route deploy/merge through explicit approval where appropriate.
 - Internal Pi patches still go through the checklist; they just skip the irrelevant new-app/repo-creation parts.
 - **Completion-status rule (MANDATORY):** before saying a patch is complete, explicitly state:
