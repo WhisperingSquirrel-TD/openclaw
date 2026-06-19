@@ -111,6 +111,10 @@ ERROR_PATTERNS = re.compile(
     r"KeyError|AttributeError|cannot\s+read|unreadable)\b",
     re.IGNORECASE,
 )
+SUCCESS_PATTERNS = re.compile(
+    r"(Poll complete|poll complete|Pipeline complete|succeeded|written to|wrote .* to|Token refreshed successfully)",
+    re.IGNORECASE,
+)
 
 SCAN_LINES = 80   # how many recent log lines to scan for errors
 ERROR_THRESHOLD = 3  # flag if >= this many error lines in last SCAN_LINES
@@ -178,12 +182,23 @@ def _load_json_file(path: Path) -> dict | None:
 
 
 def _scan_log_errors(path: Path, last_n: int = SCAN_LINES) -> list[str]:
-    """Return the matching error lines from the last `last_n` lines of the log."""
+    """Return matching error lines from the last `last_n` lines of the log.
+
+    If a success marker appears in that recent window, only scan lines *after the
+    last success marker*. This prevents transient network/DNS failures from
+    poisoning health status long after recovery has already been logged.
+    """
     try:
         lines = path.read_text(errors="replace").splitlines()
     except FileNotFoundError:
         return []
     recent = lines[-last_n:]
+    last_success_idx = None
+    for idx, line in enumerate(recent):
+        if SUCCESS_PATTERNS.search(line):
+            last_success_idx = idx
+    if last_success_idx is not None:
+        recent = recent[last_success_idx + 1:]
     return [l for l in recent if ERROR_PATTERNS.search(l)]
 
 
