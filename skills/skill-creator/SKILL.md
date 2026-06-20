@@ -387,6 +387,32 @@ When creating or updating a skill that should be reusable in future sessions:
 
 When creating a new durable operational/planning/reference document during system-building work, ask whether future sessions will need to find it through routing. If yes, update the relevant governing map/file rather than leaving the document discoverable only by luck.
 
+### Inbound/operational-skill design rule (MANDATORY)
+
+When creating or updating any skill that monitors messages, processes communications, routes operational signals, or updates downstream systems based on surfaced inputs, explicitly design for this full chain:
+
+1. see it
+2. classify it
+3. route it
+4. complete the owning system update
+5. leave proof
+6. self-improve after use or misses
+
+Do not design such a skill as mere detection/triage if the user actually needs closed-loop operational completion.
+
+Minimum questions to answer while writing the skill:
+
+- What are the first-class intake surfaces?
+- What types of signals should trigger routing?
+- What downstream system is the owner for each signal type?
+- What counts as actual completion rather than mere detection?
+- What durable proof layer shows what happened next?
+- What ambiguity should trigger asking Tom instead of inference?
+- What end-of-use / missed-item review step will improve the skill after real use?
+
+If the skill handles high-integrity operational outputs, the fail-closed mechanism must be explicit in the skill instructions.
+If the skill will encounter materially ambiguous routing/update decisions, the clarification trigger for asking Tom must also be explicit.
+
 ### Step 6: Iterate
 
 After testing the skill, users may request improvements. Often this happens right after using the skill, with fresh context of how the skill performed.
@@ -396,6 +422,7 @@ After every real use of a skill, do a short explicit pass with Tom on whether an
 
 - Treat this as part of completion, not an optional retrospective.
 - Check for: missing triggers, missing examples, unclear steps, fragile instructions, over-verbose sections, reusable outputs worth promoting into references/assets, and any mistake/near-miss that should be prevented next time.
+- For monitoring/routing/operational skills specifically, also check whether the skill still covers the whole chain: see -> classify -> route -> complete -> prove -> improve.
 - If a useful improvement is identified, update the skill in the same workstream whenever practical rather than leaving it as implied learning.
 - If no change is needed, that is still a valid outcome — but the review step must happen.
 

@@ -320,8 +320,15 @@ def check_expense_watcher_health() -> list[str]:
         issues.append(f"Expense watcher: runtime state unreadable ({e})")
 
     timer_rc, timer_out, timer_err = _run(["systemctl", "--user", "is-enabled", EXPENSE_WATCHER_TIMER])
-    if timer_rc != 0 or timer_out.strip() != "enabled":
+    timer_enabled = timer_rc == 0 and timer_out.strip() == "enabled"
+
+    active_rc, active_out, active_err = _run(["systemctl", "--user", "is-active", EXPENSE_WATCHER_TIMER])
+    timer_active = active_rc == 0 and active_out.strip() == "active"
+
+    if not timer_enabled:
         issues.append("Expense watcher: timer is not enabled")
+    elif not timer_active:
+        issues.append("Expense watcher: timer is enabled but not active")
 
     return issues
 
