@@ -26,6 +26,7 @@ MONITORED_FILE = WORKSPACE / 'memory' / 'monitored-items-state.json'
 MS_READER = ROOT / 'openclaw' / 'pi-services' / 'trusted-email-reader' / 'read_email.py'
 GMAIL_READER = ROOT / 'openclaw' / 'pi-services' / 'trusted-email-reader' / 'read_gmail.py'
 WHATSAPP_RECENT = WORKSPACE / 'WHATSAPP_RECENT.md'
+CONTACTS_FILE = WORKSPACE / 'contacts.md'
 
 EMAIL_SOURCES = [
     ('assistant', WORKSPACE / 'ASSISTANT_INBOX.md'),
@@ -245,11 +246,11 @@ WHATSAPP_STALE_THREAD_WINDOW = timedelta(days=7)
 WHATSAPP_STALE_SURFACED_WINDOW = timedelta(hours=36)
 
 PREFERRED_CLOSURE_STATES = {
-    'logged': 'expense_done',
+    'logged': 'processed',
     'duplicate': 'closed',
-    'pending': 'blocked_pending_gate',
+    'pending': 'blocked',
     'not_needed': 'not_needed',
-    'material_non_expense': 'surfaced',
+    'material_non_expense': 'classified',
 }
 
 
@@ -273,6 +274,7 @@ class WhatsAppEntry:
     raw_line: str
     group: str | None = None
     direct_thread_contact: str | None = None
+    explicit_outbound: bool = False
 
     @property
     def key(self) -> str:
@@ -298,6 +300,52 @@ class WhatsAppEntry:
         if self.is_me:
             return f'direct:{(self.direct_thread_contact or self.contact).strip().lower()}'
         return f'direct:{self.contact.strip().lower()}'
+
+
+def normalize_phone(value: str | None) -> str | None:
+    if not value:
+        return None
+    digits = re.sub(r'\D', '', value)
+    if not digits:
+        return None
+    if digits.startswith('44'):
+        return '+' + digits
+    if digits.startswith('0'):
+        return '+44' + digits[1:]
+    if value.strip().startswith('+'):
+        return '+' + digits
+    return '+' + digits
+
+
+def load_whatsapp_contact_map() -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    if not CONTACTS_FILE.exists():
+        return mapping
+    for line in CONTACTS_FILE.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if not line.startswith('- **') or 'Mobile:' not in line:
+            continue
+        m = re.match(r'- \*\*(.+?)\*\*.*?Mobile:\s*([^|]+)', line)
+        if not m:
+            continue
+        name = m.group(1).strip()
+        number = normalize_phone(m.group(2).strip())
+        if number:
+            mapping[number] = name
+    return mapping
+
+
+WHATSAPP_CONTACT_MAP = load_whatsapp_contact_map()
+
+
+def canonical_contact_label(label: str | None) -> str | None:
+    if not label:
+        return None
+    label = label.strip()
+    num = normalize_phone(label)
+    if num and num in WHATSAPP_CONTACT_MAP:
+        return WHATSAPP_CONTACT_MAP[num]
+    return label
 
 
 def runtime_dirs() -> list[Path]:
@@ -703,20 +751,25 @@ def email_monitored_payload(entry: MailEntry, closure_state: str, blocker: str |
     vendor, _ = infer_vendor(entry.subject, entry.party, entry.body_preview)
     flags = flags or ['EXPENSE']
     evidence_refs = evidence_refs or ['seer-expenses.md']
-    return {
+    now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    payload = {
         'id': mail_key(entry),
         'surface': f'{entry.account}_{entry.section}',
         'entity': vendor,
         'thread_key': refs.get('invoice') or refs.get('receipt') or entry.subject[:120],
         'source_timestamp': entry.date_str,
-        'seen_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        'seen_at': now_iso,
+        'management_relevance': 'not_needed' if closure_state == 'not_needed' else 'needs_management',
         'flags': flags,
         'mode': 'watch',
         'closure_state': closure_state,
         'blocker': blocker,
         'evidence_refs': evidence_refs,
-        'resolved_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z') if closure_state in ('expense_done', 'closed', 'not_needed', 'surfaced') else None,
+        'resolved_at': now_iso if closure_state in ('processed', 'closed', 'not_needed') else None,
+        'processed_at': now_iso if closure_state == 'processed' else None,
+        'closed_at': now_iso if closure_state == 'closed' else None,
     }
+    return payload
 
 
 def parse_whatsapp_recent() -> list[WhatsAppEntry]:
@@ -731,7 +784,17 @@ def parse_whatsapp_recent() -> list[WhatsAppEntry]:
         if not m:
             continue
         ts, group, contact, text = m.groups()
-        entries.append(WhatsAppEntry(timestamp=ts, group=group, contact=contact.strip(), text=text.strip(), raw_line=line))
+        contact = contact.strip()
+        text = text.strip()
+        explicit_outbound = False
+        direct_thread_contact = None
+        if not group and '->' in contact:
+            sender, recipient = [part.strip() for part in contact.split('->', 1)]
+            if sender.lower() in {'tom', 'me', 'tom dean'} and recipient:
+                explicit_outbound = True
+                direct_thread_contact = canonical_contact_label(recipient) or recipient
+                contact = 'Me'
+        entries.append(WhatsAppEntry(timestamp=ts, group=group, contact=contact, text=text, raw_line=line, direct_thread_contact=direct_thread_contact, explicit_outbound=explicit_outbound))
     return entries
 
 
@@ -740,7 +803,7 @@ def infer_direct_whatsapp_threads(entries: list[WhatsAppEntry]) -> list[WhatsApp
     for pos, idx in enumerate(direct_indices):
         entry = entries[idx]
         if not entry.is_me:
-            entry.direct_thread_contact = entry.contact
+            entry.direct_thread_contact = canonical_contact_label(entry.contact) or entry.contact
             continue
 
         prev_contact = None
@@ -761,15 +824,16 @@ def infer_direct_whatsapp_threads(entries: list[WhatsAppEntry]) -> list[WhatsApp
                 next_dt = next_entry.timestamp_dt
                 break
 
-        chosen = None
+        chosen = entry.direct_thread_contact
+        chosen_is_number = bool(chosen and normalize_phone(chosen))
         if prev_contact and next_contact and prev_contact.lower() == next_contact.lower():
             if prev_dt and next_dt and (entry.timestamp_dt - prev_dt) <= WHATSAPP_DIRECT_THREAD_LINK_WINDOW and (next_dt - entry.timestamp_dt) <= WHATSAPP_DIRECT_THREAD_LINK_WINDOW:
                 chosen = prev_contact
-        if not chosen and prev_contact and prev_dt and (entry.timestamp_dt - prev_dt) <= WHATSAPP_DIRECT_THREAD_LINK_WINDOW:
+        if (not chosen or chosen_is_number) and prev_contact and prev_dt and (entry.timestamp_dt - prev_dt) <= WHATSAPP_DIRECT_THREAD_LINK_WINDOW:
             chosen = prev_contact
-        if not chosen and next_contact and next_dt and (next_dt - entry.timestamp_dt) <= WHATSAPP_DIRECT_THREAD_LINK_WINDOW:
+        if (not chosen or chosen_is_number) and next_contact and next_dt and (next_dt - entry.timestamp_dt) <= WHATSAPP_DIRECT_THREAD_LINK_WINDOW:
             chosen = next_contact
-        entry.direct_thread_contact = chosen
+        entry.direct_thread_contact = canonical_contact_label(chosen) or chosen
     return entries
 
 
@@ -903,19 +967,23 @@ def ensure_pending_whatsapp_row(entry: WhatsAppEntry, blocker: str) -> bool:
 
 
 def whatsapp_monitored_payload(entry: WhatsAppEntry, closure_state: str, blocker: str | None, flags: list[str] | None = None, evidence_refs: list[str] | None = None) -> dict[str, Any]:
+    now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     return {
         'id': entry.key,
         'surface': 'whatsapp_recent',
         'entity': entry.direct_thread_contact or entry.contact,
         'thread_key': entry.thread_key,
         'source_timestamp': entry.timestamp,
-        'seen_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        'seen_at': now_iso,
+        'management_relevance': 'not_needed' if closure_state == 'not_needed' else 'needs_management',
         'flags': flags or ['EXPENSE'],
         'mode': 'watch',
         'closure_state': closure_state,
         'blocker': blocker,
         'evidence_refs': evidence_refs or ['seer-expenses.md'],
-        'resolved_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z') if closure_state in ('expense_done', 'closed', 'not_needed', 'surfaced') else None,
+        'resolved_at': now_iso if closure_state in ('processed', 'closed', 'not_needed') else None,
+        'processed_at': now_iso if closure_state == 'processed' else None,
+        'closed_at': now_iso if closure_state == 'closed' else None,
     }
 
 
@@ -926,6 +994,34 @@ def mark_state(state: dict[str, Any], key: str, route: str, status: str, detail:
         'detail': detail,
         'updated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
     }
+
+
+def advance_item_lifecycle(state: dict[str, Any], key: str, route: str, stage: str, detail: str | None = None) -> None:
+    current = state.setdefault('item_states', {}).get(key, {})
+    history = list(current.get('history', []))
+    now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    history.append({'stage': stage, 'detail': detail, 'at': now_iso})
+    state['item_states'][key] = {
+        'route': route,
+        'status': stage,
+        'detail': detail,
+        'updated_at': now_iso,
+        'history': history,
+    }
+
+
+def lifecycle_payload(base: dict[str, Any], stage: str, blocker: str | None = None) -> dict[str, Any]:
+    now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    payload = dict(base)
+    payload['closure_state'] = stage
+    payload['blocker'] = blocker
+    payload['management_relevance'] = 'not_needed' if stage == 'not_needed' else 'needs_management'
+    payload['resolved_at'] = now_iso if stage in ('processed', 'closed', 'not_needed') else None
+    payload['processed_at'] = now_iso if stage == 'processed' else payload.get('processed_at')
+    payload['closed_at'] = now_iso if stage == 'closed' else payload.get('closed_at')
+    if stage == 'closed' and not payload.get('processed_at'):
+        payload['processed_at'] = payload.get('resolved_at') or now_iso
+    return payload
 
 
 def latest_thread_entry(entries: list[WhatsAppEntry]) -> WhatsAppEntry | None:
@@ -973,11 +1069,14 @@ def prune_whatsapp_artifacts(entries: list[WhatsAppEntry]) -> None:
         except Exception:
             stale_source = False
 
-        legacy_blocked_expense = closure_state == 'blocked_pending_gate' and ('expense signal needs business relevance' in blocker)
-        stale_surfaced_nonlive = closure_state == 'surfaced' and thread_key and thread_key not in live_direct_thread_keys and stale_source
-        stale_surfaced_live_nonactionable = closure_state == 'surfaced' and item_id in live_keys and item_id not in live_actionable_keys and stale_source
-        noisy_priority_item = closure_state == 'surfaced' and entity in WHATSAPP_PRIORITY_CONTACTS and item_id not in live_actionable_keys
-        no_longer_actionable_live_item = item_id in live_keys and item_id not in live_actionable_keys and closure_state in {'surfaced', 'blocked_pending_gate', 'closed'}
+        legacy_blocked_expense = closure_state in {'blocked'} and ('expense signal needs business relevance' in blocker)
+        stale_classified_nonlive = closure_state in {'classified'} and thread_key and thread_key not in live_direct_thread_keys and stale_source
+        stale_classified_live_nonactionable = closure_state in {'classified'} and item_id in live_keys and item_id not in live_actionable_keys and stale_source
+        noisy_priority_item = closure_state in {'classified'} and entity in WHATSAPP_PRIORITY_CONTACTS and item_id not in live_actionable_keys
+        no_longer_actionable_live_item = item_id in live_keys and item_id not in live_actionable_keys and closure_state in {'classified', 'blocked', 'closed'}
+
+        stale_surfaced_nonlive = stale_classified_nonlive
+        stale_surfaced_live_nonactionable = stale_classified_live_nonactionable
 
         if legacy_blocked_expense or stale_surfaced_nonlive or stale_surfaced_live_nonactionable or noisy_priority_item or no_longer_actionable_live_item:
             changed = True
@@ -1044,13 +1143,13 @@ def process_whatsapp_threads(state: dict[str, Any], entries: list[WhatsAppEntry]
                         latest.key,
                         whatsapp_monitored_payload(
                             latest,
-                            'surfaced',
+                            'routed',
                             'Latest actionable inbound in direct thread has no later visible Me: reply yet',
                             flags=sorted(set(flags + ['OUTBOUND_CONTEXT'])),
                             evidence_refs=['WHATSAPP_RECENT.md', 'memory/monitored-items-state.json'],
                         ),
                     )
-                    mark_state(state, latest.key, 'whatsapp', 'surfaced', 'Direct thread still waiting on Tom reply')
+                    advance_item_lifecycle(state, latest.key, 'whatsapp', 'routed', 'Direct thread still waiting on Tom reply')
             continue
 
         if latest and latest.is_me and outbound_follow_up_signal(latest):
@@ -1061,13 +1160,13 @@ def process_whatsapp_threads(state: dict[str, Any], entries: list[WhatsAppEntry]
                     latest.key,
                     whatsapp_monitored_payload(
                         latest,
-                        'surfaced',
+                        'routed',
                         'Tom sent the latest direct follow-up/chase and there is no later visible reply yet',
                         flags=['FOLLOW_UP', 'OUTBOUND_CONTEXT'],
                         evidence_refs=['WHATSAPP_RECENT.md', 'memory/monitored-items-state.json'],
                     ),
                 )
-                mark_state(state, latest.key, 'whatsapp', 'surfaced', 'Direct thread may need chase tracking')
+                advance_item_lifecycle(state, latest.key, 'whatsapp', 'routed', 'Direct thread may need chase tracking')
 
 
 def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[str, int]) -> None:
@@ -1075,9 +1174,24 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
     scanned = set(state.get('scanned_non_candidates', []))
     current = state.get('item_states', {}).get(key, {})
     flags = classify_email_flags(entry)
+    refs = extract_refs(entry.subject, entry.body_preview)
+    base_payload = email_monitored_payload(entry, 'trigger_received', None, refs, flags=flags)
 
     summary['reviewed'] += 1
-    mark_state(state, key, 'email', 'reviewed', ','.join(flags))
+    advance_item_lifecycle(state, key, 'email', 'trigger_received', ','.join(flags))
+    upsert_monitored(key, lifecycle_payload(base_payload, 'trigger_received'))
+
+    if 'IGNORE' in flags and not materially_important_email(entry, flags):
+        remove_monitored(key)
+        summary['not_needed'] += 1
+        if key not in scanned:
+            scanned.add(key)
+            state['scanned_non_candidates'] = sorted(scanned)
+        advance_item_lifecycle(state, key, 'email', 'not_needed', 'No routed signal detected in mirror')
+        return
+
+    advance_item_lifecycle(state, key, 'email', 'classified', ','.join(flags))
+    upsert_monitored(key, lifecycle_payload(base_payload, 'classified'))
 
     if 'EXPENSE' not in flags:
         if materially_important_email(entry, flags):
@@ -1087,39 +1201,27 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
                 summary['material_non_expense'] += 1
                 seen_material.add(material_key)
                 summary['_seen_material_keys'] = sorted(seen_material)
-            upsert_monitored(
-                key,
-                email_monitored_payload(
-                    entry,
-                    'surfaced',
-                    None,
-                    flags=flags,
-                    evidence_refs=['memory/monitored-items-state.json'],
-                ),
-            )
+            advance_item_lifecycle(state, key, 'email', 'routed', 'Managed non-expense item routed for visibility/reconciliation')
+            upsert_monitored(key, lifecycle_payload(base_payload, 'routed', None))
         else:
-            existing = load_monitored()
-            items = existing.get('items', [])
-            filtered = [i for i in items if i.get('id') != key]
-            if len(filtered) != len(items):
-                existing['items'] = filtered
-                existing['last_updated'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-                save_json(MONITORED_FILE, existing)
+            remove_monitored(key)
             summary['not_needed'] += 1
             if key not in scanned:
                 scanned.add(key)
                 state['scanned_non_candidates'] = sorted(scanned)
-            if current.get('status') != 'not_needed':
-                mark_state(state, key, 'email', 'not_needed', 'No routed signal detected in mirror')
+            advance_item_lifecycle(state, key, 'email', 'not_needed', 'No routed signal detected in mirror')
         return
 
     summary['expense_candidates'] += 1
-    refs = extract_refs(entry.subject, entry.body_preview)
+    advance_item_lifecycle(state, key, 'email', 'routed', 'Expense workflow selected')
+    upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
+
     expense_md = load_expense_text()
     if row_exists(expense_md, refs, entry.subject):
         summary['duplicates'] += 1
-        mark_state(state, key, 'email', 'duplicate', 'Already present in seer-expenses.md')
-        upsert_monitored(key, email_monitored_payload(entry, 'closed', None, refs, flags=flags))
+        advance_item_lifecycle(state, key, 'email', 'processed', 'Already present in seer-expenses.md')
+        advance_item_lifecycle(state, key, 'email', 'closed', 'Already present in seer-expenses.md')
+        upsert_monitored(key, lifecycle_payload(base_payload, 'closed'))
         return
 
     reader = run_reader(entry)
@@ -1127,19 +1229,21 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
         row = build_logged_row(entry, reader)
         if insert_expense_row(row):
             summary['logged'] += 1
-            mark_state(state, key, 'email', 'logged', 'Reader extraction succeeded')
-            upsert_monitored(key, email_monitored_payload(entry, 'expense_done', None, extract_refs(entry.subject, text_from_reader(reader)), flags=flags))
+            processed_payload = email_monitored_payload(entry, 'processed', None, extract_refs(entry.subject, text_from_reader(reader)), flags=flags)
+            advance_item_lifecycle(state, key, 'email', 'processed', 'Reader extraction succeeded')
+            upsert_monitored(key, lifecycle_payload(processed_payload, 'processed'))
             log(f'Logged expense from {entry.account}/{entry.section}: {entry.subject}')
             return
         summary['duplicates'] += 1
-        mark_state(state, key, 'email', 'duplicate', 'Built row already existed or could not be inserted uniquely')
-        upsert_monitored(key, email_monitored_payload(entry, 'closed', None, refs, flags=flags))
+        advance_item_lifecycle(state, key, 'email', 'processed', 'Built row already existed or could not be inserted uniquely')
+        advance_item_lifecycle(state, key, 'email', 'closed', 'Built row already existed or could not be inserted uniquely')
+        upsert_monitored(key, lifecycle_payload(base_payload, 'closed'))
         return
 
     blocker = 'Trusted reader could not extract full body/attachments from this mirrored email yet'
     ensure_pending_email_row(entry, blocker, refs)
-    mark_state(state, key, 'email', 'pending', blocker)
-    upsert_monitored(key, email_monitored_payload(entry, 'blocked_pending_gate', blocker, refs, flags=flags))
+    advance_item_lifecycle(state, key, 'email', 'blocked', blocker)
+    upsert_monitored(key, lifecycle_payload(base_payload, 'blocked', blocker))
     summary['pending'] += 1
 
 
@@ -1147,7 +1251,22 @@ def process_whatsapp_entry(state: dict[str, Any], entry: WhatsAppEntry, summary:
     key = entry.key
     scanned = set(state.get('scanned_non_candidates', []))
     flags = classify_whatsapp_flags(entry)
-    mark_state(state, key, 'whatsapp', 'reviewed', ','.join(flags))
+    base_payload = whatsapp_monitored_payload(entry, 'trigger_received', None, flags=flags)
+
+    advance_item_lifecycle(state, key, 'whatsapp', 'trigger_received', ','.join(flags))
+    upsert_monitored(key, lifecycle_payload(base_payload, 'trigger_received'))
+
+    if 'IGNORE' in flags and not materially_important_whatsapp(entry, flags):
+        remove_monitored(key)
+        if key not in scanned:
+            scanned.add(key)
+            state['scanned_non_candidates'] = sorted(scanned)
+        summary['not_needed'] += 1
+        advance_item_lifecycle(state, key, 'whatsapp', 'not_needed', 'No strong routed signal detected in WhatsApp recent feed')
+        return
+
+    advance_item_lifecycle(state, key, 'whatsapp', 'classified', ','.join(flags))
+    upsert_monitored(key, lifecycle_payload(base_payload, 'classified'))
 
     if 'EXPENSE' not in flags:
         if entry.is_direct and (not entry.group) and (not entry.is_me or entry.direct_thread_contact):
@@ -1156,33 +1275,36 @@ def process_whatsapp_entry(state: dict[str, Any], entry: WhatsAppEntry, summary:
                 scanned.add(key)
                 state['scanned_non_candidates'] = sorted(scanned)
             summary['not_needed'] += 1
-            if state.get('item_states', {}).get(key, {}).get('status') != 'not_needed':
-                mark_state(state, key, 'whatsapp', 'not_needed', 'Direct-thread non-expense signals are reconciled at thread level with Me: context')
+            advance_item_lifecycle(state, key, 'whatsapp', 'not_needed', 'Direct-thread non-expense signals are reconciled at thread level with Me: context')
             return
         if materially_important_whatsapp(entry, flags):
             summary['material_non_expense'] += 1
-            upsert_monitored(key, whatsapp_monitored_payload(entry, 'surfaced', None, flags=flags, evidence_refs=['memory/monitored-items-state.json']))
+            advance_item_lifecycle(state, key, 'whatsapp', 'routed', 'Managed non-expense item routed for visibility/reconciliation')
+            upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
         else:
             if key not in scanned:
                 scanned.add(key)
                 state['scanned_non_candidates'] = sorted(scanned)
             summary['not_needed'] += 1
-            if state.get('item_states', {}).get(key, {}).get('status') != 'not_needed':
-                mark_state(state, key, 'whatsapp', 'not_needed', 'No strong routed signal detected in WhatsApp recent feed')
+            advance_item_lifecycle(state, key, 'whatsapp', 'not_needed', 'No strong routed signal detected in WhatsApp recent feed')
         return
 
     summary['expense_candidates'] += 1
+    advance_item_lifecycle(state, key, 'whatsapp', 'routed', 'Expense workflow selected')
+    upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
+
     expense_md = load_expense_text()
     if entry.text in expense_md:
         summary['duplicates'] += 1
-        mark_state(state, key, 'whatsapp', 'duplicate', 'Already represented in seer-expenses.md')
-        upsert_monitored(key, whatsapp_monitored_payload(entry, 'closed', None, flags=flags))
+        advance_item_lifecycle(state, key, 'whatsapp', 'processed', 'Already represented in seer-expenses.md')
+        advance_item_lifecycle(state, key, 'whatsapp', 'closed', 'Already represented in seer-expenses.md')
+        upsert_monitored(key, lifecycle_payload(base_payload, 'closed'))
         return
 
     blocker = 'WhatsApp expense signal needs business relevance / payment-source confirmation or richer evidence before full logging'
     ensure_pending_whatsapp_row(entry, blocker)
-    mark_state(state, key, 'whatsapp', 'pending', blocker)
-    upsert_monitored(key, whatsapp_monitored_payload(entry, 'blocked_pending_gate', blocker, flags=flags))
+    advance_item_lifecycle(state, key, 'whatsapp', 'blocked', blocker)
+    upsert_monitored(key, lifecycle_payload(base_payload, 'blocked', blocker))
     summary['pending'] += 1
 
 
