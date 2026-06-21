@@ -1596,6 +1596,8 @@ def cmd_dev_test(token: str, chat_id: str, project: str) -> None:
 def _find_codex_bin() -> str | None:
     candidates = [
         shutil.which("codex"),
+        str(Path.home() / ".npm-packages/bin/codex"),
+        str(Path.home() / ".local/share/pnpm/codex"),
         str(Path.home() / ".npm-global/bin/codex"),
         str(Path.home() / ".local/bin/codex"),
         "/usr/local/bin/codex",
@@ -1633,6 +1635,8 @@ def cmd_codex_reauth(token: str, chat_id: str) -> None:
             env = os.environ.copy()
             env["PATH"] = ":".join(filter(None, [
                 env.get("PATH", ""),
+                str(Path.home() / ".npm-packages/bin"),
+                str(Path.home() / ".local/share/pnpm"),
                 str(Path.home() / ".npm-global/bin"),
                 str(Path.home() / ".local/bin"),
                 "/usr/local/bin",
