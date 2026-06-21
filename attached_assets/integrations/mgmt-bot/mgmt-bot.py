@@ -638,22 +638,57 @@ def cmd_install(token: str, chat_id: str) -> None:
     wrapper_path = Path("/tmp/openclaw-install-wrapper.py")
     wrapper_path.write_text(
         "#!/usr/bin/env python3\n"
-        "import subprocess, urllib.request, json, sys, time, os\n"
+        "import subprocess, urllib.request, urllib.error, json, sys, time, os\n"
         f"TOKEN   = {token!r}\n"
         f"CHAT_ID = {chat_id!r}\n"
         f"INSTALL = {str(install_sh)!r}\n"
         f"VAULT_PASS = {_vault_pass!r}\n"
         "\n"
-        "def tg(text):\n"
+        "LOG = '/tmp/openclaw-install-wrapper.log'\n"
+        "def log(line):\n"
         "    try:\n"
-        "        data = json.dumps({'chat_id': CHAT_ID, 'text': text,\n"
-        "                           'parse_mode': 'Markdown'}).encode()\n"
-        "        req  = urllib.request.Request(\n"
-        "            f'https://api.telegram.org/bot{TOKEN}/sendMessage',\n"
-        "            data=data, headers={'Content-Type': 'application/json'})\n"
-        "        urllib.request.urlopen(req, timeout=15)\n"
-        "    except Exception as e:\n"
-        "        print(f'tg send failed: {e}', file=sys.stderr)\n"
+        "        with open(LOG, 'a') as f:\n"
+        "            f.write(time.strftime('%Y-%m-%d %H:%M:%S ') + str(line) + '\\n')\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "\n"
+        "def tg(text):\n"
+        "    # Retry hard. The install pegs the Pi CPU and the gateway restart\n"
+        "    # can briefly starve tailscaled/MagicDNS, so api.telegram.org may\n"
+        "    # fail to resolve for a window right when this fires. A single\n"
+        "    # attempt (the old behaviour) silently lost the completion message;\n"
+        "    # keep trying for ~3 min so it actually lands.\n"
+        "    url = f'https://api.telegram.org/bot{TOKEN}/sendMessage'\n"
+        "    md    = json.dumps({'chat_id': CHAT_ID, 'text': text,\n"
+        "                        'parse_mode': 'Markdown'}).encode()\n"
+        "    plain = json.dumps({'chat_id': CHAT_ID, 'text': text}).encode()\n"
+        "    payload, mode = md, 'markdown'\n"
+        "    last = ''\n"
+        "    for attempt in range(1, 19):\n"
+        "        try:\n"
+        "            req = urllib.request.Request(\n"
+        "                url, data=payload,\n"
+        "                headers={'Content-Type': 'application/json'})\n"
+        "            urllib.request.urlopen(req, timeout=15)\n"
+        "            log(f'tg send OK on attempt {attempt} ({mode})')\n"
+        "            return True\n"
+        "        except urllib.error.HTTPError as e:\n"
+        "            last = f'HTTP {e.code}'\n"
+        "            log(f'tg send attempt {attempt} failed: {last}')\n"
+        "            # A 400 means Telegram rejected the content (usually bad\n"
+        "            # Markdown). Retrying the same payload never works, so drop\n"
+        "            # to plain text once and retry immediately.\n"
+        "            if e.code == 400 and mode == 'markdown':\n"
+        "                payload, mode = plain, 'plain'\n"
+        "                log('falling back to plain text')\n"
+        "                continue\n"
+        "            time.sleep(10)\n"
+        "        except Exception as e:\n"
+        "            last = str(e)\n"
+        "            log(f'tg send attempt {attempt} failed: {last}')\n"
+        "            time.sleep(10)\n"
+        "    log(f'tg send GAVE UP after retries: {last}')\n"
+        "    return False\n"
         "\n"
         "HOME = os.path.expanduser('~')\n"
         "\n"
@@ -664,6 +699,8 @@ def cmd_install(token: str, chat_id: str) -> None:
         "    install_env['OPENCLAW_VAULT_PASSPHRASE'] = VAULT_PASS\n"
         "# Mark as non-interactive so the install script skips any TTY-gated prompts.\n"
         "install_env['OPENCLAW_NONINTERACTIVE'] = '1'\n"
+        "\n"
+        "log('wrapper started; running install script')\n"
         "\n"
         "def svc_active(name):\n"
         "    r = subprocess.run(['systemctl', '--user', 'is-active', name],\n"
@@ -716,23 +753,28 @@ def cmd_install(token: str, chat_id: str) -> None:
     # when it restarts this service during the install. systemd-run --user
     # puts the wrapper in its own transient unit with its own cgroup.
     # Falls back to start_new_session if systemd-run is unavailable.
+    # Capture the launcher's own output so a systemd-run failure (e.g. missing
+    # XDG_RUNTIME_DIR/D-Bus) is visible in a log instead of vanishing.
+    _launch_log = open("/tmp/openclaw-install-wrapper-launch.log", "ab")
     _sdr = shutil.which("systemd-run")
     if _sdr:
         subprocess.Popen(
             [_sdr, "--user", "--no-block",
              sys.executable, str(wrapper_path)],
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=_launch_log,
+            stderr=_launch_log,
         )
     else:
         subprocess.Popen(
             [sys.executable, str(wrapper_path)],
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=_launch_log,
+            stderr=_launch_log,
             start_new_session=True,
         )
+    # Child has inherited (dup'd) the fd; the parent copy is no longer needed.
+    _launch_log.close()
 
 
 def cmd_health(token: str, chat_id: str) -> None:
