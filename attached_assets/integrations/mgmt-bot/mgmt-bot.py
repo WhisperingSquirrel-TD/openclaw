@@ -1593,6 +1593,156 @@ def cmd_dev_test(token: str, chat_id: str, project: str) -> None:
             else f"All checks passed. Run `/dev-run {project}` to generate a preview."))
 
 
+def _find_codex_bin() -> str | None:
+    candidates = [
+        shutil.which("codex"),
+        str(Path.home() / ".npm-global/bin/codex"),
+        str(Path.home() / ".local/bin/codex"),
+        "/usr/local/bin/codex",
+        "/usr/bin/codex",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).exists() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def cmd_codex_reauth(token: str, chat_id: str) -> None:
+    """Re-authenticate OpenAI Codex via device code flow, phone-first and remote-safe."""
+    import threading
+
+    codex_bin = _find_codex_bin()
+    if not codex_bin:
+        send(token, chat_id, "❌ `codex` CLI not found on the Pi in PATH or standard install locations.")
+        return
+
+    helper = STATE_DIR / "workspace" / "skills" / "codex-reauth" / "reauth-copy-tokens.py"
+    if not helper.exists():
+        send(token, chat_id, f"❌ Codex token-copy helper not found at `{helper}`")
+        return
+
+    send(token, chat_id,
+         "🔐 *OpenAI Codex re-auth*\n\n"
+         "Starting device auth on the Pi… I’ll send you the URL and one-time code next.\n"
+         "_You can complete this from your phone, remotely — no home network needed._")
+
+    def _run() -> None:
+        import re as _re
+
+        try:
+            env = os.environ.copy()
+            env["PATH"] = ":".join(filter(None, [
+                env.get("PATH", ""),
+                str(Path.home() / ".npm-global/bin"),
+                str(Path.home() / ".local/bin"),
+                "/usr/local/bin",
+            ]))
+            proc = subprocess.Popen(
+                [codex_bin, "login", "--device-auth"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+        except Exception as e:
+            send(token, chat_id, f"❌ Could not start Codex device auth: `{e}`")
+            return
+
+        url = None
+        code = None
+        lines = []
+
+        if proc.stdout is None:
+            send(token, chat_id, "❌ Codex device auth started without readable output.")
+            return
+
+        for raw in proc.stdout:
+            line = raw.rstrip("\n")
+            lines.append(line)
+            clean = _re.sub(r'\x1b\[[0-9;]*m', '', line).strip()
+            if not url:
+                m = _re.search(r'https://\S+', clean)
+                if m:
+                    url = m.group(0)
+            if not code:
+                m = _re.fullmatch(r'([A-Z0-9]{4,}-[A-Z0-9-]{4,})', clean)
+                if m:
+                    code = m.group(1)
+            if url and code:
+                send(token, chat_id,
+                     f"🔐 *OpenAI Codex re-auth*\n\n"
+                     f"1. Open this URL on your phone:\n{url}\n\n"
+                     f"2. Enter this one-time code:\n`{code}`\n\n"
+                     "_This works remotely — you do not need to be on the same network as the Pi._\n\n"
+                     "I’ll keep waiting here and will message you when the auth is complete.")
+                break
+
+        if not (url and code):
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            tail = "\n".join(lines[-20:])
+            send(token, chat_id,
+                 f"❌ Could not parse Codex device-auth URL/code from CLI output.\n\n```{tail}```")
+            return
+
+        # continue consuming output silently until completion
+        remaining = proc.stdout.read() or ""
+        if remaining:
+            lines.extend(remaining.splitlines())
+
+        rc = proc.wait(timeout=1200)
+        if rc != 0:
+            tail = "\n".join(lines[-30:])
+            send(token, chat_id,
+                 f"❌ Codex device auth did not complete successfully (exit {rc}).\n\n```{tail}```")
+            return
+
+        try:
+            copy = subprocess.run(
+                ["python3", str(helper)],
+                capture_output=True, text=True, timeout=30,
+            )
+            if copy.returncode != 0:
+                tail = (copy.stdout + copy.stderr).strip()[-1500:]
+                send(token, chat_id,
+                     f"⚠️ Sign-in succeeded but token copy failed.\n\n```{tail}```")
+                return
+
+            restart = subprocess.run(
+                ["systemctl", "--user", "restart", "openclaw-gateway.service"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if restart.returncode != 0:
+                tail = (restart.stdout + restart.stderr).strip()[-1500:]
+                send(token, chat_id,
+                     f"⚠️ Tokens copied, but gateway restart failed.\n\n```{tail}```")
+                return
+
+            verify = subprocess.run(
+                "openclaw config auth-status 2>&1 | grep -A 5 'openai-codex'",
+                shell=True, capture_output=True, text=True, timeout=30,
+            )
+            verify_out = (verify.stdout + verify.stderr).strip()
+            if "Failed to refresh OAuth token" in verify_out or not verify_out:
+                tail = verify_out[-1500:] if verify_out else "No auth-status output captured."
+                send(token, chat_id,
+                     f"⚠️ Codex sign-in completed, but verification still looks unhealthy.\n\n```{tail}```")
+                return
+
+            send(token, chat_id,
+                 f"✅ *OpenAI Codex re-auth complete*\n\n"
+                 f"Tokens copied into OpenClaw, gateway restarted, and auth verification passed.\n\n```{verify_out[-1200:]}```")
+        except subprocess.TimeoutExpired:
+            send(token, chat_id, "⚠️ Codex sign-in completed, but follow-up verification timed out.")
+        except Exception as e:
+            send(token, chat_id, f"⚠️ Codex sign-in completed, but follow-up steps failed: `{e}`")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def cmd_ms_reauth(token: str, chat_id: str, account: str = "assistant") -> None:
     """
     Re-authenticate a Microsoft account via device code flow.
@@ -1945,7 +2095,8 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/anthropic — switch to Anthropic API + restart gateway\n"
          "/openai — switch to OpenAI API + restart gateway\n"
          "/codex — switch to Codex Web gpt-5.4 (full) + restart gateway\n"
-         "/codexmini — switch to Codex Web gpt-5.3-codex (mini) + restart\n\n"
+         "/codexmini — switch to Codex Web gpt-5.3-codex (mini) + restart\n"
+         "/codex_reauth — start remote phone-first Codex OAuth re-auth\n\n"
          "*Services*\n"
          "/restart — restart the L1 gateway\n"
          "/garmin — manually trigger the Garmin poller\n"
@@ -2006,6 +2157,7 @@ MENU_COMMANDS = [
     ("anthropic", "Switch to Anthropic API model"),
     ("codex",     "Switch to Codex Web gpt-5.4 (full)"),
     ("codexmini", "Switch to Codex Web gpt-5.3-codex (mini)"),
+    ("codex_reauth", "Start remote phone-first Codex OAuth re-auth"),
     # Integrations
     ("garmin",       "Manually trigger the Garmin poller"),
     ("yt_add",       "Add a YouTube channel — /yt-add <url> [label]"),
@@ -2411,6 +2563,8 @@ COMMANDS = {
     "/anthropic":  lambda t, c: cmd_switch(t, c, "anthropic"),
     "/codex":      lambda t, c: cmd_switch(t, c, "codex"),
     "/codexmini":  lambda t, c: cmd_switch(t, c, "codexmini"),
+    "/codex-reauth": cmd_codex_reauth,
+    "/codex_reauth": cmd_codex_reauth,
     "/restart":    cmd_restart,
     "/reboot":     cmd_reboot,
     "/pull":       cmd_pull,
