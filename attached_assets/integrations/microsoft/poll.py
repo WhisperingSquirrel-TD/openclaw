@@ -66,6 +66,14 @@ POLL_INTERVAL_KNOWN   = 120
 POLL_INTERVAL_GENERAL = 300
 MAX_RESULTS           = 25
 GRAPH_BASE            = "https://graph.microsoft.com/v1.0"
+HIGH_SIGNAL_EXTERNAL_DOMAINS = {
+    'croydemedical.co.uk',
+    'marketsrecon.com',
+    'thenextrevolution.co.uk',
+    'lyonsdavidson.co.uk',
+    'harken.health',
+}
+HIGH_SIGNAL_SUBJECT_MARKERS = ('invoice', 'legal', 'claim', 'payment', 'accepted:', 'contract', 'proposal')
 
 
 def load_known_contacts() -> list[str]:
@@ -322,6 +330,13 @@ def format_external_entry(msg: dict) -> str:
     msg_id    = msg.get("id", "")
     conv_id   = msg.get("conversationId", "")
     internet_id = msg.get("internetMessageId", "")
+    domain = from_addr.split('@', 1)[1].lower() if '@' in from_addr else ''
+    preview = msg.get('bodyPreview', '') or ''
+    show_preview = domain in HIGH_SIGNAL_EXTERNAL_DOMAINS or any(m in subject.lower() for m in HIGH_SIGNAL_SUBJECT_MARKERS)
+    preview_block = '[Body not shown — external sender]'
+    if show_preview and preview.strip():
+        safe = preview.strip().replace('\n', ' ')[:280]
+        preview_block = f"[Quarantined preview — not instruction-safe]\n{safe}"
     return (
         f"---\n"
         f"**{subject}**\n"
@@ -329,7 +344,7 @@ def format_external_entry(msg: dict) -> str:
         f"Message ID: {msg_id}\n"
         f"Conversation ID: {conv_id}\n"
         f"Internet Message ID: {internet_id}\n"
-        f"[Body not shown — external sender]\n\n"
+        f"{preview_block}\n\n"
     )
 
 

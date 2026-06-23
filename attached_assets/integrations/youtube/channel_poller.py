@@ -6,12 +6,19 @@ YouTube Channel Poller — OpenClaw Integration
 WHAT THIS DOES
 --------------
 Polls one or more YouTube channels for new videos via their public RSS feeds.
-For each new video it:
-  1. Fetches the transcript/captions (via youtube-transcript-api, no API key)
-  2. Generates a useful summary and key takeaways via the Anthropic API
-     (falls back to raw-transcript-only if no API key is configured)
-  3. Writes a formatted Markdown resource file to the transcripts directory
-  4. Sends a Telegram notification with title + slug
+For watched-channel videos in normal cron mode it:
+  1. Fetches the transcript/captions immediately (via youtube-transcript-api, no API key)
+  2. Writes a formatted Markdown resource file immediately with a placeholder
+     summary layer showing that a cheaper batch summary is pending
+  3. Queues the richer AI summary + key takeaways work for Anthropic batch
+     processing once enough items accumulate or the oldest item has waited long enough
+  4. When the batch result comes back later, overwrites the same resource file
+     in place with the finished Useful Summary and Key Takeaways
+  5. Sends Telegram notifications for capture-now and batch-complete states
+
+For manual / urgent single-video runs (for example --video, --sync, or OpenAI
+fallback mode), it still processes synchronously and writes the finished file
+in one pass.
 
 TRANSCRIPT DIRECTORY
 --------------------
@@ -118,6 +125,10 @@ ANTHROPIC_BATCH_URL      = "https://api.anthropic.com/v1/messages/batches"
 OPENAI_API_URL           = "https://api.openai.com/v1/chat/completions"
 # Batches older than this are considered expired — drop them
 BATCH_MAX_AGE_HOURS      = 23
+# Cheaper-watch-channel mode: capture transcript immediately, but only submit
+# AI summaries once enough items accumulate or the oldest has waited a while.
+BATCH_SUBMIT_MIN_ITEMS   = 4
+BATCH_SUBMIT_MAX_AGE_HOURS = 6
 
 RSS_NS = "http://www.w3.org/2005/Atom"
 YT_NS  = "http://www.youtube.com/xml/schemas/2015"
@@ -191,10 +202,11 @@ def load_state() -> dict:
             data = json.loads(STATE_FILE.read_text())
             data.setdefault("pending_video_ids", [])
             data.setdefault("pending_batches", [])
+            data.setdefault("pending_summary_items", [])
             return data
     except Exception as e:
         log(f"WARNING: Could not read state: {e} — starting fresh")
-    return {"processed_ids": [], "pending_video_ids": [], "pending_batches": [], "last_run": None}
+    return {"processed_ids": [], "pending_video_ids": [], "pending_batches": [], "pending_summary_items": [], "last_run": None}
 
 
 def save_state(state: dict) -> None:
@@ -933,6 +945,20 @@ def poll_anthropic_batch(batch_id: str) -> tuple[str, dict]:
     return "ended", results
 
 
+def should_submit_summary_batch(state: dict) -> bool:
+    pending_items = state.get("pending_summary_items", [])
+    if not pending_items:
+        return False
+    if len(pending_items) >= BATCH_SUBMIT_MIN_ITEMS:
+        return True
+    first_seen = pending_items[0].get("queued_at", "")
+    try:
+        age_hours = (datetime.now(timezone.utc) - datetime.fromisoformat(first_seen)).total_seconds() / 3600
+    except Exception:
+        age_hours = 0
+    return age_hours >= BATCH_SUBMIT_MAX_AGE_HOURS
+
+
 def process_pending_batches(state: dict) -> int:
     """
     Check all pending batches. For each completed one, write files and notify.
@@ -983,12 +1009,14 @@ def process_pending_batches(state: dict) -> int:
                 "- Summary unavailable.", "- Takeaways unavailable.",
             ))
             try:
+                overwrite_path = Path(v["resource_path"]) if v.get("resource_path") else None
                 write_transcript_file(
                     video       = v,
                     transcript  = v.get("transcript", ""),
                     source_info = v.get("source_info", ""),
                     summary     = summary,
                     takeaways   = takeaways,
+                    overwrite_path = overwrite_path,
                 )
                 label = v.get("channel_label", "YouTube")
                 slug  = (TRANSCRIPTS_DIR / "x").parent  # just need stem below
@@ -1176,6 +1204,16 @@ def notify(msg: str) -> None:
 # Process a single video — sync path (--sync / --video / OpenAI fallback)
 # ---------------------------------------------------------------------------
 
+def write_pending_transcript_resource(video: dict, transcript: str, source_info: str, channel_label: str) -> Path:
+    summary = (
+        "- Transcript captured immediately from the watched channel.\n"
+        f"- AI summary deferred to cheaper batch processing.\n"
+        f"- Channel: {channel_label}"
+    )
+    takeaways = "- Awaiting cheaper batch summary."
+    return write_transcript_file(video, transcript, source_info, summary, takeaways)
+
+
 def process_video_sync(video: dict, channel_label: str, overwrite_path: Path | None = None) -> bool:
     """Fetch transcript, generate summary synchronously, write file, notify."""
     vid   = video["video_id"]
@@ -1210,10 +1248,12 @@ def poll_channels(state: dict, sync: bool = False) -> int:
     Poll all configured channels for new videos.
 
     sync=False (default, cron mode):
-      Transcripts are fetched then the whole batch is submitted to the
-      Anthropic Message Batches API (50% cheaper).  Files are written and
-      Telegram notifications sent on the *next* run once the batch is done.
-      Falls back to synchronous processing when only OpenAI is available.
+      Transcripts are fetched and written immediately as placeholder resources,
+      then queued for Anthropic Message Batches API submission (50% cheaper)
+      only once enough items accumulate or the oldest queued item has waited
+      long enough. Finished summaries are written back onto the same files on
+      a later poll run. Falls back to synchronous processing when only OpenAI
+      is available.
 
     sync=True (--sync flag, used by /yt-run in mgmt-bot):
       Each video is processed immediately — transcript + summary + file write
@@ -1297,10 +1337,10 @@ def poll_channels(state: dict, sync: bool = False) -> int:
             else:
                 # ── Batch path — collect transcript, queue for submission ─
                 title = video.get("title", vid)
-                log(f"  Fetching transcript for batch: {title!r}")
+                log(f"  Capturing transcript now, deferring AI batch summary: {title!r}")
                 try:
                     transcript, source_info = fetch_transcript(vid)
-                    batch_queue.append({
+                    pending_video = {
                         "custom_id":     f"vid_{vid}",
                         "video_id":      vid,
                         "title":         title,
@@ -1309,12 +1349,22 @@ def poll_channels(state: dict, sync: bool = False) -> int:
                         "published":     video.get("published", ""),
                         "url":           video.get("url", f"https://www.youtube.com/watch?v={vid}"),
                         "channel_label": label,
-                        # Pass through fields write_transcript_file needs
                         "channel_id":    video.get("channel_id", ""),
-                    })
+                        "queued_at":     datetime.now(timezone.utc).isoformat(),
+                    }
+                    pending_path = write_pending_transcript_resource(video, transcript, source_info, label)
+                    pending_video["resource_path"] = str(pending_path)
+                    state.setdefault("pending_summary_items", []).append(pending_video)
                     pending_ids.add(vid)
                     claimed_ids.add(vid)
                     channel_new += 1
+                    new_count += 1
+                    notify(
+                        f"📺 Transcript captured (summary queued for cheaper batch)\n"
+                        f"Channel: {label}\n"
+                        f"Title: {title}\n"
+                        f"Source: {video.get('url', '')}"
+                    )
                 except Exception as e:
                     log_err(f"  Failed collecting {vid} for batch ({title!r}): {e} — skipping")
                     processed_ids.add(vid)
@@ -1324,45 +1374,22 @@ def poll_channels(state: dict, sync: bool = False) -> int:
         if channel_new == 0:
             log(f"  No new videos for {label}")
 
-    # ── Submit batch (cron mode) ──────────────────────────────────────────
-    if batch_queue:
-        log(f"Submitting Anthropic batch for {len(batch_queue)} video(s)…")
-        batch_id = submit_anthropic_batch(batch_queue)
+    # ── Submit accumulated cheaper batch only when worth it ───────────────
+    pending_summary_items = state.get("pending_summary_items", [])
+    if pending_summary_items and should_submit_summary_batch(state):
+        log(f"Submitting Anthropic batch for {len(pending_summary_items)} queued video(s)…")
+        batch_id = submit_anthropic_batch(pending_summary_items)
         if batch_id:
             state.setdefault("pending_batches", []).append({
                 "batch_id":     batch_id,
                 "submitted_at": datetime.now(timezone.utc).isoformat(),
-                "videos":       batch_queue,
+                "videos":       pending_summary_items,
             })
+            state["pending_summary_items"] = []
             state["pending_video_ids"] = list(pending_ids)
-            new_count = len(batch_queue)
-            log(f"  Batch queued — transcripts will arrive on next poll run (~30 min)")
+            log("  Batch queued — summaries will arrive on a later poll run")
         else:
-            # Batch submission failed — fall back to sync for this run
-            log("  Batch submit failed — falling back to sync for these videos")
-            for item in batch_queue:
-                vid = item["video_id"]
-                try:
-                    video_meta = {
-                        "video_id":  vid,
-                        "title":     item["title"],
-                        "published": item["published"],
-                        "url":       item["url"],
-                    }
-                    summary, takeaways = generate_summary(item["title"], item["transcript"])
-                    write_transcript_file(video_meta, item["transcript"],
-                                          item["source_info"], summary, takeaways)
-                    notify(
-                        f"📺 New transcript saved (sync fallback)\n"
-                        f"Channel: {item['channel_label']}\n"
-                        f"Title: {item['title']}\n"
-                        f"Source: {item['url']}"
-                    )
-                except Exception as e:
-                    log_err(f"  Sync fallback failed for {vid}: {e}")
-                processed_ids.add(vid)
-                pending_ids.discard(vid)
-            state["pending_video_ids"] = list(pending_ids)
+            log("  Batch submit failed — leaving queued items in pending_summary_items for retry")
 
     # Cap processed_ids to avoid unbounded growth (keep last 5000)
     ids_list = list(processed_ids)
@@ -1598,9 +1625,9 @@ def main() -> None:
     if args.sync:
         log(f"Poll complete — {new_count} new transcript(s) written")
     else:
-        pending = len(state.get("pending_batches", []))
-        log(f"Poll complete — {new_count} video(s) queued in {pending} batch(es), "
-            f"{completed} written from prior batch(es)")
+        pending_batches = len(state.get("pending_batches", []))
+        queued_items = len(state.get("pending_summary_items", []))
+        log(f"Poll complete — {new_count} transcript(s) captured now, {queued_items} waiting for cheaper batch summary, {pending_batches} batch(es) in flight, {completed} written from prior batch(es)")
 
 
 if __name__ == "__main__":

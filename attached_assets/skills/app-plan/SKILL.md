@@ -92,7 +92,17 @@ Use when the build is for another person, client, or project context.
    - what behavior will be proven by integration tests
    - what end-to-end proof is actually needed
    - what logs/signals must exist to diagnose failure in production or on the Pi
-10. Include an end-to-end sentence in the plan covering the full path:
+10. **Monitoring/operational-system planning rule (MANDATORY):** if the system watches feeds, messages, queues, trackers, or other changing operational surfaces, the plan must explicitly define:
+
+- the first-class intake surfaces
+- the continuity anchor model (`last successful visible update`, not missed-check windows)
+- the item-level vs surface-level state split
+- the proof layers that must converge
+- the outbound completion path from `noticed/queued/generated` to destination truth
+- the recurring audit/reconciliation path that will prove the system stays honest over time
+  Planning is incomplete if it only defines detection/alerts without the state, completion, and reconciliation model.
+
+11. Include an end-to-end sentence in the plan covering the full path:
 
 - Tom prompts for a project
 - project is created in the right code home

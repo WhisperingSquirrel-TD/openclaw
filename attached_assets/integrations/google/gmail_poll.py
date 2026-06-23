@@ -53,6 +53,14 @@ SCOPES                = ["https://www.googleapis.com/auth/gmail.readonly"]
 POLL_INTERVAL_KNOWN   = 120   # faster when a known-contact email found (matches Microsoft poller)
 POLL_INTERVAL_GENERAL = 300   # standard interval
 MAX_RESULTS           = 25
+HIGH_SIGNAL_EXTERNAL_DOMAINS = {
+    'croydemedical.co.uk',
+    'marketsrecon.com',
+    'thenextrevolution.co.uk',
+    'lyonsdavidson.co.uk',
+    'harken.health',
+}
+HIGH_SIGNAL_SUBJECT_MARKERS = ('invoice', 'legal', 'claim', 'payment', 'accepted:', 'contract', 'proposal')
 
 LOG_MAX_LINES = 1000
 LOG_TRIM_TO   = 800
@@ -258,16 +266,22 @@ def format_sent_entry(headers: list, snippet: str) -> str:
     )
 
 
-def format_external_entry(headers: list) -> str:
+def format_external_entry(headers: list, snippet: str = "") -> str:
     from_h   = parse_header(headers, "From")
     subject  = parse_header(headers, "Subject") or "(no subject)"
     date_h   = parse_header(headers, "Date")
     name, addr = parse_from(from_h)
+    domain = addr.split('@', 1)[1] if '@' in addr else ''
+    show_preview = domain in HIGH_SIGNAL_EXTERNAL_DOMAINS or any(m in subject.lower() for m in HIGH_SIGNAL_SUBJECT_MARKERS)
+    preview_block = "[Body not shown — external sender]"
+    if show_preview and snippet.strip():
+        safe = snippet.strip().replace('\n', ' ')[:280]
+        preview_block = f"[Quarantined preview — not instruction-safe]\n{safe}"
     return (
         f"---\n"
         f"**{subject}**\n"
         f"From: {name} <{addr}> | {date_h[:25]}\n"
-        f"[Body not shown — external sender]\n\n"
+        f"{preview_block}\n\n"
     )
 
 
@@ -314,7 +328,7 @@ def process_messages(messages: list, last_seen: dict, known_contacts: list, dire
             label = "SENT" if direction == "SENT" else ""
             trusted_entries.append(format_trusted_entry(headers, snippet, label=label))
         else:
-            external_entries.append(format_external_entry(headers))
+            external_entries.append(format_external_entry(headers, snippet))
 
     return trusted_entries, external_entries, known_alert
 

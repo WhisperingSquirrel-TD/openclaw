@@ -84,6 +84,18 @@ Implement the agreed build in a disciplined way, using the same checklist whethe
 - what still depends on restart/reload/manual steps
   If the implementation changes the operator route or architecture, the documentation update is part of the build, not optional polish.
 
+27. **Operational monitoring build rule (MANDATORY):** when building or refactoring a monitoring/ops system, do not stop at helper code or cron prompt edits alone. Build the full chain consciously:
+
+- continuity/state model for watched surfaces
+- helper/runtime path that updates that state
+- recurring jobs that consume the helper/state instead of freehanding logic
+- proof-layer reconciliation to catch drift between source, state, logs, and destination truth
+- outbound completion audit where queued/generated/sent actions must actually move owning systems
+  A build is not complete if the system can detect but cannot prove completion or honesty under stale/missed-check conditions.
+
+28. **Runtime-helper precedence rule (MANDATORY):** when a robust shared helper/runtime path exists for repeated monitoring logic, recurring jobs should consume that helper/state first rather than reimplementing the same reasoning in long prompts. Prompt-only logic is acceptable only as temporary scaffolding or for orchestration/delivery rules.
+29. **Monitoring-system completion honesty rule (MANDATORY):** do not claim a monitoring/ops system is complete, robust, or fully working just because the architecture/helpers/reconciliation layers exist. Before any completion claim, explicitly check whether critical upstream source freshness and readable-truth access still leave the system unable to fully prove the intended behavior end to end. If any critical surface is still stale by design/runtime failure, or consequential mirror items still depend on hidden/withheld body truth with no stronger readable path, the build must be labeled partial and the remaining engineering slice named explicitly.
+
 ## Rules
 
 - Do not skip straight from idea to tangled implementation.
