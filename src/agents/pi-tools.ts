@@ -583,8 +583,24 @@ export function createOpenClawCodingTools(options?: {
     ? withHooks.map((tool) => wrapToolWithAbortSignal(tool, options.abortSignal))
     : withHooks;
 
+  // Defensive: a tool name must never appear twice in the final list.
+  // Anthropic hard-rejects duplicate tool names ("tools: Tool names must be
+  // unique"), while OpenAI/codex silently tolerates them — which is why a
+  // latent duplicate only surfaces after switching to a Claude model. Plugin
+  // tools can be contributed via more than one resolution path above, so
+  // collapse any duplicates here, keeping the first (allowlisted) occurrence.
+  const seenToolNames = new Set<string>();
+  const deduped = withAbort.filter((tool) => {
+    if (seenToolNames.has(tool.name)) {
+      logWarn(`Dropping duplicate agent tool "${tool.name}" from tool list.`);
+      return false;
+    }
+    seenToolNames.add(tool.name);
+    return true;
+  });
+
   // NOTE: Keep canonical (lowercase) tool names here.
   // pi-ai's Anthropic OAuth transport remaps tool names to Claude Code-style names
   // on the wire and maps them back for tool dispatch.
-  return withAbort;
+  return deduped;
 }
