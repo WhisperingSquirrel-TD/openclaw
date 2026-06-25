@@ -62,7 +62,7 @@ def _load_dotenv() -> None:
             key, _, value = line.partition("=")
             key   = key.strip()
             value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
+            if key:
                 os.environ[key] = value
     except Exception:
         pass
@@ -134,6 +134,8 @@ def get_telegram_credentials() -> tuple[str, str]:
         allow_from = tg.get("allowFrom", [])
         if allow_from:
             chat_id = str(allow_from[0])
+            if chat_id.startswith("tg:"):
+                chat_id = chat_id[3:]
 
     return bot_token, chat_id
 

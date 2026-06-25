@@ -514,23 +514,24 @@ export function createOpenClawCodingTools(options?: {
       senderIsOwner: options?.senderIsOwner,
       sessionId: options?.sessionId,
     }),
-    ...resolvePluginTools({
-      context: {
-        config: options?.config,
-        workspaceDir: workspaceRoot,
-        agentDir: options?.agentDir,
-        agentId,
-        sessionKey: options?.sessionKey,
-        sessionId: options?.sessionId,
-        messageChannel: options?.messageProvider,
-        agentAccountId: options?.agentAccountId,
-        requesterSenderId: options?.senderId ?? undefined,
-        senderIsOwner: options?.senderIsOwner,
-        sandboxed: !!sandbox,
-      },
-      existingToolNames: new Set(),
-    }),
   ];
+  const pluginTools = resolvePluginTools({
+    context: {
+      config: options?.config,
+      workspaceDir: workspaceRoot,
+      agentDir: options?.agentDir,
+      agentId,
+      sessionKey: options?.sessionKey,
+      sessionId: options?.sessionId,
+      messageChannel: options?.messageProvider,
+      agentAccountId: options?.agentAccountId,
+      requesterSenderId: options?.senderId ?? undefined,
+      senderIsOwner: options?.senderIsOwner,
+      sandboxed: !!sandbox,
+    },
+    existingToolNames: new Set(tools.map((tool) => tool.name)),
+  });
+  tools.push(...pluginTools);
   const toolsForMessageProvider = applyMessageProviderToolPolicy(tools, options?.messageProvider);
   const toolsForModelProvider = applyModelProviderToolPolicy(toolsForMessageProvider, {
     modelProvider: options?.modelProvider,
