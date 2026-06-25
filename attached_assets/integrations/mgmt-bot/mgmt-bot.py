@@ -9,14 +9,14 @@ the gateway is completely down.
 COMMANDS
 --------
   /status       — current provider, service state, Pi uptime
-  /codex        — switch to Codex Web 5.4 full (default) and restart gateway
-  /codex55      — switch to Codex Web 5.5 full and restart gateway
-  /codexmini    — switch to Codex Web 5.3 mini and restart gateway
-  /codexmini54  — switch to Codex Web 5.4 mini and restart gateway
-  /anthropic    — switch to Anthropic Sonnet 4.5 and restart gateway
-  /sonnet       — switch to Anthropic Sonnet 4.6 and restart gateway
-  /opus         — switch to Anthropic Opus 4.6 and restart gateway
-  /openai       — switch to OpenAI GPT-5 mini and restart gateway
+  /codex54full  — switch to Codex Web 5.4 full (default) and restart gateway
+  /codex55full  — switch to Codex Web 5.5 full and restart gateway
+  /codex53mini  — switch to Codex Web 5.3 mini and restart gateway
+  /codex54mini  — switch to Codex Web 5.4 mini and restart gateway
+  /sonnet45     — switch to Anthropic Sonnet 4.5 and restart gateway
+  /sonnet46     — switch to Anthropic Sonnet 4.6 and restart gateway
+  /opus46       — switch to Anthropic Opus 4.6 and restart gateway
+  /gpt5mini     — switch to OpenAI GPT-5 mini and restart gateway
   /gpt54        — switch to OpenAI GPT-5.4 and restart gateway
   /restart      — restart the L1 gateway service
   /pull         — git pull latest from GitHub (does NOT reinstall)
@@ -44,14 +44,14 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
   MGMT_BOT_CHAT_ID          Your Telegram chat/user ID — only this ID is obeyed
   All model IDs below are OPTIONAL — each command has a built-in default and
   works out of the box. Set a var only to override the exact model ID string.
-  OPENCLAW_CODEX_MODEL        override /codex,       default openai-codex/gpt-5.4
-  OPENCLAW_CODEX55_MODEL      override /codex55,     default openai-codex/gpt-5.5
-  OPENCLAW_CODEX_MINI_MODEL   override /codexmini,   default openai-codex/gpt-5.3-codex
-  OPENCLAW_CODEX_MINI54_MODEL override /codexmini54, default openai-codex/gpt-5.4-codex
-  OPENCLAW_ANTHROPIC_MODEL    override /anthropic,   default anthropic/claude-sonnet-4-5
-  OPENCLAW_SONNET_MODEL       override /sonnet,      default anthropic/claude-sonnet-4-6
-  OPENCLAW_OPUS_MODEL         override /opus,        default anthropic/claude-opus-4-6
-  OPENCLAW_OPENAI_MODEL       override /openai,      default openai/gpt-5-mini-2025-08-07
+  OPENCLAW_CODEX_MODEL        override /codex54full, default openai-codex/gpt-5.4
+  OPENCLAW_CODEX55_MODEL      override /codex55full, default openai-codex/gpt-5.5
+  OPENCLAW_CODEX_MINI_MODEL   override /codex53mini, default openai-codex/gpt-5.3-codex
+  OPENCLAW_CODEX_MINI54_MODEL override /codex54mini, default openai-codex/gpt-5.4-codex
+  OPENCLAW_ANTHROPIC_MODEL    override /sonnet45,    default anthropic/claude-sonnet-4-5
+  OPENCLAW_SONNET_MODEL       override /sonnet46,    default anthropic/claude-sonnet-4-6
+  OPENCLAW_OPUS_MODEL         override /opus46,      default anthropic/claude-opus-4-6
+  OPENCLAW_OPENAI_MODEL       override /gpt5mini,    default openai/gpt-5-mini-2025-08-07
   OPENCLAW_GPT54_MODEL        override /gpt54,       default openai/gpt-5.4
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
@@ -494,16 +494,16 @@ def cmd_status(token: str, chat_id: str) -> None:
 #   label          : human-friendly name shown in Telegram replies
 MODEL_REGISTRY = {
     # --- Codex Web (OAuth, no API key). gpt-5.4 is the daily-reset default. ---
-    "codex":       ("OPENCLAW_CODEX_MODEL",        "openai-codex/gpt-5.4",         None,            "openai-codex", "Codex 5.4 (full)"),
-    "codex55":     ("OPENCLAW_CODEX55_MODEL",      "openai-codex/gpt-5.5",         None,            "openai-codex", "Codex 5.5 (full)"),
-    "codexmini":   ("OPENCLAW_CODEX_MINI_MODEL",   "openai-codex/gpt-5.3-codex",   None,            "openai-codex", "Codex 5.3 mini"),
-    "codexmini54": ("OPENCLAW_CODEX_MINI54_MODEL", "openai-codex/gpt-5.4-codex",   None,            "openai-codex", "Codex 5.4 mini"),
+    "codex54full": ("OPENCLAW_CODEX_MODEL",        "openai-codex/gpt-5.4",         None,            "openai-codex", "Codex 5.4 (full)"),
+    "codex55full": ("OPENCLAW_CODEX55_MODEL",      "openai-codex/gpt-5.5",         None,            "openai-codex", "Codex 5.5 (full)"),
+    "codex53mini": ("OPENCLAW_CODEX_MINI_MODEL",   "openai-codex/gpt-5.3-codex",   None,            "openai-codex", "Codex 5.3 mini"),
+    "codex54mini": ("OPENCLAW_CODEX_MINI54_MODEL", "openai-codex/gpt-5.4-codex",   None,            "openai-codex", "Codex 5.4 mini"),
     # --- Anthropic API (auth handled internally by the gateway) ---
-    "anthropic":   ("OPENCLAW_ANTHROPIC_MODEL",    "anthropic/claude-sonnet-4-5",  None,            "anthropic",    "Anthropic Sonnet 4.5"),
-    "sonnet":      ("OPENCLAW_SONNET_MODEL",       "anthropic/claude-sonnet-4-6",  None,            "anthropic",    "Anthropic Sonnet 4.6"),
-    "opus":        ("OPENCLAW_OPUS_MODEL",         "anthropic/claude-opus-4-6",    None,            "anthropic",    "Anthropic Opus 4.6"),
+    "sonnet45":    ("OPENCLAW_ANTHROPIC_MODEL",    "anthropic/claude-sonnet-4-5",  None,            "anthropic",    "Anthropic Sonnet 4.5"),
+    "sonnet46":    ("OPENCLAW_SONNET_MODEL",       "anthropic/claude-sonnet-4-6",  None,            "anthropic",    "Anthropic Sonnet 4.6"),
+    "opus46":      ("OPENCLAW_OPUS_MODEL",         "anthropic/claude-opus-4-6",    None,            "anthropic",    "Anthropic Opus 4.6"),
     # --- OpenAI API (needs OPENAI_API_KEY) ---
-    "openai":      ("OPENCLAW_OPENAI_MODEL",       "openai/gpt-5-mini-2025-08-07", "OPENAI_API_KEY", "openai",      "OpenAI GPT-5 mini"),
+    "gpt5mini":    ("OPENCLAW_OPENAI_MODEL",       "openai/gpt-5-mini-2025-08-07", "OPENAI_API_KEY", "openai",      "OpenAI GPT-5 mini"),
     "gpt54":       ("OPENCLAW_GPT54_MODEL",        "openai/gpt-5.4",               "OPENAI_API_KEY", "openai",      "OpenAI GPT-5.4"),
 }
 
@@ -2153,14 +2153,14 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/logs — recent errors across all poller logs\n"
          "/disk — disk space on the Pi\n\n"
          "*Provider (model switch)*\n"
-         "/codex — Codex 5.4 full [default] + restart\n"
-         "/codex55 — Codex 5.5 full + restart\n"
-         "/codexmini — Codex 5.3 mini + restart\n"
-         "/codexmini54 — Codex 5.4 mini + restart\n"
-         "/anthropic — Anthropic Sonnet 4.5 + restart\n"
-         "/sonnet — Anthropic Sonnet 4.6 + restart\n"
-         "/opus — Anthropic Opus 4.6 + restart\n"
-         "/openai — OpenAI GPT-5 mini + restart\n"
+         "/codex54full — Codex 5.4 full [default] + restart\n"
+         "/codex55full — Codex 5.5 full + restart\n"
+         "/codex53mini — Codex 5.3 mini + restart\n"
+         "/codex54mini — Codex 5.4 mini + restart\n"
+         "/sonnet45 — Anthropic Sonnet 4.5 + restart\n"
+         "/sonnet46 — Anthropic Sonnet 4.6 + restart\n"
+         "/opus46 — Anthropic Opus 4.6 + restart\n"
+         "/gpt5mini — OpenAI GPT-5 mini + restart\n"
          "/gpt54 — OpenAI GPT-5.4 + restart\n"
          "/codex_reauth — start remote phone-first Codex OAuth re-auth\n\n"
          "*Services*\n"
@@ -2219,10 +2219,15 @@ MENU_COMMANDS = [
     ("install",   "Git pull + run install script"),
     ("reboot",    "Reboot the Pi (refused if not safe)"),
     # Model switching
-    ("openai",    "Switch to OpenAI API model"),
-    ("anthropic", "Switch to Anthropic API model"),
-    ("codex",     "Switch to Codex Web gpt-5.4 (full)"),
-    ("codexmini", "Switch to Codex Web gpt-5.3-codex (mini)"),
+    ("codex54full", "Switch to Codex Web 5.4 full (default)"),
+    ("codex55full", "Switch to Codex Web 5.5 full"),
+    ("codex53mini", "Switch to Codex Web 5.3 mini"),
+    ("codex54mini", "Switch to Codex Web 5.4 mini"),
+    ("sonnet45",    "Switch to Anthropic Sonnet 4.5"),
+    ("sonnet46",    "Switch to Anthropic Sonnet 4.6"),
+    ("opus46",      "Switch to Anthropic Opus 4.6"),
+    ("gpt5mini",    "Switch to OpenAI GPT-5 mini"),
+    ("gpt54",       "Switch to OpenAI GPT-5.4"),
     ("codex_reauth", "Start remote phone-first Codex OAuth re-auth"),
     # Integrations
     ("garmin",       "Manually trigger the Garmin poller"),
@@ -2625,14 +2630,14 @@ def _check_dev_triggers(token: str, chat_id: str) -> None:
 
 COMMANDS = {
     "/status":     cmd_status,
-    "/openai":     lambda t, c: cmd_switch(t, c, "openai"),
-    "/anthropic":  lambda t, c: cmd_switch(t, c, "anthropic"),
-    "/codex":      lambda t, c: cmd_switch(t, c, "codex"),
-    "/codex55":      lambda t, c: cmd_switch(t, c, "codex55"),
-    "/codexmini":  lambda t, c: cmd_switch(t, c, "codexmini"),
-    "/codexmini54":  lambda t, c: cmd_switch(t, c, "codexmini54"),
-    "/sonnet":       lambda t, c: cmd_switch(t, c, "sonnet"),
-    "/opus":         lambda t, c: cmd_switch(t, c, "opus"),
+    "/codex54full":  lambda t, c: cmd_switch(t, c, "codex54full"),
+    "/codex55full":  lambda t, c: cmd_switch(t, c, "codex55full"),
+    "/codex53mini":  lambda t, c: cmd_switch(t, c, "codex53mini"),
+    "/codex54mini":  lambda t, c: cmd_switch(t, c, "codex54mini"),
+    "/sonnet45":     lambda t, c: cmd_switch(t, c, "sonnet45"),
+    "/sonnet46":     lambda t, c: cmd_switch(t, c, "sonnet46"),
+    "/opus46":       lambda t, c: cmd_switch(t, c, "opus46"),
+    "/gpt5mini":     lambda t, c: cmd_switch(t, c, "gpt5mini"),
     "/gpt54":        lambda t, c: cmd_switch(t, c, "gpt54"),
     "/codex-reauth": cmd_codex_reauth,
     "/codex_reauth": cmd_codex_reauth,

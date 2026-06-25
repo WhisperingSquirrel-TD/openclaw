@@ -973,7 +973,7 @@ fi
 
 # ── Daily provider reset (04:00) ──────────────────────────────────────────────
 # Resets L1 to the configured Codex Web model at 4am each day.
-# User can switch during the day via /openai, /anthropic, /codex, /codexmini.
+# User can switch during the day via /codex54full, /sonnet46, /gpt54, etc.
 RESET_SRC="$HOME/openclaw/attached_assets/integrations/provider-switch/daily-reset.py"
 RESET_DST="$HOME/.openclaw/integrations/provider-switch/daily-reset.py"
 RESET_LOG="$HOME/.openclaw/workspace/memory/daily-reset.log"
@@ -1367,7 +1367,7 @@ fi
 # OpenClaw Management Bot
 # Separate Telegram bot that intercepts system commands BEFORE the LLM.
 # Works even when OpenAI is rate-limited or the gateway is completely down.
-# Commands: /status /openai /anthropic /restart /pull /reboot
+# Commands: /status /codex54full /sonnet46 /gpt54 /restart /pull /reboot
 # Requires a SECOND Telegram bot token (separate from the main OpenClaw bot).
 # ---------------------------------------------------------------------------
 MGMT_BOT_SRC="$HOME/openclaw/attached_assets/integrations/mgmt-bot/mgmt-bot.py"
@@ -1997,10 +1997,15 @@ echo "      /status    — model, gateway state, uptime, reboot safety"
 echo "      /health    — run system health check now"
 echo "      /logs      — recent errors across all poller logs"
 echo "      /disk      — disk space on the Pi"
-echo "      /openai    — switch to OpenAI model + restart gateway"
-echo "      /anthropic — switch to Anthropic model + restart gateway"
-echo "      /codex     — switch to Codex Web gpt-5.4 (full) + restart gateway"
-echo "      /codexmini — switch to Codex Web gpt-5.3-codex (mini) + restart"
+echo "      /codex54full — switch to Codex Web 5.4 full (default) + restart gateway"
+echo "      /codex55full — switch to Codex Web 5.5 full + restart gateway"
+echo "      /codex53mini — switch to Codex Web 5.3 mini + restart gateway"
+echo "      /codex54mini — switch to Codex Web 5.4 mini + restart gateway"
+echo "      /sonnet45  — switch to Anthropic Sonnet 4.5 + restart gateway"
+echo "      /sonnet46  — switch to Anthropic Sonnet 4.6 + restart gateway"
+echo "      /opus46    — switch to Anthropic Opus 4.6 + restart gateway"
+echo "      /gpt5mini  — switch to OpenAI GPT-5 mini + restart gateway"
+echo "      /gpt54     — switch to OpenAI GPT-5.4 + restart gateway"
 echo "      /restart   — restart L1 gateway"
 echo "      /garmin    — manually trigger Garmin poller"
 echo "      /pull      — git pull latest from GitHub"
@@ -2107,7 +2112,7 @@ fi
 #      MagicDNS (100.100.100.100) as the ONLY resolver. If tailscaled hiccups,
 #      ALL name resolution fails (Errno -3 "Temporary failure in name
 #      resolution") and the mgmt-bot can't reach api.telegram.org, so Telegram
-#      commands (/openai, /anthropic, …) silently stop responding. Dropping
+#      commands (/codex54full, /sonnet46, …) silently stop responding. Dropping
 #      MagicDNS can affect *.ts.net resolution (e.g. the WCP tunnel), so the
 #      automatic fix is opt-in: set OPENCLAW_TAILSCALE_DISABLE_DNS=1 in
 #      ~/.openclaw/.env. Otherwise we just warn with the zero-tradeoff
