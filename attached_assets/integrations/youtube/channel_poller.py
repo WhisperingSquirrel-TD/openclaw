@@ -203,6 +203,20 @@ def load_state() -> dict:
             data.setdefault("pending_video_ids", [])
             data.setdefault("pending_batches", [])
             data.setdefault("pending_summary_items", [])
+            # De-duplicate any queued summary items by video_id (keep first seen).
+            # Older state files may contain repeated entries for the same video from
+            # the pre-fix duplicate-capture bug; collapse them so the next batch does
+            # not emit one notification per duplicate.
+            seen_ids: set[str] = set()
+            deduped_items = []
+            for it in data["pending_summary_items"]:
+                vid = it.get("video_id")
+                if vid and vid in seen_ids:
+                    continue
+                if vid:
+                    seen_ids.add(vid)
+                deduped_items.append(it)
+            data["pending_summary_items"] = deduped_items
             return data
     except Exception as e:
         log(f"WARNING: Could not read state: {e} — starting fresh")
@@ -1275,7 +1289,16 @@ def poll_channels(state: dict, sync: bool = False) -> int:
 
     processed_ids = set(state.get("processed_ids", []))
     pending_ids   = set(state.get("pending_video_ids", []))
-    claimed_ids   = processed_ids | pending_ids  # don't re-process either set
+    # Also treat anything already queued for a (not-yet-submitted) batch as claimed,
+    # so a video captured on a previous run is never re-captured/re-notified even if
+    # pending_video_ids was not persisted for some reason.
+    queued_summary_ids = {
+        it.get("video_id")
+        for it in state.get("pending_summary_items", [])
+        if it.get("video_id")
+    }
+    pending_ids  |= queued_summary_ids
+    claimed_ids   = processed_ids | pending_ids  # don't re-process any of these
     cutoff        = datetime.now(timezone.utc) - timedelta(days=INITIAL_LOOKBACK_DAYS)
 
     new_count    = 0
@@ -1386,10 +1409,15 @@ def poll_channels(state: dict, sync: bool = False) -> int:
                 "videos":       pending_summary_items,
             })
             state["pending_summary_items"] = []
-            state["pending_video_ids"] = list(pending_ids)
             log("  Batch queued — summaries will arrive on a later poll run")
         else:
             log("  Batch submit failed — leaving queued items in pending_summary_items for retry")
+
+    # Always persist the claimed (pending) video IDs, whether or not a batch was
+    # submitted this run. Otherwise a video captured on a quiet channel (where the
+    # batch threshold isn't met) is never recorded as pending, so the next cron run
+    # re-captures and re-notifies the same video — the duplicate-notification bug.
+    state["pending_video_ids"] = list(pending_ids)
 
     # Cap processed_ids to avoid unbounded growth (keep last 5000)
     ids_list = list(processed_ids)
