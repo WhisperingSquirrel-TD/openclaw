@@ -490,15 +490,6 @@ Entity-by-entity CRM normalisation using the Anthropic batch API (50% cost savin
 | `~/.openclaw/workspace/memory/poll-assistant-log.txt` | Assistant poller — check for auth errors          |
 | `~/.openclaw/workspace/memory/poll-gmail-log.txt`     | Gmail poller — check for `invalid_grant`          |
 
-### Systemd services
-
-| Service                            | Command                                                                    |
-| ---------------------------------- | -------------------------------------------------------------------------- |
-| `openclaw-email-microsoft.service` | `systemctl --user restart openclaw-email-microsoft.service`                |
-| `openclaw-email-assistant.service` | `systemctl --user restart openclaw-email-assistant.service`                |
-| `openclaw-email-gmail.service`     | `systemctl --user restart openclaw-email-gmail.service`                    |
-| `openclaw-gateway.service`         | `systemctl --user restart openclaw-gateway.service` — restarts main L1 app |
-
 ### Security & config
 
 | File                                     | Purpose                                                                   |
@@ -621,8 +612,6 @@ Tavily is integrated as a **native `web_search` provider** in OpenClaw's built-i
 | ------------------------------------------- | -------------------------------------------------------------------- |
 | `~/.openclaw/oauth/google/credentials.json` | Google OAuth app credentials (shared with Tasks + older Gmail setup) |
 | `~/.openclaw/oauth/google/tasks-token.json` | Google Tasks OAuth token (separate from Gmail token)                 |
-
----
 
 ---
 
@@ -757,59 +746,15 @@ python3 -c "import json; json.load(open('/home/tomdean88/.openclaw/openclaw.json
 
 ### Gateway crash-loop: "Unknown model: export VAR=value"
 
-**Symptom:** Telegram mgmt-bot shows repeated cycles of:
-
-```
-✅ New session started · model: export openclaw_codex_mini_model=openai-codex/gpt-5.3-codex
-⚠️ Agent failed before reply: Unknown model: export openclaw_codex_mini_model=openai-codex/gpt-5.3-codex
-```
-
-**Root cause:** A shell env-var assignment line (`export OPENCLAW_CODEX_MINI_MODEL=openai-codex/gpt-5.3-codex`) was stored verbatim as the primary model string in `openclaw.json`. The gateway reads this at startup, cannot resolve the model, crashes, auto-restarts, and loops indefinitely.
-
-**Why it happened:** An old version of `cmd_switch` in mgmt-bot read the raw env var value (which in some `.env` formats is the full `export VAR=value` line) and wrote it straight into the config without stripping the prefix.
-
-**Defenses now in place (as of 2026-04-18):**
-
-1. `cmd_switch` in mgmt-bot strips `export VAR=` prefix and trailing `.` before writing any model string to `openclaw.json`
-2. The install script's model migration step (`_clean_model_string`) strips corruption from every string in the entire config tree on every `bash ~/install-forked-openclaw.sh` run
-3. `daily-reset.py` sanitizes on both read (`_get_current_model`) and write (`_set_model`) paths
-
-**Fix when you see this:**
-
-```bash
-cd ~/openclaw && git pull && bash ~/install-forked-openclaw.sh
-```
-
-The install script detects and strips the corrupted value, writes the correct model, and restarts the gateway. If the install script itself is too old to have the fix, the `git pull` step fetches the self-updating script which will re-exec the newer version automatically.
-
-**Prevention:** Never write raw env var values from `.env` into `openclaw.json` without stripping the `export VAR=` prefix. The `_load_dotenv()` helper in each integration already does this correctly — the bug only appeared when a different code path read from `os.environ` and the shell line had leaked in a different way.
+**Fixed in source (2026-04-18).** Cause: a raw `export VAR=value` line leaked from `.env` and was written verbatim as the model string in `openclaw.json`, so the gateway couldn't resolve the model and crash-looped. Now defended in three places: `cmd_switch` (mgmt-bot) strips the `export VAR=`/trailing-`.`, the install script's `_clean_model_string` sanitizes the whole config tree on every run, and `daily-reset.py` sanitizes on read+write. If you ever see it, run `cd ~/openclaw && git pull && bash ~/install-forked-openclaw.sh` — install strips the bad value and restarts. **Rule:** never write a raw `.env` value into `openclaw.json` without stripping the `export VAR=` prefix.
 
 ---
-
-### Source fixes in place (git pull safe as of 2026-04-22)
-
-The following bugs were fixed directly on the Pi in previous sessions. They are now fixed **in source** in this repo so they survive `git pull && bash ~/install-forked-openclaw.sh`:
-
-| Fix | Source file | What was changed |
-|-----|-------------|-----------------|
-| `daily-reset.py` timeout crash | `attached_assets/integrations/provider-switch/daily-reset.py` | `l1-start.sh` call now wrapped in `try/except TimeoutExpired` — falls through to `systemctl --user` if start script takes >120s |
-| `daily-reset.py` not executable | `attached_assets/install-forked-openclaw.sh` | Added `chmod +x "$RESET_DST"` after symlink creation |
-| `web_search` blocked after reinstall | `attached_assets/install-forked-openclaw.sh` | Added `alsoAllow` block that idempotently inserts `youtube_transcript` and `web_search` into `tools.alsoAllow` in `openclaw.json` — coding profile blocks both by default |
-| Pi startup performance | `attached_assets/install-forked-openclaw.sh` | Idempotently writes `NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache` and `OPENCLAW_NO_RESPAWN=1` to `~/.openclaw/.env`; creates the cache dir |
-| Discord 400 on command registration | `src/discord/monitor/native-command.ts` | Added `sanitizeDiscordDescription()` guard — trims, truncates to 100 chars, falls back to `/<name> command` — applied to both command descriptions and every option description before sending to Discord API |
-| SharePoint housekeeping token path | `attached_assets/integrations/microsoft/sharepoint_housekeeping.py` + `attached_assets/install-forked-openclaw.sh` | Housekeeping script had hardcoded `integrations/microsoft/token-assistant.json` with no fallback; token lives at `integrations/microsoft-l1/token.json` (old path). Fixed: (1) script now uses `_resolve_token_file()` that tries all three candidate paths; (2) install script creates a symlink from old to new canonical path on reinstall |
-| QMD PATH + embedding config | `attached_assets/install-forked-openclaw.sh` | (1) Symlinks `~/.npm-packages/bin/qmd` → `/usr/local/bin/qmd` so systemd gateway service finds it; (2) sets `memory.qmd.searchMode=vsearch`; (3) writes `agents.defaults.memorySearch` with `provider=ollama`, `model=nomic-embed-text` when nomic-embed-text is present in Ollama |
-
-After the next `bash ~/install-forked-openclaw.sh` these seven will be applied automatically. No manual Pi edits needed.
 
 ### Outstanding items requiring Pi access
 
 | Item | Status | Pi commands |
 |------|--------|-------------|
 | Desktop taskbar (LXPanel) | Unresolved — terminal and file-manager buttons disappeared after reboot | `lxpanelctl restart` to reload panel; if buttons still missing: right-click panel → Add/Remove Panel Items → add Application Launch Bar → add lxterminal and pcmanfm |
-| Ollama local LLM | **RESOLVED 2026-04-22** — `llama3.2:3b` (2GB) pulled and verified working; `ollama/llama3.2:3b` added to `agents.defaults.model.fallbacks` in `openclaw.json`; Ollama running as systemd service (`sudo systemctl enable/start ollama`). Tested: responds correctly at ~2 tok/s CPU-only. gemma4:e2b removed (7.2GB exceeded 6.1GB available RAM). | No further action needed |
-| Ollama auth "No API key found" | **RESOLVED 2026-04-27** — see full playbook below | `~/.config/environment.d/openclaw-ollama.conf` with `OLLAMA_API_KEY=ollama` |
-| Discord "28 commands missing descriptions" 400 | **Root cause confirmed 2026-04-22** — workspace skill commands with empty SKILL.md descriptions registered as Discord slash commands with empty description field. Defensive `sanitizeDiscordDescription()` guard added to source — will suppress on next `git pull && bash ~/install-forked-openclaw.sh`. Recent errors (12:49, 13:10) are separate network issue (`EAI_AGAIN` DNS, self-resolving). | Run reinstall to apply guard |
 | `apply_patch`/`cron` alsoAllow warnings | Baked into OpenClaw's `coding` profile — not our config | Cannot fix without a plugin override; warnings are cosmetic |
 
 ---
@@ -920,76 +865,24 @@ Fork base: `d911b02` (2026-02-27). Last synced: **2026-03-08** (upstream commit 
 
 ### Merge details for conflict files
 
-These files had both upstream refactoring and our security customizations. In each case, upstream was used as the base and our customizations were carefully re-applied:
+The 2026-03-08 sync had 5 files carrying both upstream refactors and our security customizations. Upstream was used as the base and our customizations re-applied. On any future sync, preserve these per file:
 
-1. **`src/agents/bash-tools.exec-host-gateway.ts`** — Upstream refactored approval context into shared helpers (`resolveExecHostApprovalContext`, `createDefaultExecApprovalRequestContext`, `resolveBaseExecApprovalDecision`, `resolveApprovalDecisionOrUndefined` from `bash-tools.exec-host-shared.js`, plus `buildExecApprovalRequesterContext`, `buildExecApprovalTurnSourceContext`, `registerExecApprovalRequestForHostOrThrow` from `bash-tools.exec-approval-request.js`). Our denylist, TOTP gate (`requestExecApproval` from `trust-gate.ts`), and obfuscation hard-block all run BEFORE the upstream approval context resolution.
+- **`src/agents/bash-tools.exec-host-gateway.ts`** — our denylist, TOTP gate (`requestExecApproval`), and obfuscation hard-block must run BEFORE upstream's approval-context resolution.
+- **`src/web/outbound.ts`** — keep `assertNotWatchMode(account)` guard + audit logging on block (upstream added a `cfg` param).
+- **`src/web/auto-reply/monitor.ts`** — keep watch-mode routing, `appendWatchTranscript`, read-receipt/debounce suppression.
+- **`src/web/inbound/monitor.ts`** — keep presence/access-control/read-receipt/composing bypasses and `sendMedia`/`reply` blocking.
+- **`src/gateway/node-command-policy.ts`** — keep `resolveChannelDenyCommands`.
 
-2. **`src/web/outbound.ts`** — Upstream added `cfg` parameter to all outbound functions and switched to account resolution via `resolveWhatsAppAccount()`. Our `assertNotWatchMode(account)` guard and audit logging on block preserved.
+Also our addition: `ChannelMode = "active" | "watch"` + `mode` field on `ResolvedWhatsAppAccount` (`src/web/accounts.ts`) and in `WhatsAppSharedSchema` (`zod-schema.providers-whatsapp.ts`) — upstream keeps removing these.
 
-3. **`src/web/auto-reply/monitor.ts`** — Upstream added `createConnectedChannelStatusPatch` and `resolveWhatsAppMediaMaxBytes`. Our watch mode routing (`isWatchMode` check), `appendWatchTranscript` for message capture, and conditional read receipt/debounce suppression preserved. The old `DEFAULT_WEB_MEDIA_BYTES` constant import was replaced with `resolveWhatsAppMediaMaxBytes(cfg)`.
+### Durable build warnings (must not regress)
 
-4. **`src/web/inbound/monitor.ts`** — Upstream refactored into helper functions (`normalizeInboundMessage`, `enrichInboundMessage`, `enqueueInboundMessage`). Our watch mode features preserved: presence update bypass, access control bypass for all senders, read receipt suppression, composing indicator suppression, and `sendMedia`/`reply` function blocking.
+- **`tsconfig.plugin-sdk.dts.json` must keep `noEmitOnError: false`** (upstream defaults to `true`) — otherwise `build:plugin-sdk:dts` fails on the Pi due to pre-existing upstream `tsc` errors (these are `tsc`-only; the `tsdown` build is unaffected).
+- **`src/plugin-sdk/root-alias.cjs` must exist** — CJS-to-ESM shim for legacy plugin `require()`; not captured by upstream tarballs.
+- **`resolvePinnedMainDmOwnerFromAllowlist` in `src/security/dm-policy-shared.ts`** — re-implemented by us; upstream removed it but every channel handler still imports it. Without it, all inbound DM processing crashes with `ReferenceError`.
+- **`testRegexWithBoundedInput` in `src/security/safe-regex.ts`** — still missing upstream; only used by Discord exec-approvals. Will throw at runtime if the Discord channel is enabled.
 
-5. **`src/gateway/node-command-policy.ts`** — Upstream added `PlatformId` type system and `normalizeDeviceMetadataForPolicy`. Our `resolveChannelDenyCommands` function preserved.
-
-### `ChannelMode` type (our addition)
-
-Upstream removed the `ChannelMode` type and `mode` field from `src/web/accounts.ts` — these are our additions for watch mode. Re-added in two places:
-
-- **Runtime type**: `export type ChannelMode = "active" | "watch"` and `mode?: ChannelMode` on `ResolvedWhatsAppAccount` in `src/web/accounts.ts`, with safe cast from config via `resolveWhatsAppMode()` returning `"active"` as default
-- **Config schema**: `mode: z.enum(["active", "watch"]).optional().default("active")` added to `WhatsAppSharedSchema` in `src/config/zod-schema.providers-whatsapp.ts` — inherited by both `WhatsAppConfigSchema` (root level) and `WhatsAppAccountSchema` (per-account). Required because both schemas use `.strict()` which rejects unknown keys.
-
-### Pre-existing upstream TypeScript errors
-
-These exist in upstream code (not our files). They cause warnings during `tsc` but don't affect the `tsdown` build:
-
-- `safe-regex.ts` — `testRegexWithBoundedInput` missing export (referenced by Discord exec-approvals, exec-approval-forwarder). Only affects Discord channel — harmless for our setup.
-- `rate-limiter.ts` — `maxMessagesPerMinute`/`maxMessagesPerHour` on Discord config
-- `vite.config.ts` — `allowedHosts` type mismatch
-- Various `TS7006` implicit-any errors in `compaction.ts`, `pi-embedded-helpers`, `pi-embedded-runner`, `pdf-tool.helpers.ts`, `commands-core.ts`, `get-reply-inline-actions.ts`, `memory-flush.ts`, `post-compaction-context.ts`, `heartbeat-runner.ts`, `process-message.ts`
-
-**Previously upstream errors that we fixed:**
-
-- `dm-policy-shared.ts` — `resolvePinnedMainDmOwnerFromAllowlist` was removed by upstream but still imported by all channel handlers. We re-implemented it (see "Recreated/restored upstream exports" below).
-
-**Build fix**: `tsconfig.plugin-sdk.dts.json` has `noEmitOnError: false` (upstream has `true`) so the `build:plugin-sdk:dts` step emits declarations despite these upstream errors. Without this, the build fails on the Pi.
-
-### Recreated/restored upstream exports
-
-- `src/plugin-sdk/root-alias.cjs` — CJS-to-ESM proxy shim for legacy plugin `require()` support. Was missing after upstream sync (`.cjs` files not captured in tarball extraction). Recreated based on test expectations and upstream plugin-sdk loader behavior. Inlines `emptyPluginConfigSchema` for fast access; lazily loads full ESM index via `require("./index.js")` (works in Node 22.12+ which supports `require()` of ESM modules).
-- `resolvePinnedMainDmOwnerFromAllowlist` in `src/security/dm-policy-shared.ts` — Function removed by upstream refactor but still imported by Telegram, WhatsApp, Discord, Signal, Slack, iMessage, and Line channel handlers. Without it, all inbound DM message processing crashes with `ReferenceError`. Re-implemented: returns the single pinned DM owner from the allowlist when `dmScope` is `"main"` and exactly one non-wildcard entry exists; returns `null` otherwise.
-- `testRegexWithBoundedInput` in `src/security/safe-regex.ts` — Still missing (only used by Discord exec-approvals and exec-approval-forwarder, neither of which we use). Will cause runtime error if Discord channel is enabled.
-
-## Custom Files Index
-
-All files unique to our fork (not present in upstream):
-
-- `src/infra/totp/totp.ts` — TOTP core
-- `src/infra/totp/totp-setup.ts` — TOTP secret management
-- `src/infra/totp/totp-session.ts` — Approval window manager
-- `src/infra/outbound/trust-gate.ts` — Trust gate (TOTP + socket modes)
-- `src/infra/outbound/audit-log.ts` — Outbound audit logger
-- `src/infra/exec-obfuscation-detect.ts` — Exec obfuscation detector
-- `src/auto-reply/reply/commands-totp.ts` — Telegram TOTP commands
-- `src/web/watch-mode.ts` — Watch mode error/helper
-- `src/web/auto-reply/watch-transcript.ts` — Watch mode transcript writer
-- `src/web/auto-reply/watch-action-scanner.ts` — Reads watch transcript JSONL, tracks cursor, returns new messages for analysis
-- `src/web/auto-reply/watch-action-classifier.ts` — AI-powered action detection using cheap model (Haiku/4o-mini/Flash). Conversation-aware: considers full thread context so resolved actions aren't flagged
-- `src/web/auto-reply/watch-action-notify.ts` — Sends Telegram inline keyboard cards for detected actions
-- `src/web/auto-reply/watch-action-store.ts` — Pending action store (JSON file) for callback button handling
-- `src/web/auto-reply/watch-action-scheduler.ts` — Scan scheduler: event-driven (45s debounce after each message) + 2-min tick + 5-min interval throttle. Active 8am-10pm. Exports `triggerWatchActionScanDebounced()` called from `monitor.ts` on every new message.
-- `src/web/auto-reply/watch-action-google-tasks.ts` — Google Tasks integration. Device Authorization Flow (TV-style: user visits accounts.google.com/device and enters a code). Credentials at `~/.openclaw/oauth/google/credentials.json`, token at `~/.openclaw/oauth/google/tasks-token.json`. Shopping actions → "Shopping" task list (auto-created). Other actions → default task list.
-- `src/agents/soul-integrity.ts` — SOUL.md hash verification
-- `src/agents/soul-vault.ts` — Encrypted SOUL.md at rest
-- `attached_assets/install-forked-openclaw.sh` — Pi install/upgrade script (self-updating: re-execs from repo copy if newer)
-- `attached_assets/integrations/config-check/check.py` — Config drift detector: verifies exec.host=gateway, totpWindowMinutes=5, telegram.dmPolicy=allowlist, whatsapp.mode=watch. Logs to `~/.openclaw/workspace/memory/config-alerts.log`. Run automatically at end of install.
-- `attached_assets/integrations/docx-converter/convert.py` — Watches `~/.openclaw/media/inbound/` for .docx files, converts to .txt via LibreOffice headless. Logs to `workspace/memory/docx-conversions.log`.
-- `attached_assets/integrations/microsoft/poll.py` — Microsoft Graph email poller: inbox + sent items, per-contact state tracking in `last-seen-emails.md`, immediate alert file on new email from known contact, shorter poll interval for known contacts (2min vs 5min general). Auto-detects and converts MSAL token cache format. Handles 429 rate limiting with `Retry-After` backoff.
-- `attached_assets/integrations/google/gmail_poll.py` — Gmail email poller: identical guardrails to Microsoft poller (prompt-injection headers, known-contacts.txt filtering). Writes to `GMAIL_INBOX.md` / `GMAIL_EXTERNAL.md`. Uses Google OAuth2 (`gmail-credentials.json` + `gmail-token.json`).
-- `attached_assets/integrations/tavily/search.py` — Tavily web search. Reads `TAVILY_API_KEY` from `~/.openclaw/.env`. Supports `--max-results`, `--include-answer`, `--search-depth basic|advanced`, `--topic general|news`, `--raw-json`. Deployed to `~/.openclaw/integrations/tavily/search.py`.
-- `attached_assets/scripts/whatsapp_recent.sh` — Generates `~/.openclaw/workspace/WHATSAPP_RECENT.md` (last 48h, max 400 lines) from the full `WHATSAPP_LOG.md`. Cron every 15 min. L1 reads `WHATSAPP_RECENT.md`; full log stays untouched as archive. Deployed and cron-installed automatically.
-- `attached_assets/prospector/process_queue.sh` — Bounce/unsub queue processor. L1 appends email addresses to `~/prospector/pending_bounces.txt` or `~/prospector/pending_unsubs.txt` (plain file append, no exec/TOTP needed). Cron runs every 30 min and calls `python3 ~/prospector/manage.py bounce|unsub [email]` for each queued address, then clears the files. Logs to `~/prospector/logs/queue_processor.log`. Deployed and cron-installed automatically by install script.
-- `scripts/copy-plugin-manifests.mjs` — Copies `openclaw.plugin.json` from each `extensions/*/` source directory to the corresponding `dist/extensions/*/` output directory. Run as part of `pnpm build` and `build:strict-smoke`. Without this, the plugin loader cannot find plugins at startup.
+> Index of fork-unique files removed to save context — reconstruct from the repo with `git diff --name-only` against the upstream base, or read each file's header comment. The behavioral details for these live in the feature sections above (Security & Control Features, WhatsApp Watch Mode/Action Scanner, the integration runbooks).
 
 ## WhatsApp Watch Action Scanner
 
