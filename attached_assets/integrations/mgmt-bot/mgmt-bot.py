@@ -9,10 +9,15 @@ the gateway is completely down.
 COMMANDS
 --------
   /status       — current provider, service state, Pi uptime
-  /openai       — switch to OpenAI API model and restart gateway
-  /anthropic    — switch to Anthropic API model and restart gateway
-  /codex        — switch to Codex Web gpt-5.4 (full) and restart gateway
-  /codexmini    — switch to Codex Web gpt-5.3-codex (mini) and restart gateway
+  /codex        — switch to Codex Web 5.4 full (default) and restart gateway
+  /codex55      — switch to Codex Web 5.5 full and restart gateway
+  /codexmini    — switch to Codex Web 5.3 mini and restart gateway
+  /codexmini54  — switch to Codex Web 5.4 mini and restart gateway
+  /anthropic    — switch to Anthropic Sonnet 4.5 and restart gateway
+  /sonnet       — switch to Anthropic Sonnet 4.6 and restart gateway
+  /opus         — switch to Anthropic Opus 4.6 and restart gateway
+  /openai       — switch to OpenAI GPT-5 mini and restart gateway
+  /gpt54        — switch to OpenAI GPT-5.4 and restart gateway
   /restart      — restart the L1 gateway service
   /pull         — git pull latest from GitHub (does NOT reinstall)
   /reboot       — reboot the Pi (refused if auto-start safety check fails)
@@ -37,10 +42,17 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
                             (create a SECOND bot via BotFather — separate from the
                             main OpenClaw bot so the two don't conflict)
   MGMT_BOT_CHAT_ID          Your Telegram chat/user ID — only this ID is obeyed
-  OPENCLAW_OPENAI_MODEL     Model ID for OpenAI API, e.g. openai/gpt-5-mini-2025-08-07
-  OPENCLAW_ANTHROPIC_MODEL  Model ID for Anthropic API, e.g. anthropic/claude-sonnet-4-5
-  OPENCLAW_CODEX_MODEL      Model ID for /codex command, e.g. openai-codex/gpt-5.4
-  OPENCLAW_CODEX_MINI_MODEL Model ID for /codexmini command, e.g. openai-codex/gpt-5.3-codex
+  All model IDs below are OPTIONAL — each command has a built-in default and
+  works out of the box. Set a var only to override the exact model ID string.
+  OPENCLAW_CODEX_MODEL        override /codex,       default openai-codex/gpt-5.4
+  OPENCLAW_CODEX55_MODEL      override /codex55,     default openai-codex/gpt-5.5
+  OPENCLAW_CODEX_MINI_MODEL   override /codexmini,   default openai-codex/gpt-5.3-codex
+  OPENCLAW_CODEX_MINI54_MODEL override /codexmini54, default openai-codex/gpt-5.4-codex
+  OPENCLAW_ANTHROPIC_MODEL    override /anthropic,   default anthropic/claude-sonnet-4-5
+  OPENCLAW_SONNET_MODEL       override /sonnet,      default anthropic/claude-sonnet-4-6
+  OPENCLAW_OPUS_MODEL         override /opus,        default anthropic/claude-opus-4-6
+  OPENCLAW_OPENAI_MODEL       override /openai,      default openai/gpt-5-mini-2025-08-07
+  OPENCLAW_GPT54_MODEL        override /gpt54,       default openai/gpt-5.4
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
 OPTIONAL ENV VARS
@@ -472,54 +484,57 @@ def cmd_status(token: str, chat_id: str) -> None:
          f"🔄 Daily reset: {reset_info}")
 
 
-def cmd_switch(token: str, chat_id: str, provider: str) -> None:
-    model_key = {
-        "openai":     "OPENCLAW_OPENAI_MODEL",
-        "anthropic":  "OPENCLAW_ANTHROPIC_MODEL",
-        "codex":      "OPENCLAW_CODEX_MODEL",
-        "codexmini":  "OPENCLAW_CODEX_MINI_MODEL",
-    }.get(provider, "OPENCLAW_OPENAI_MODEL")
+# Model registry — every mgmt-bot model command maps to one entry here.
+#   env_var        : ~/.openclaw/.env override for the exact model ID string
+#                    (lets you correct a model name without editing this file)
+#   default_model  : used when env_var is not set — works out of the box
+#   api_key_var    : API key that MUST exist in .env before switching
+#                    (None = OAuth / gateway-managed auth, no key needed)
+#   gateway_prefix : provider prefix added to a bare model ID
+#   label          : human-friendly name shown in Telegram replies
+MODEL_REGISTRY = {
+    # --- Codex Web (OAuth, no API key). gpt-5.4 is the daily-reset default. ---
+    "codex":       ("OPENCLAW_CODEX_MODEL",        "openai-codex/gpt-5.4",         None,            "openai-codex", "Codex 5.4 (full)"),
+    "codex55":     ("OPENCLAW_CODEX55_MODEL",      "openai-codex/gpt-5.5",         None,            "openai-codex", "Codex 5.5 (full)"),
+    "codexmini":   ("OPENCLAW_CODEX_MINI_MODEL",   "openai-codex/gpt-5.3-codex",   None,            "openai-codex", "Codex 5.3 mini"),
+    "codexmini54": ("OPENCLAW_CODEX_MINI54_MODEL", "openai-codex/gpt-5.4-codex",   None,            "openai-codex", "Codex 5.4 mini"),
+    # --- Anthropic API (auth handled internally by the gateway) ---
+    "anthropic":   ("OPENCLAW_ANTHROPIC_MODEL",    "anthropic/claude-sonnet-4-5",  None,            "anthropic",    "Anthropic Sonnet 4.5"),
+    "sonnet":      ("OPENCLAW_SONNET_MODEL",       "anthropic/claude-sonnet-4-6",  None,            "anthropic",    "Anthropic Sonnet 4.6"),
+    "opus":        ("OPENCLAW_OPUS_MODEL",         "anthropic/claude-opus-4-6",    None,            "anthropic",    "Anthropic Opus 4.6"),
+    # --- OpenAI API (needs OPENAI_API_KEY) ---
+    "openai":      ("OPENCLAW_OPENAI_MODEL",       "openai/gpt-5-mini-2025-08-07", "OPENAI_API_KEY", "openai",      "OpenAI GPT-5 mini"),
+    "gpt54":       ("OPENCLAW_GPT54_MODEL",        "openai/gpt-5.4",               "OPENAI_API_KEY", "openai",      "OpenAI GPT-5.4"),
+}
 
-    # Default values if env var not explicitly set. openai/anthropic are
-    # included so /openai and /anthropic work out of the box like /codex,
-    # without requiring the user to hand-edit ~/.openclaw/.env first.
-    model_defaults = {
-        "openai":    "openai/gpt-5-mini-2025-08-07",
-        "anthropic": "anthropic/claude-sonnet-4-5",
-        "codex":     "openai-codex/gpt-5.4",
-        "codexmini": "openai-codex/gpt-5.3-codex",
-    }
-    model = _cfg(model_key) or model_defaults.get(provider, "")
+
+def cmd_switch(token: str, chat_id: str, provider: str) -> None:
+    spec = MODEL_REGISTRY.get(provider)
+    if spec is None:
+        send(token, chat_id, f"❌ Unknown model route `{provider}`.")
+        return
+    env_var, default_model, api_key_var, gateway_prefix, label = spec
+
+    # .env override wins over the built-in default; defaults work out of the box.
+    model = _cfg(env_var) or default_model
     if not model:
         send(token, chat_id,
-             f"❌ `{model_key}` is not set in `~/.openclaw/.env`.\n"
+             f"❌ `{env_var}` is not set in `~/.openclaw/.env`.\n"
              f"Add it and re-run the install script.")
         return
+
     # Validate the required API key is present in .env before switching.
-    # Codex uses OAuth (no key needed); openai/anthropic need their keys.
-    api_key_var = {
-        "openai":    "OPENAI_API_KEY",
-        "anthropic": None,  # gateway handles Anthropic auth internally
-        "codex":     None,  # uses Codex Web route, no separate API key
-        "codexmini": None,  # uses Codex Web route, no separate API key
-    }.get(provider)
-    if api_key_var:
-        if not _cfg(api_key_var):
-            send(token, chat_id,
-                 f"❌ `{api_key_var}` is not set in `~/.openclaw/.env`.\n"
-                 f"Add it before switching to `{provider}`.")
-            return
+    # Codex uses OAuth and Anthropic auth is gateway-managed (no key needed).
+    if api_key_var and not _cfg(api_key_var):
+        send(token, chat_id,
+             f"❌ `{api_key_var}` is not set in `~/.openclaw/.env`.\n"
+             f"Add it before switching to {label}.")
+        return
 
     # Ensure the model has a provider prefix — the gateway requires it and
     # will incorrectly prepend "anthropic/" to any bare model ID.
-    # If the .env value already contains "/" (e.g. openai-codex/gpt-5.4),
-    # use it verbatim. Only add the correct gateway prefix for bare names.
-    gateway_prefix = {
-        "openai":    "openai",
-        "anthropic": "anthropic",
-        "codex":     "openai-codex",
-        "codexmini": "openai-codex",
-    }.get(provider, provider)
+    # If the value already contains "/" (e.g. openai-codex/gpt-5.4), use it
+    # verbatim. Only add the correct gateway prefix for bare names.
     if "/" not in model:
         model = f"{gateway_prefix}/{model}"
 
@@ -532,7 +547,7 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
         config  = _read_config()
         current = _get_current_model(config)
         if current == model:
-            send(token, chat_id, f"ℹ️ Already using `{model}` — no change.")
+            send(token, chat_id, f"ℹ️ Already using `{model}` ({label}) — no change.")
             return
         config = _set_model(config, model)
         _write_config(config)
@@ -540,7 +555,7 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
         send(token, chat_id, f"❌ Failed to update config:\n```{e}```")
         return
 
-    send(token, chat_id, f"✅ Model set to `{model}`\nRestarting gateway…")
+    send(token, chat_id, f"✅ Model set to `{model}` ({label})\nRestarting gateway…")
     ok, msg = _restart_gateway()
     send(token, chat_id, f"{'✅' if ok else '❌'} {msg}")
 
@@ -2137,11 +2152,16 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/health — run system health check now\n"
          "/logs — recent errors across all poller logs\n"
          "/disk — disk space on the Pi\n\n"
-         "*Provider*\n"
-         "/anthropic — switch to Anthropic API + restart gateway\n"
-         "/openai — switch to OpenAI API + restart gateway\n"
-         "/codex — switch to Codex Web gpt-5.4 (full) + restart gateway\n"
-         "/codexmini — switch to Codex Web gpt-5.3-codex (mini) + restart\n"
+         "*Provider (model switch)*\n"
+         "/codex — Codex 5.4 full [default] + restart\n"
+         "/codex55 — Codex 5.5 full + restart\n"
+         "/codexmini — Codex 5.3 mini + restart\n"
+         "/codexmini54 — Codex 5.4 mini + restart\n"
+         "/anthropic — Anthropic Sonnet 4.5 + restart\n"
+         "/sonnet — Anthropic Sonnet 4.6 + restart\n"
+         "/opus — Anthropic Opus 4.6 + restart\n"
+         "/openai — OpenAI GPT-5 mini + restart\n"
+         "/gpt54 — OpenAI GPT-5.4 + restart\n"
          "/codex_reauth — start remote phone-first Codex OAuth re-auth\n\n"
          "*Services*\n"
          "/restart — restart the L1 gateway\n"
@@ -2608,7 +2628,12 @@ COMMANDS = {
     "/openai":     lambda t, c: cmd_switch(t, c, "openai"),
     "/anthropic":  lambda t, c: cmd_switch(t, c, "anthropic"),
     "/codex":      lambda t, c: cmd_switch(t, c, "codex"),
+    "/codex55":      lambda t, c: cmd_switch(t, c, "codex55"),
     "/codexmini":  lambda t, c: cmd_switch(t, c, "codexmini"),
+    "/codexmini54":  lambda t, c: cmd_switch(t, c, "codexmini54"),
+    "/sonnet":       lambda t, c: cmd_switch(t, c, "sonnet"),
+    "/opus":         lambda t, c: cmd_switch(t, c, "opus"),
+    "/gpt54":        lambda t, c: cmd_switch(t, c, "gpt54"),
     "/codex-reauth": cmd_codex_reauth,
     "/codex_reauth": cmd_codex_reauth,
     "/restart":    cmd_restart,
