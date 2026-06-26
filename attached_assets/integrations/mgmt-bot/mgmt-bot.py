@@ -46,12 +46,12 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
   works out of the box. Set a var only to override the exact model ID string.
   OPENCLAW_CODEX_MODEL        override /codex54full, default openai-codex/gpt-5.4
   OPENCLAW_CODEX55_MODEL      override /codex55full, default openai-codex/gpt-5.5
-  OPENCLAW_CODEX_MINI_MODEL   override /codex53mini, default openai-codex/gpt-5.3-codex
-  OPENCLAW_CODEX_MINI54_MODEL override /codex54mini, default openai-codex/gpt-5.4-codex
+  OPENCLAW_CODEX_MINI_MODEL   override /codex53mini, default openai-codex/gpt-5.3-codex-spark
+  OPENCLAW_CODEX_MINI54_MODEL override /codex54mini, default openai-codex/gpt-5.4-mini
   OPENCLAW_ANTHROPIC_MODEL    override /sonnet45,    default anthropic/claude-sonnet-4-5
   OPENCLAW_SONNET_MODEL       override /sonnet46,    default anthropic/claude-sonnet-4-6
   OPENCLAW_OPUS_MODEL         override /opus46,      default anthropic/claude-opus-4-6
-  OPENCLAW_OPENAI_MODEL       override /gpt5mini,    default openai/gpt-5-mini-2025-08-07
+  OPENCLAW_OPENAI_MODEL       override /gpt5mini,    default openai/gpt-5-mini
   OPENCLAW_GPT54_MODEL        override /gpt54,       default openai/gpt-5.4
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
@@ -80,7 +80,7 @@ SETUP
 3. Add to ~/.openclaw/.env:
      MGMT_BOT_TOKEN=<token>
      MGMT_BOT_CHAT_ID=<your_numeric_id>
-     OPENCLAW_OPENAI_MODEL=openai/gpt-5-mini-2025-08-07
+     OPENCLAW_OPENAI_MODEL=openai/gpt-5-mini
      OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5
      OPENCLAW_CODEX_MODEL=openai-codex/gpt-5.4
 4. Run the install script — deploys this file and installs the systemd service
@@ -496,14 +496,14 @@ MODEL_REGISTRY = {
     # --- Codex Web (OAuth, no API key). gpt-5.4 is the daily-reset default. ---
     "codex54full": ("OPENCLAW_CODEX_MODEL",        "openai-codex/gpt-5.4",         None,            "openai-codex", "Codex 5.4 (full)"),
     "codex55full": ("OPENCLAW_CODEX55_MODEL",      "openai-codex/gpt-5.5",         None,            "openai-codex", "Codex 5.5 (full)"),
-    "codex53mini": ("OPENCLAW_CODEX_MINI_MODEL",   "openai-codex/gpt-5.3-codex",   None,            "openai-codex", "Codex 5.3 mini"),
-    "codex54mini": ("OPENCLAW_CODEX_MINI54_MODEL", "openai-codex/gpt-5.4-codex",   None,            "openai-codex", "Codex 5.4 mini"),
+    "codex53mini": ("OPENCLAW_CODEX_MINI_MODEL",   "openai-codex/gpt-5.3-codex-spark", None,        "openai-codex", "Codex 5.3 Spark (Pro)"),
+    "codex54mini": ("OPENCLAW_CODEX_MINI54_MODEL", "openai-codex/gpt-5.4-mini",    None,            "openai-codex", "Codex 5.4 mini"),
     # --- Anthropic API (auth handled internally by the gateway) ---
     "sonnet45":    ("OPENCLAW_ANTHROPIC_MODEL",    "anthropic/claude-sonnet-4-5",  None,            "anthropic",    "Anthropic Sonnet 4.5"),
     "sonnet46":    ("OPENCLAW_SONNET_MODEL",       "anthropic/claude-sonnet-4-6",  None,            "anthropic",    "Anthropic Sonnet 4.6"),
     "opus46":      ("OPENCLAW_OPUS_MODEL",         "anthropic/claude-opus-4-6",    None,            "anthropic",    "Anthropic Opus 4.6"),
     # --- OpenAI API (needs OPENAI_API_KEY) ---
-    "gpt5mini":    ("OPENCLAW_OPENAI_MODEL",       "openai/gpt-5-mini-2025-08-07", "OPENAI_API_KEY", "openai",      "OpenAI GPT-5 mini"),
+    "gpt5mini":    ("OPENCLAW_OPENAI_MODEL",       "openai/gpt-5-mini",            "OPENAI_API_KEY", "openai",      "OpenAI GPT-5 mini"),
     "gpt54":       ("OPENCLAW_GPT54_MODEL",        "openai/gpt-5.4",               "OPENAI_API_KEY", "openai",      "OpenAI GPT-5.4"),
 }
 

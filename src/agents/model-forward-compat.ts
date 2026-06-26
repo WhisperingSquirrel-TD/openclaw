@@ -10,9 +10,19 @@ const OPENAI_GPT_54_CONTEXT_TOKENS = 1_050_000;
 const OPENAI_GPT_54_MAX_TOKENS = 128_000;
 const OPENAI_GPT_54_TEMPLATE_MODEL_IDS = ["gpt-5.2"] as const;
 const OPENAI_GPT_54_PRO_TEMPLATE_MODEL_IDS = ["gpt-5.2-pro", "gpt-5.2"] as const;
+// gpt-5.5 is OpenAI's newest GPT-5-series model (available via API key and Codex
+// ChatGPT sign-in) and is not yet in pi-ai's built-in catalog. Resolve it via the
+// same template path as gpt-5.4 so users don't get "Unknown model" errors.
+const OPENAI_GPT_55_MODEL_ID = "gpt-5.5";
 
+const OPENAI_CODEX_GPT_55_MODEL_ID = "gpt-5.5";
+const OPENAI_CODEX_GPT_55_TEMPLATE_MODEL_IDS = ["gpt-5.3-codex", "gpt-5.2-codex"] as const;
 const OPENAI_CODEX_GPT_54_MODEL_ID = "gpt-5.4";
 const OPENAI_CODEX_GPT_54_TEMPLATE_MODEL_IDS = ["gpt-5.3-codex", "gpt-5.2-codex"] as const;
+// gpt-5.4-mini is the current fast/low-cost Codex model. pi-ai 0.55.3 only ships
+// gpt-5.1-codex-mini, so clone that as the template.
+const OPENAI_CODEX_GPT_54_MINI_MODEL_ID = "gpt-5.4-mini";
+const OPENAI_CODEX_GPT_54_MINI_TEMPLATE_MODEL_IDS = ["gpt-5.1-codex-mini"] as const;
 const OPENAI_CODEX_GPT_53_MODEL_ID = "gpt-5.3-codex";
 const OPENAI_CODEX_TEMPLATE_MODEL_IDS = ["gpt-5.2-codex"] as const;
 
@@ -47,7 +57,7 @@ function resolveOpenAIGpt54ForwardCompatModel(
   const trimmedModelId = modelId.trim();
   const lower = trimmedModelId.toLowerCase();
   let templateIds: readonly string[];
-  if (lower === OPENAI_GPT_54_MODEL_ID) {
+  if (lower === OPENAI_GPT_54_MODEL_ID || lower === OPENAI_GPT_55_MODEL_ID) {
     templateIds = OPENAI_GPT_54_TEMPLATE_MODEL_IDS;
   } else if (lower === OPENAI_GPT_54_PRO_MODEL_ID) {
     templateIds = OPENAI_GPT_54_PRO_TEMPLATE_MODEL_IDS;
@@ -123,8 +133,14 @@ function resolveOpenAICodexForwardCompatModel(
 
   let templateIds: readonly string[];
   let eligibleProviders: Set<string>;
-  if (lower === OPENAI_CODEX_GPT_54_MODEL_ID) {
+  if (lower === OPENAI_CODEX_GPT_55_MODEL_ID) {
+    templateIds = OPENAI_CODEX_GPT_55_TEMPLATE_MODEL_IDS;
+    eligibleProviders = CODEX_GPT54_ELIGIBLE_PROVIDERS;
+  } else if (lower === OPENAI_CODEX_GPT_54_MODEL_ID) {
     templateIds = OPENAI_CODEX_GPT_54_TEMPLATE_MODEL_IDS;
+    eligibleProviders = CODEX_GPT54_ELIGIBLE_PROVIDERS;
+  } else if (lower === OPENAI_CODEX_GPT_54_MINI_MODEL_ID) {
+    templateIds = OPENAI_CODEX_GPT_54_MINI_TEMPLATE_MODEL_IDS;
     eligibleProviders = CODEX_GPT54_ELIGIBLE_PROVIDERS;
   } else if (lower === OPENAI_CODEX_GPT_53_MODEL_ID) {
     templateIds = OPENAI_CODEX_TEMPLATE_MODEL_IDS;
