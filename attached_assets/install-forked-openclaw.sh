@@ -920,15 +920,13 @@ mkdir -p "$HOME/.openclaw/integrations/garmin"
 # Remove the retired cookie poller (replaced by the garminconnect library poller)
 rm -f "$HOME/.openclaw/integrations/garmin/poll-garmin-cookie.py"
 
-# The poller needs the garminconnect library (Python >= 3.9). Install/upgrade.
-if python3 -c "import garminconnect" 2>/dev/null; then
-    info "garminconnect: already installed"
-else
-    info "Installing garminconnect (Garmin DI OAuth client)..."
-    pip3 install --break-system-packages --quiet --upgrade garminconnect 2>/dev/null && \
-        info "garminconnect installed" || \
-        warn "garminconnect install failed — install manually: pip3 install --break-system-packages garminconnect"
-fi
+# The poller needs the garminconnect library (Python >= 3.9). Always upgrade —
+# old versions raise FileNotFoundError on first-time --setup (they try to LOAD
+# tokens from an empty tokenstore instead of falling back to a credential login).
+info "Installing/upgrading garminconnect (Garmin DI OAuth client)..."
+pip3 install --break-system-packages --quiet --upgrade garminconnect 2>/dev/null && \
+    info "garminconnect up to date" || \
+    warn "garminconnect install/upgrade failed — install manually: pip3 install --break-system-packages --upgrade garminconnect"
 
 # Deploy the poller
 if [ -f "$GARMIN_SRC" ]; then

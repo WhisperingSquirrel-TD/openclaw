@@ -41,8 +41,16 @@ activities. Written to `GARMIN_DAILY.md` (full snapshot) and `GARMIN_ARCHIVE.md`
 - **Commands**: `--setup` (one-time login), `--status` (token validity/age, never
   logs in), `--backfill N` (N days of history into the archive); plus mgmt-bot
   `/garmin`, `/garmin-setup`, `/garmin-status`
-- **Library dep**: `garminconnect` — installed/upgraded automatically by the [install script](../pi-deployment.md)
+- **Library dep**: `garminconnect` — the [install script](../pi-deployment.md) now **always** runs `pip3 install --upgrade garminconnect` (it used to skip the upgrade whenever the lib was already present, which stranded the Pi on old versions)
 - If the account ever enables MFA, run `--setup` from a terminal so the code can be entered interactively
+
+### First-time setup error: `[Errno 2] No such file or directory: '~/.garminconnect/oauth1_token.json'`
+
+On a brand-new install the token dir is empty. Old `garminconnect`/`garth` versions, when handed a tokenstore path, try to **load** `oauth1_token.json` *before* falling back to a credential login — so first-time `--setup`/`/garmin_setup` fails with this `FileNotFoundError`. Two-part fix (both shipped):
+- `login_and_save()` now forces a fresh credential login — it calls `client.login()` with **no** tokenstore argument (and temporarily clears `GARMINTOKENS`) so the library can never attempt the doomed load, then dumps the tokens explicitly. Token-dump failures now surface instead of being silently swallowed.
+- The install script always upgrades the library (above), so the Pi gets the version that also falls back gracefully.
+
+If you still see it after deploying: confirm `pip3 show garminconnect` is recent and that `~/.openclaw/.env` has `GARMIN_EMAIL`/`GARMIN_PASSWORD`.
 
 ## Data source / field extraction
 

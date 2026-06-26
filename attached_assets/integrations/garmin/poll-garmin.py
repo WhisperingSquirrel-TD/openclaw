@@ -273,8 +273,16 @@ def login_and_save(interactive: bool):
     TOKENSTORE.mkdir(parents=True, exist_ok=True)
     mfa_cb = _mfa_prompt if interactive else None
     client = Garmin(email=email, password=password, is_cn=False, prompt_mfa=mfa_cb)
+    # Force a FRESH credential login. We deliberately do NOT pass TOKENSTORE to
+    # login() here: on first-time setup the token dir is empty, and some
+    # garminconnect/garth versions try to LOAD oauth1_token.json before falling
+    # back to credentials — raising
+    #   [Errno 2] No such file or directory: '~/.garminconnect/oauth1_token.json'
+    # We also temporarily clear GARMINTOKENS so login() can't pick up a path and
+    # attempt the same doomed load.
+    _saved_tokenenv = os.environ.pop("GARMINTOKENS", None)
     try:
-        client.login(str(TOKENSTORE))
+        client.login()
     except TooMany as e:
         _mark_429()
         raise RuntimeError(
@@ -283,11 +291,16 @@ def login_and_save(interactive: bool):
         )
     except AuthErr as e:
         raise RuntimeError(f"Login failed (check credentials / MFA): {e}")
-    # Persist tokens explicitly (belt and braces — login() already dumps them).
+    finally:
+        if _saved_tokenenv is not None:
+            os.environ["GARMINTOKENS"] = _saved_tokenenv
+    # Persist tokens explicitly so scheduled runs can resume from them.
     try:
         client.garth.dump(str(TOKENSTORE))
-    except Exception:
-        pass
+    except Exception as e:
+        raise RuntimeError(
+            f"Login succeeded but writing tokens to {TOKENSTORE} failed: {e}"
+        )
     _clear_cooldown()
     try:
         os.chmod(TOKENSTORE, 0o700)
