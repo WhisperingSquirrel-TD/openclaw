@@ -47,10 +47,16 @@ activities. Written to `GARMIN_DAILY.md` (full snapshot) and `GARMIN_ARCHIVE.md`
 ### First-time setup error: `[Errno 2] No such file or directory: '~/.garminconnect/oauth1_token.json'`
 
 On a brand-new install the token dir is empty. Old `garminconnect`/`garth` versions, when handed a tokenstore path, try to **load** `oauth1_token.json` *before* falling back to a credential login — so first-time `--setup`/`/garmin_setup` fails with this `FileNotFoundError`. Two-part fix (both shipped):
-- `login_and_save()` now forces a fresh credential login — it calls `client.login()` with **no** tokenstore argument (and temporarily clears `GARMINTOKENS`) so the library can never attempt the doomed load, then dumps the tokens explicitly. Token-dump failures now surface instead of being silently swallowed.
+- `login_and_save()` now forces a fresh credential login — it calls `client.login()` with **no** tokenstore argument (and temporarily clears `GARMINTOKENS`) so the library can never attempt the doomed load, then persists the tokens explicitly and verifies the file landed.
 - The install script always upgrades the library (above), so the Pi gets the version that also falls back gracefully.
 
-If you still see it after deploying: confirm `pip3 show garminconnect` is recent and that `~/.openclaw/.env` has `GARMIN_EMAIL`/`GARMIN_PASSWORD`.
+### Token save error: `'Garmin' object has no attribute 'garth'`
+
+The garth client that holds the in-memory tokens is an internal attribute of the `Garmin` object whose **name changed across library versions**: `.garth` in older releases, `.client` in current ones. Hard-coding `client.garth.dump()` breaks on the upgraded library. `_persist_tokens()` now tries each known handle (`.garth`, then `.client`) and verifies `oauth1_token.json` actually exists; `login_and_save()` raises a clear error if no token file was written, so setup never reports false success.
+
+> **429 caution:** every `--setup` does a real Garmin SSO login. If token-save silently failed, you'd retry repeatedly and Garmin IP-rate-limits you (`Mobile login returned 429`). The login itself usually still succeeds via a fallback transport, so once the save bug is fixed a **single** successful `--setup` is enough — do not loop on it. A hard 429 (`TooMany`) trips the [24h backoff](#auth-model--you-log-in-once); wait it out.
+
+If you still see a failure after deploying: confirm `pip3 show garminconnect` is recent and that `~/.openclaw/.env` has `GARMIN_EMAIL`/`GARMIN_PASSWORD`.
 
 ## Data source / field extraction
 

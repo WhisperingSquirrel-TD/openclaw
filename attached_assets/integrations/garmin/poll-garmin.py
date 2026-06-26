@@ -224,6 +224,30 @@ def _tokens_present() -> bool:
     return (TOKENSTORE / "oauth1_token.json").exists()
 
 
+def _persist_tokens(client) -> None:
+    """Write the in-memory OAuth tokens to TOKENSTORE after a credential login.
+
+    The garth client that actually holds the tokens is an internal attribute of
+    the Garmin object whose name changed across garminconnect versions
+    (`.garth` in older releases, `.client` in current ones). Try each known
+    handle and stop as soon as the token file lands on disk.
+    """
+    TOKENSTORE.mkdir(parents=True, exist_ok=True)
+    last_err = None
+    for attr in ("garth", "client"):
+        garth_client = getattr(client, attr, None)
+        dump = getattr(garth_client, "dump", None) if garth_client is not None else None
+        if callable(dump):
+            try:
+                dump(str(TOKENSTORE))
+                if _tokens_present():
+                    return
+            except Exception as e:
+                last_err = e
+    if last_err is not None:
+        log(f"WARNING: token dump attempts failed: {last_err}")
+
+
 def _mfa_prompt() -> str:
     if not sys.stdin.isatty():
         raise RuntimeError(
@@ -294,12 +318,15 @@ def login_and_save(interactive: bool):
     finally:
         if _saved_tokenenv is not None:
             os.environ["GARMINTOKENS"] = _saved_tokenenv
-    # Persist tokens explicitly so scheduled runs can resume from them.
-    try:
-        client.garth.dump(str(TOKENSTORE))
-    except Exception as e:
+    # Persist tokens so scheduled runs can resume from them (version-robust dump),
+    # then verify the file actually landed — otherwise we'd report success while
+    # leaving nothing for cron to resume, forcing repeated logins (429 risk).
+    _persist_tokens(client)
+    if not _tokens_present():
         raise RuntimeError(
-            f"Login succeeded but writing tokens to {TOKENSTORE} failed: {e}"
+            f"Login succeeded but no token file was written to {TOKENSTORE}. "
+            f"Upgrade the library and retry once: "
+            f"pip3 install --break-system-packages --upgrade garminconnect"
         )
     _clear_cooldown()
     try:
