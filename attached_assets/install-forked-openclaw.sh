@@ -904,70 +904,64 @@ deploy_integration "$INTEGRATIONS_SRC/github/create-repo.py"       "$INTEGRATION
 deploy_integration "$INTEGRATIONS_SRC/github/retro-push.py"        "$INTEGRATIONS_DST/github/retro-push.py"
 
 # ---------------------------------------------------------------------------
-# Garmin Connect daily health poller (cookie-based — no OAuth, no rate-limit risk)
-# Fetches resting HR, HRV, sleep, stress, body battery, steps, last activity.
-# Writes GARMIN_DAILY.md once per day at 09:00.
-# Auth: uses browser session cookies stored in ~/.openclaw/integrations/garmin/garmin-cookies.json
-# Setup (one-time, or when cookies expire): python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup
+# Garmin Connect daily health poller (garminconnect library — DI OAuth)
+# Fetches resting HR, post-workout recovery HR, HRV, training readiness, sleep,
+# stress, SpO2, Body Battery, VO2max, steps and recent activities.
+# Writes GARMIN_DAILY.md + GARMIN_ARCHIVE.md once per day at 09:00.
+# Auth: log in ONCE; a self-renewing token is cached in ~/.garminconnect/.
+# Setup (one-time): python3 ~/.openclaw/integrations/garmin/poll-garmin.py --setup
 # ---------------------------------------------------------------------------
-GARMIN_COOKIE_SRC="$HOME/openclaw/attached_assets/integrations/garmin/poll-garmin-cookie.py"
-GARMIN_COOKIE_DST="$HOME/.openclaw/integrations/garmin/poll-garmin-cookie.py"
-GARMIN_OLD_SRC="$HOME/openclaw/attached_assets/integrations/garmin/poll-garmin.py"
-GARMIN_OLD_DST="$HOME/.openclaw/integrations/garmin/poll-garmin.py"
+GARMIN_SRC="$HOME/openclaw/attached_assets/integrations/garmin/poll-garmin.py"
+GARMIN_DST="$HOME/.openclaw/integrations/garmin/poll-garmin.py"
 GARMIN_LOG="$HOME/.openclaw/workspace/memory/poll-garmin-log.txt"
 
 mkdir -p "$HOME/.openclaw/integrations/garmin"
 
-# garminconnect + garth are now used by the poller for self-healing auth when
-# GARMIN_EMAIL + GARMIN_PASSWORD are in ~/.openclaw/.env.  Install if missing.
+# Remove the retired cookie poller (replaced by the garminconnect library poller)
+rm -f "$HOME/.openclaw/integrations/garmin/poll-garmin-cookie.py"
+
+# The poller needs the garminconnect library (Python >= 3.9). Install/upgrade.
 if python3 -c "import garminconnect" 2>/dev/null; then
     info "garminconnect: already installed"
 else
-    info "Installing garminconnect (used for self-healing Garmin auth)..."
-    pip3 install --break-system-packages --quiet garminconnect 2>/dev/null && \
+    info "Installing garminconnect (Garmin DI OAuth client)..."
+    pip3 install --break-system-packages --quiet --upgrade garminconnect 2>/dev/null && \
         info "garminconnect installed" || \
         warn "garminconnect install failed — install manually: pip3 install --break-system-packages garminconnect"
 fi
 
-# Deploy cookie-based poller (primary — now also supports garth/credential auth)
-if [ -f "$GARMIN_COOKIE_SRC" ]; then
-    ln -sf "$GARMIN_COOKIE_SRC" "$GARMIN_COOKIE_DST"
-    info "Garmin poller linked: $GARMIN_COOKIE_DST"
+# Deploy the poller
+if [ -f "$GARMIN_SRC" ]; then
+    ln -sf "$GARMIN_SRC" "$GARMIN_DST"
+    info "Garmin poller linked: $GARMIN_DST"
 else
-    warn "Garmin poller not found at $GARMIN_COOKIE_SRC — skipping"
+    warn "Garmin poller not found at $GARMIN_SRC — skipping"
 fi
 
-# Keep old garth-based poller as a fallback
-if [ -f "$GARMIN_OLD_SRC" ]; then
-    ln -sf "$GARMIN_OLD_SRC" "$GARMIN_OLD_DST"
-    info "Garmin legacy poller linked (fallback only): $GARMIN_OLD_DST"
-fi
+# Cron: migrate any old garmin cron lines to the single poller at 09:00.
+if [ -f "$GARMIN_DST" ]; then
+    GARMIN_CRON="0 9 * * * python3 $GARMIN_DST >> $GARMIN_LOG 2>&1"
+    # Drop any pre-existing garmin poller lines (cookie or legacy), then add ours.
+    # `|| true` on each filter: grep exits 1 when it matches nothing, which would
+    # abort the script under `set -e` (e.g. empty crontab / only-garmin crontab).
+    NEW_CRON="$( crontab -l 2>/dev/null | grep -v "poll-garmin" || true )"
+    ( printf '%s\n' "$NEW_CRON"; echo "$GARMIN_CRON" ) | grep -v '^$' | crontab - || true
+    info "Garmin poller cron set: daily at 09:00 (poll-garmin.py)"
 
-# Cron: add poller at 09:00 if not already present
-if crontab -l 2>/dev/null | grep -qF "poll-garmin-cookie.py"; then
-    info "Garmin poller cron already present — leaving as-is."
-elif [ -f "$GARMIN_COOKIE_DST" ]; then
-    GARMIN_CRON="0 9 * * * python3 $GARMIN_COOKIE_DST >> $GARMIN_LOG 2>&1"
-    ( crontab -l 2>/dev/null; echo "$GARMIN_CRON" ) | crontab -
-    info "Garmin poller cron installed: daily at 09:00"
-
-    # Check if credentials are available — if so, need one-time --setup-garth run
+    # One-time auth check: tokens live in ~/.garminconnect/
     GARMIN_ENV="$HOME/.openclaw/.env"
-    GARTH_DIR="$HOME/.garth"
-    if [ -f "$GARMIN_ENV" ] && grep -q "GARMIN_EMAIL" "$GARMIN_ENV" && grep -q "GARMIN_PASSWORD" "$GARMIN_ENV"; then
-        if [ -f "$GARTH_DIR/oauth2_token.json" ] || [ -f "$GARTH_DIR/token.json" ]; then
-            info "GARMIN_EMAIL + GARMIN_PASSWORD in .env + garth tokens cached — poller will self-authenticate."
-        else
-            warn "GARMIN_EMAIL + GARMIN_PASSWORD found in .env but garth tokens not yet created."
-            warn "  Run this ONCE from a terminal (handles MFA if needed):"
-            warn "    python3 $GARMIN_COOKIE_DST --setup-garth"
-            warn "  After that, the 09:00 cron runs automatically with no further action."
-        fi
+    GARMIN_TOKENS="$HOME/.garminconnect/oauth1_token.json"
+    if [ -f "$GARMIN_TOKENS" ]; then
+        info "Garmin tokens cached — poller will resume + auto-refresh (no login needed)."
+    elif [ -f "$GARMIN_ENV" ] && grep -q "GARMIN_EMAIL" "$GARMIN_ENV" && grep -q "GARMIN_PASSWORD" "$GARMIN_ENV"; then
+        warn "GARMIN_EMAIL + GARMIN_PASSWORD in .env but no token cached yet."
+        warn "  Run this ONCE (from Telegram or a terminal) to authenticate:"
+        warn "    /garmin-setup        (Telegram)"
+        warn "    python3 $GARMIN_DST --setup   (terminal)"
+        warn "  After that, the 09:00 cron resumes automatically with no further action."
     else
-        warn "GARMIN_EMAIL or GARMIN_PASSWORD not found in ~/.openclaw/.env"
-        warn "  Recommended (self-healing, no cookie expiry): add both to ~/.openclaw/.env, then run:"
-        warn "    python3 $GARMIN_COOKIE_DST --setup-garth"
-        warn "  OR use the legacy cookie setup: python3 $GARMIN_COOKIE_DST --setup"
+        warn "GARMIN_EMAIL / GARMIN_PASSWORD not found in ~/.openclaw/.env"
+        warn "  Add both to ~/.openclaw/.env, then run: python3 $GARMIN_DST --setup"
     fi
 fi
 
@@ -2036,18 +2030,20 @@ echo "    One-time re-auth (device code — works on Pi without a browser):"
 echo "      python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py reauth"
 echo "    Test: python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py list /"
 echo ""
-echo "  Garmin Connect poller (cookie-based — no OAuth, no rate-limit risk):"
-echo "    Runs daily at 09:00 — writes GARMIN_DAILY.md (resting HR, HRV, sleep, stress, body battery, steps, last activity)"
+echo "  Garmin Connect poller (garminconnect library — DI OAuth, self-renewing token):"
+echo "    Runs daily at 09:00 — writes GARMIN_DAILY.md (resting HR, recovery HR, HRV,"
+echo "      training readiness, sleep, stress, SpO2, Body Battery, VO2max, steps, activities)"
 echo "    Also writes GARMIN_ARCHIVE.md — rolling 28-day compact history for L1 trend analysis"
 echo "    (09:00 chosen — 06:xx busy with CRM, 07:xx busy with another job)"
-echo "    Auth: browser session cookies in ~/.openclaw/integrations/garmin/garmin-cookies.json"
-echo "    One-time setup (or when cookies expire ~7-14 days):"
-echo "      1. Log into connect.garmin.com in the Pi browser"
-echo "      2. python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup"
-echo "      3. Paste SESSIONID (and optionally session, _cflb, JWT_WEB) from browser devtools"
-echo "    Test run: python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py"
+echo "    Auth: log in ONCE; token cached in ~/.garminconnect/ then auto-refreshed forever."
+echo "    One-time setup (no cookies, no manual renewals):"
+echo "      • From Telegram:  /garmin-setup"
+echo "      • From terminal:  python3 ~/.openclaw/integrations/garmin/poll-garmin.py --setup"
+echo "      (uses GARMIN_EMAIL + GARMIN_PASSWORD from ~/.openclaw/.env)"
+echo "    Token status: python3 ~/.openclaw/integrations/garmin/poll-garmin.py --status   (or /garmin-status)"
+echo "    Test run:     python3 ~/.openclaw/integrations/garmin/poll-garmin.py"
+echo "    Backfill:     python3 ~/.openclaw/integrations/garmin/poll-garmin.py --backfill 30"
 echo "    Logs: ~/.openclaw/workspace/memory/poll-garmin-log.txt"
-echo "    Legacy garth-based poller kept at poll-garmin.py (fallback if needed)"
 echo ""
 echo "  CRM lead importer (no LLM — replaces agentTurn cron):"
 echo "    Runs daily at 08:00 — imports new leads from ~/prospects/YYYYMMDD/ CSVs into crm.md"

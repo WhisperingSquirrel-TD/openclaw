@@ -329,21 +329,44 @@ Lessons from applying upstream changes — follow this checklist every sync.
 
 The CRM runs at 06:00 every morning and another job runs at 07:00. No background jobs should be scheduled in the 06:xx or 07:xx windows. All timed tasks should be scheduled at 08:00 or later. The Garmin poller is set to 09:00 for this reason. Enforce this for any new pollers or cron jobs added in future.
 
-### Garmin poller — self-healing auth via credentials
+### Garmin poller — garminconnect library (DI OAuth, login once)
 
-`poll-garmin-cookie.py` now supports two auth modes, tried in this order:
+`poll-garmin.py` is the single canonical poller, built on the maintained
+[`cyberjunky/python-garminconnect`](https://github.com/cyberjunky/python-garminconnect)
+library (Garmin's current DI OAuth flow). The old cookie poller
+(`poll-garmin-cookie.py`) and the legacy garth poller are **retired and deleted** —
+both cookie scraping (deprecated `/proxy/` paths returned empty `{}`) and direct
+garth logins (Cloudflare-blocked + per-account 429 bans lasting 24–72h) are dead ends.
 
-1. **Garth/credential mode (preferred)** — reads `GARMIN_EMAIL` + `GARMIN_PASSWORD` from `~/.openclaw/.env`, authenticates via the `garminconnect` library (garth OAuth2). Tokens cached in `~/.garth/` and auto-refreshed every few weeks. **No manual cookie setup needed, never expires like cookies do.**
-2. **Cookie fallback** — reads browser session cookies from `garmin-cookies.json`. Used only if credentials are not in `.env` or garth auth fails. Cookies expire every 7–14 days requiring manual `--setup`.
+**Auth model — you log in ONCE:**
 
-- **Primary script**: `~/.openclaw/integrations/garmin/poll-garmin-cookie.py`
-- **Credential setup** (one-time): add `GARMIN_EMAIL=your@email.com` and `GARMIN_PASSWORD=yourpassword` to `~/.openclaw/.env`. The install script checks for these and skips the cookie warning when found.
-- **Manual cookie setup** (fallback only): log into connect.garmin.com, run `python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup`, paste SESSIONID from devtools
-- **Cookie file** (cookie mode): `~/.openclaw/integrations/garmin/garmin-cookies.json`
-- **Garth token cache**: `~/.garth/` (auto-managed by the garth library)
-- **Legacy fallback**: `poll-garmin.py` (old garth-based poller) kept on disk but not in cron
-- The mgmt-bot `/garmin` command uses the cookie poller if present, legacy if not
-- If garth login fails with MFA, run the poller manually once from a terminal to complete MFA interactively — tokens are then cached and subsequent runs are non-interactive
+- **Setup** (`--setup`, or `/garmin-setup` on Telegram): reads `GARMIN_EMAIL` +
+  `GARMIN_PASSWORD` from `~/.openclaw/.env`, logs in (MFA prompt only if the
+  account has MFA — this account does not), and caches a self-renewing token in
+  `~/.garminconnect/` (`oauth1_token.json` + `oauth2_token.json`).
+- **Scheduled run** (cron, 09:00): constructs the client with **no credentials**
+  and resumes from the cached token, auto-refreshing it. It can therefore **never
+  fall through to a credential login** — the path that caused the 429 spiral is
+  structurally impossible from cron.
+- **Token-rejected / missing**: the run logs a `FLAG TO TOM` to re-run setup and
+  exits cleanly — it never retries a login.
+- **429 guard**: any 429 writes `~/.openclaw/integrations/garmin/.garmin_429_backoff`;
+  for the next 24h all runs skip immediately so a ban is never made worse.
+
+**Data collected** (for L1 exercise/recovery advice): resting HR, post-workout
+recovery HR (from activity details), HRV (last night / status / weekly), **training
+readiness** (Garmin's recovery-readiness score), sleep stages + score, SpO2,
+stress, Body Battery high/low, VO2max, steps/calories/intensity minutes, and recent
+activities. Written to `GARMIN_DAILY.md` (full snapshot) and `GARMIN_ARCHIVE.md`
+(rolling 28-day compact history).
+
+- **Script**: `~/.openclaw/integrations/garmin/poll-garmin.py`
+- **Token cache**: `~/.garminconnect/` (override dir via `GARMINTOKENS` env var)
+- **Commands**: `--setup` (one-time login), `--status` (token validity/age, never
+  logs in), `--backfill N` (N days of history into the archive); plus mgmt-bot
+  `/garmin`, `/garmin-setup`, `/garmin-status`
+- **Library dep**: `garminconnect` — installed/upgraded automatically by the install script
+- If the account ever enables MFA, run `--setup` from a terminal so the code can be entered interactively
 
 ### Background services (Pi)
 
@@ -818,37 +841,18 @@ grep -i "ollama\|error\|failed" /tmp/openclaw/openclaw-$(date +%Y-%m-%d).log | t
 
 ---
 
-### Garmin poller — confirmed endpoint map
+### Garmin poller — data source
 
-`poll-garmin-cookie.py` uses `curl --compressed` with browser-like headers to pass Cloudflare. Auth requires **three things**: full cookie string (19+ cookies), `Connect-Csrf-Token` header value, and the curl backend (not urllib).
-
-**Confirmed working endpoints (as of 2026-04-18):**
-
-| Data           | Endpoint                                                                                      | Notes                                                                    |
-| -------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Sleep          | `/gc-api/sleep-service/sleep/dailySleepData?date=YYYY-MM-DD`                                  | Full sleep DTO with stages, score, HRV                                   |
-| Resting HR     | `/gc-api/wellness-service/wellness/dailyHeartRate/{date}`                                     | Returns `restingHeartRate`                                               |
-| HRV            | `/gc-api/hrv-service/hrv/{date}`                                                              | Returns `weeklyAvg`, `lastNight`, `status`                               |
-| Wellness chart | `/gc-api/wellness-service/wellness/dailySummaryChart/{date}`                                  | Hourly list — step values are **cumulative** (take `max()`, not `sum()`) |
-| Body battery   | `/gc-api/wellness-service/wellness/bodyBattery/messagingToday?date=YYYY-MM-DD`                | Returns `deltaValue` dict                                                |
-| Stress         | `/gc-api/wellness-service/wellness/dailyStress/{date}`                                        | Overrides avg stress; adds `maxStressLevel`                              |
-| Activities     | `/gc-api/activitylist-service/activities/search/activities?startDate=...&endDate=...&limit=1` | Most recent activity                                                     |
-
-**Stats/calories — try in order:**
-
-1. `/gc-api/wellness-service/wellness/dailySummary/{date}` — flat dict with `totalKilocalories`, `totalSteps`, `activeKilocalories`, `activeMinutes`
-2. `/gc-api/usersummary-service/usersummary/daily/{date}` — fallback
-3. The old `/gc-api/userstats-service/statistics/daily` returns **403 Forbidden** — do not use
-
-**Known dead endpoints:**
-
-- `/gc-api/wellness-service/wellness/dailySpo2?calendarDate=...` → 404 (try `/dailySpo2/{date}` path form first; 404 likely means device doesn't support SpO2)
-- `/gc-api/userstats-service/statistics/daily` → 403 Forbidden
-- `/gc-api/wellness-service/wellness/dailySummaryChart` with query params for steps → values are cumulative totals per interval, not incremental — summing them gives wrong (low) results
-
-**Status code handling:** 401 → cookies expired (fatal, exit and prompt `--setup`); 403 → endpoint forbidden for this account/device (skip, continue); 404 → endpoint path wrong or device doesn't support it (skip); 429 → rate limited (back off).
-
-**Garmin cookie setup:** Run `python3 ~/.openclaw/integrations/garmin/poll-garmin-cookie.py --setup`. You need: (1) the full cookie string from browser devtools on connect.garmin.com, and (2) the `Connect-Csrf-Token` header value from any `/gc-api/` request. Both are stored in `garmin-cookies.json`.
+The poller no longer talks to `/gc-api/` endpoints directly — the `garminconnect`
+library owns all endpoint mapping, Cloudflare handling, and token refresh. Field
+extraction lives in `poll-garmin.py::extract()`, which reads the library's typed
+responses (`get_stats`, `get_heart_rates`, `get_hrv_data`, `get_sleep_data`,
+`get_spo2_data`, `get_stress_data`, `get_training_readiness`, `get_body_battery`,
+`get_max_metrics`, `get_activities` / `get_activity`). Note the library exposes
+`get_rhr_day` / `get_heart_rates` — there is **no** `get_resting_heart_rate`. If a
+field is missing on a given account/device the poller writes `n/a` and continues;
+upgrade the library (`pip3 install --break-system-packages --upgrade garminconnect`)
+if Garmin changes a response shape.
 
 ---
 

@@ -24,6 +24,8 @@ COMMANDS
   /health       — run system health check now and show output
   /logs         — show recent errors across all poller logs
   /garmin       — manually trigger the Garmin poller
+  /garmin-setup — one-time Garmin login (caches self-renewing token)
+  /garmin-status— show Garmin token validity/age
   /yt-add       — add a YouTube channel to the transcript poller
   /yt-list      — list configured YouTube channels
   /yt-run       — trigger the YouTube channel poller now
@@ -849,30 +851,49 @@ def cmd_logs(token: str, chat_id: str) -> None:
     send(token, chat_id, f"⚠️ *Recent errors:*\n\n{output}")
 
 
-def cmd_garmin(token: str, chat_id: str) -> None:
-    cookie_script = STATE_DIR / "integrations/garmin/poll-garmin-cookie.py"
-    legacy_script  = STATE_DIR / "integrations/garmin/poll-garmin.py"
+def _garmin_script() -> "Path":
     override = _cfg("OPENCLAW_GARMIN_SCRIPT", "")
     if override:
-        script = Path(override)
-    elif cookie_script.exists():
-        script = cookie_script
-    elif legacy_script.exists():
-        script = legacy_script
-    else:
-        send(token, chat_id, "❌ Garmin script not found (neither cookie nor legacy poller present)")
+        return Path(override)
+    return STATE_DIR / "integrations/garmin/poll-garmin.py"
+
+
+def _run_garmin(token: str, chat_id: str, args: list, intro: str, timeout: int = 120) -> None:
+    script = _garmin_script()
+    if not script.exists():
+        send(token, chat_id, "❌ Garmin poller not found at "
+                             f"`{script}` — run the install script first.")
         return
-    send(token, chat_id, f"🏃 Triggering Garmin poller (`{script.name}`) — may take 30–60 seconds…")
-    r = subprocess.run(
-        ["python3", str(script)],
-        capture_output=True, text=True, timeout=120,
-    )
+    send(token, chat_id, intro)
+    try:
+        r = subprocess.run(
+            ["python3", str(script), *args],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        send(token, chat_id, "❌ Garmin command timed out.")
+        return
     output = (r.stdout + r.stderr).strip()
     tail   = "\n".join(output.splitlines()[-15:]) if output else "(no output)"
-    if r.returncode == 0:
-        send(token, chat_id, f"✅ Garmin poller complete:\n```{tail}```")
-    else:
-        send(token, chat_id, f"❌ Garmin poller failed:\n```{tail}```")
+    icon   = "✅" if r.returncode == 0 else "❌"
+    send(token, chat_id, f"{icon} Result:\n```{tail}```")
+
+
+def cmd_garmin(token: str, chat_id: str) -> None:
+    _run_garmin(token, chat_id, [],
+                "🏃 Triggering Garmin poller — may take 30–60 seconds…")
+
+
+def cmd_garmin_setup(token: str, chat_id: str) -> None:
+    # One-time auth from GARMIN_EMAIL/GARMIN_PASSWORD in .env. No MFA on this
+    # account, so this completes non-interactively.
+    _run_garmin(token, chat_id, ["--setup"],
+                "🔐 Authenticating with Garmin (one-time) — caches a self-renewing token…")
+
+
+def cmd_garmin_status(token: str, chat_id: str) -> None:
+    _run_garmin(token, chat_id, ["--status"],
+                "🔎 Checking Garmin token status…", timeout=60)
 
 
 def _yt_channels_path() -> "Path":
@@ -2166,6 +2187,8 @@ def cmd_help(token: str, chat_id: str) -> None:
          "*Services*\n"
          "/restart — restart the L1 gateway\n"
          "/garmin — manually trigger the Garmin poller\n"
+         "/garmin-setup — one-time Garmin login (caches self-renewing token)\n"
+         "/garmin-status — show Garmin token validity/age\n"
          "/yt-add <url> [label] — add a YouTube channel to the transcript poller\n"
          "/yt-list — list configured YouTube channels\n"
          "/yt-run — trigger the YouTube channel poller now\n"
@@ -2231,6 +2254,8 @@ MENU_COMMANDS = [
     ("codex_reauth", "Start remote phone-first Codex OAuth re-auth"),
     # Integrations
     ("garmin",       "Manually trigger the Garmin poller"),
+    ("garmin_setup", "One-time Garmin login (caches self-renewing token)"),
+    ("garmin_status", "Show Garmin token validity/age"),
     ("yt_add",       "Add a YouTube channel — /yt-add <url> [label]"),
     ("yt_list",      "List configured YouTube channels"),
     ("yt_run",       "Trigger the YouTube channel poller now"),
@@ -2648,6 +2673,10 @@ COMMANDS = {
     "/health":     cmd_health,
     "/logs":       cmd_logs,
     "/garmin":     cmd_garmin,
+    "/garmin-setup":  cmd_garmin_setup,
+    "/garmin_setup":  cmd_garmin_setup,
+    "/garmin-status": cmd_garmin_status,
+    "/garmin_status": cmd_garmin_status,
     "/yt-list":    cmd_yt_list,
     "/yt_list":    cmd_yt_list,
     "/yt-run":          cmd_yt_run,

@@ -1,76 +1,66 @@
 #!/usr/bin/env python3
 """
-Garmin Connect daily health data poller for OpenClaw.
+Garmin Connect health-data poller for OpenClaw.
 
-Auth: uses garth's standard ~/.garth token store.
-  - First run: prompts interactively for email/password, saves tokens to ~/.garth.
-  - Subsequent runs: resumes silently from ~/.garth — no credentials needed.
-  - GARMIN_EMAIL / GARMIN_PASSWORD env vars are used if present on first run,
-    otherwise the script prompts interactively.
+Uses the maintained `garminconnect` library (Garmin's current DI OAuth flow).
+You authenticate ONCE; the library caches a self-renewing refresh token, so
+scheduled runs never log in again — they only resume from the cached token and
+auto-refresh.  This is what fixes the old 429 spiral: the previous garth-based
+auth was blocked by Garmin and every cron run re-attempted a login, which made
+the per-account rate-limit ban worse.
 
-Fetches today's data:
-  - Resting heart rate
-  - HRV (last night, weekly average, status)
-  - Sleep (duration, score, deep, REM, avg HR during sleep)
-  - SpO2 (overnight average)
-  - Average stress
-  - Body battery (high and low)
-  - Steps, calories, active minutes
-  - Most recent activity
+Auth model
+----------
+  • One-time setup (run once, from anywhere):
+        python3 poll-garmin.py --setup
+    Reads GARMIN_EMAIL + GARMIN_PASSWORD from ~/.openclaw/.env, logs in
+    (prompting for an MFA code only if your account has MFA enabled), and
+    saves tokens to ~/.garminconnect/.
 
-Writes two files:
-  GARMIN_DAILY.md   — today's full snapshot, overwritten each run (never grows)
-  GARMIN_ARCHIVE.md — rolling 28-day compact history, always in workspace.
-                      L1 uses this proactively to spot trends and advise.
+  • Scheduled / cron run (no interaction, no credential login ever):
+        python3 poll-garmin.py
+    Resumes from the cached token and auto-refreshes.  If the token is missing
+    or rejected it FLAGS TOM to re-run setup instead of attempting a login.
 
-Scheduled at 09:00 daily (NOT 06:xx — CRM runs at 06:00; 07:xx also busy).
+  • Token status (never logs in):
+        python3 poll-garmin.py --status
 
-Dependencies:
-  pip3 install --break-system-packages garminconnect garth
+  • Backfill history into the archive:
+        python3 poll-garmin.py --backfill 30
+
+Golden rule (enforced below): never call a credential login from the scheduled
+path.  A 429 anywhere writes a cooldown stamp that suppresses all login
+attempts for COOLDOWN_HOURS.
+
+Outputs:
+  GARMIN_DAILY.md   — today's full snapshot (overwritten each run)
+  GARMIN_ARCHIVE.md — rolling 28-day compact history for trend analysis
 """
-import getpass
 import os
 import sys
 import json
-from datetime import datetime, date, timedelta, timezone
+import time
+import argparse
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
+OPENCLAW    = Path.home() / ".openclaw"
+GARMIN_DIR  = OPENCLAW / "integrations" / "garmin"
+# garminconnect stores oauth1_token.json + oauth2_token.json here.
+TOKENSTORE  = Path(os.environ.get("GARMINTOKENS", str(Path.home() / ".garminconnect")))
+OUTPUT_MD   = OPENCLAW / "workspace" / "GARMIN_DAILY.md"
+ARCHIVE_MD  = OPENCLAW / "workspace" / "GARMIN_ARCHIVE.md"
+LOG_FILE    = OPENCLAW / "workspace" / "memory" / "poll-garmin-log.txt"
+BACKOFF_FILE = GARMIN_DIR / ".garmin_429_backoff"
 
-def _load_dotenv() -> None:
-    """Load ~/.openclaw/.env into os.environ so cron runs pick up credentials
-    without needing a manual 'source' step first."""
-    env_file = Path.home() / ".openclaw" / ".env"
-    if not env_file.exists():
-        return
-    with env_file.open() as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            # Strip leading 'export ' so both formats work:
-            #   KEY=value  and  export KEY=value
-            if line.startswith("export "):
-                line = line[7:]
-            key, _, val = line.partition("=")
-            key = key.strip()
-            val = val.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = val
-
-_load_dotenv()
-
-OPENCLAW          = Path.home() / ".openclaw"
-GARTH_HOME        = Path.home() / ".garth"          # garth standard token store
-OUTPUT_MD         = OPENCLAW / "workspace/GARMIN_DAILY.md"
-ARCHIVE_MD        = OPENCLAW / "workspace/GARMIN_ARCHIVE.md"
-LOG_FILE          = OPENCLAW / "workspace/memory/poll-garmin-log.txt"
-
-LOG_MAX_LINES     = 1000
-LOG_TRIM_TO       = 800
+LOG_MAX_LINES       = 1000
+LOG_TRIM_TO         = 800
 ARCHIVE_RETAIN_DAYS = 28
+COOLDOWN_HOURS      = 24      # after a 429, suppress all login attempts this long
+LOG_TO_STDOUT       = False   # keep Garmin chatter out of aggregated runtime logs
 
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# ── Logging ─────────────────────────────────────────────────────────────────────
 
 def log(msg: str):
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -89,10 +79,17 @@ def log(msg: str):
         tmp.replace(LOG_FILE)
     except Exception:
         tmp.unlink(missing_ok=True)
-    print(line, end="", flush=True)
+    if LOG_TO_STDOUT:
+        print(line, end="", flush=True)
 
 
-# ── Atomic write ──────────────────────────────────────────────────────────────
+def say(msg: str):
+    """Print to stdout (for interactive --setup/--status and mgmt-bot tails) and log."""
+    print(msg, flush=True)
+    log(msg)
+
+
+# ── Atomic write ────────────────────────────────────────────────────────────────
 
 def write_atomic(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,364 +102,492 @@ def write_atomic(path: Path, content: str):
         raise
 
 
-# ── Value helpers ─────────────────────────────────────────────────────────────
+# ── .env loader ───────────────────────────────────────────────────────────────--
 
-def _safe(val, unit: str = "", fallback: str = "n/a") -> str:
-    if val is None or val == -1:
-        return fallback
+def _load_dotenv() -> None:
+    env_file = OPENCLAW / ".env"
+    if not env_file.exists():
+        return
     try:
-        if isinstance(val, float) and val != val:  # NaN check
-            return fallback
+        for raw in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
     except Exception:
         pass
-    return f"{val}{unit}"
 
 
-def _fmt_dur(seconds) -> str:
-    if not seconds:
-        return "n/a"
-    try:
-        s = int(seconds)
-        h = s // 3600
-        m = (s % 3600) // 60
-        return f"{h}h {m}m" if h else f"{m}m"
-    except (TypeError, ValueError):
-        return "n/a"
+# ── Formatting helpers ───────────────────────────────────────────────────────---
 
-
-def _fmt_km(metres) -> str:
-    if not metres:
+def _safe(val, suffix: str = "") -> str:
+    if val is None or val == "" or val == -1:
         return "n/a"
-    try:
-        return f"{float(metres) / 1000:.2f} km"
-    except (TypeError, ValueError):
-        return "n/a"
+    return f"{val}{suffix}"
 
 
 def _fmt_int(val) -> str:
-    if val is None or val == -1:
-        return "n/a"
     try:
         return f"{int(val):,}"
     except (TypeError, ValueError):
         return "n/a"
 
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
-
-def get_client():
+def _fmt_dur(seconds) -> str:
     try:
-        from garminconnect import Garmin
+        s = int(seconds)
+    except (TypeError, ValueError):
+        return "n/a"
+    if s <= 0:
+        return "n/a"
+    h, m = divmod(s // 60, 60)
+    return f"{h}h {m}m" if h else f"{m}m"
+
+
+def _fmt_km(meters) -> str:
+    try:
+        km = float(meters) / 1000.0
+    except (TypeError, ValueError):
+        return "n/a"
+    if km <= 0:
+        return "n/a"
+    return f"{km:.2f} km"
+
+
+def _deep_find(obj, key: str):
+    """Recursively search a nested dict/list for the first value under `key`."""
+    if isinstance(obj, dict):
+        if key in obj and obj[key] not in (None, "", -1):
+            return obj[key]
+        for v in obj.values():
+            found = _deep_find(v, key)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _deep_find(v, key)
+            if found is not None:
+                return found
+    return None
+
+
+# ── 429 cooldown guard ───────────────────────────────────────────────────────---
+
+def _in_cooldown() -> int:
+    """Return remaining cooldown minutes if a recent 429 stamp exists, else 0."""
+    if not BACKOFF_FILE.exists():
+        return 0
+    try:
+        age = time.time() - BACKOFF_FILE.stat().st_mtime
+    except OSError:
+        return 0
+    remaining = COOLDOWN_HOURS * 3600 - age
+    return int(remaining / 60) if remaining > 0 else 0
+
+
+def _mark_429():
+    try:
+        GARMIN_DIR.mkdir(parents=True, exist_ok=True)
+        BACKOFF_FILE.touch()
+    except OSError:
+        pass
+
+
+def _clear_cooldown():
+    BACKOFF_FILE.unlink(missing_ok=True)
+
+
+# ── Authentication ───────────────────────────────────────────────────────────---
+
+def _import_garmin():
+    try:
+        from garminconnect import (
+            Garmin,
+            GarminConnectAuthenticationError,
+            GarminConnectTooManyRequestsError,
+        )
+        return Garmin, GarminConnectAuthenticationError, GarminConnectTooManyRequestsError
     except ImportError:
-        log("ERROR: garminconnect not installed. Run: pip3 install --break-system-packages garminconnect garth")
-        sys.exit(1)
+        raise RuntimeError(
+            "garminconnect not installed. Run: "
+            "pip3 install --break-system-packages --upgrade garminconnect"
+        )
 
-    GARTH_HOME.mkdir(parents=True, exist_ok=True)
 
-    interactive = sys.stdin.isatty()
+def _tokens_present() -> bool:
+    return (TOKENSTORE / "oauth1_token.json").exists()
 
-    # Attempt to resume a saved session — no credentials needed on repeat runs.
-    tokens_exist = any(GARTH_HOME.iterdir()) if GARTH_HOME.exists() else False
+
+def _mfa_prompt() -> str:
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "Garmin MFA required but no terminal is attached. "
+            "Run setup from a terminal: python3 poll-garmin.py --setup"
+        )
+    return input("Garmin MFA code: ").strip()
+
+
+def resume_client():
+    """
+    Resume a session from cached tokens WITHOUT any credential login.
+    Constructed with no email/password, so it can never fall through to an SSO
+    login (and therefore can never trigger a 429 ban) — it either loads valid
+    tokens / silently refreshes, or raises.
+    """
+    Garmin, AuthErr, TooMany = _import_garmin()
+    if not _tokens_present():
+        raise RuntimeError("NO_TOKENS")
     client = Garmin()
-    if tokens_exist:
-        try:
-            client.garth.load(str(GARTH_HOME))
-            client.get_full_name()
-            log(f"Garmin: resumed session from {GARTH_HOME}")
-            return client
-        except Exception as e:
-            err = str(e)
-            if "429" in err or "Too Many Requests" in err:
-                log("ERROR: Garmin rate-limited (429) even on token refresh — stop all retries and wait 24h.")
-                log("FLAG TO TOM: Garmin has rate-limited this IP. Do NOT retry. Wait until tomorrow.")
-                sys.exit(1)
-            # Session expired — only attempt re-login interactively to avoid hammering SSO.
-            if not interactive:
-                log("ERROR: Saved Garmin session has expired and cron cannot re-authenticate interactively.")
-                log("FLAG TO TOM: Run this command in a Pi terminal to refresh your Garmin session:")
-                log("  python3 ~/.openclaw/integrations/garmin/poll-garmin.py")
-                log("After that, the cron job will resume automatically.")
-                sys.exit(1)
-            log(f"Garmin: saved session expired ({e}) — attempting interactive re-login")
-    else:
-        if not interactive:
-            log("ERROR: No saved Garmin session found and cron cannot log in interactively.")
-            log("FLAG TO TOM: Run this command in a Pi terminal to create your first Garmin session:")
-            log("  python3 ~/.openclaw/integrations/garmin/poll-garmin.py")
-            sys.exit(1)
-        log("Garmin: no saved session found — performing first-time interactive login")
-
-    # Interactive login only reaches here when running in a real terminal.
-    email    = os.environ.get("GARMIN_EMAIL", "").strip()
-    password = os.environ.get("GARMIN_PASSWORD", "").strip()
-
-    if not email:
-        email = input("Garmin email: ").strip()
-    if not password:
-        password = getpass.getpass("Garmin password: ")
-
-    client = Garmin(email, password)
     try:
-        client.login()
+        client.login(str(TOKENSTORE))
+    except TooMany as e:
+        _mark_429()
+        raise RuntimeError(f"RATE_LIMITED: {e}")
+    except AuthErr as e:
+        raise RuntimeError(f"TOKENS_REJECTED: {e}")
     except Exception as e:
-        err = str(e)
-        if "429" in err or "Too Many Requests" in err:
-            log("ERROR: Garmin rate-limited (429). Wait several hours before trying again.")
-            log("FLAG TO TOM: Do NOT keep retrying — each attempt extends the ban.")
-            sys.exit(1)
-        elif "MFA" in err or "NEEDS_MFA" in err:
-            log("Garmin: MFA required")
-            mfa = input("Enter Garmin MFA code: ").strip()
-            client.login(mfa_code=mfa)
-        else:
-            log(f"ERROR: Garmin login failed: {e}")
-            raise
-
-    try:
-        client.garth.dump(str(GARTH_HOME))
-        log(f"Garmin: session tokens saved to {GARTH_HOME}")
-    except Exception as dump_err:
-        log(f"WARNING: Could not save tokens: {dump_err}")
-
+        # Connection/transport errors etc. — surface as a controlled failure so
+        # get_client_for_run()/cmd_status() never crash with a raw traceback.
+        raise RuntimeError(f"RESUME_FAILED: {e}")
     return client
 
 
-# ── Data fetchers ─────────────────────────────────────────────────────────────
+def login_and_save(interactive: bool):
+    """
+    One-time credential login (setup). Reads GARMIN_EMAIL/GARMIN_PASSWORD from
+    the environment, logs in (MFA prompt only if the account requires it), and
+    persists tokens to TOKENSTORE.
+    """
+    Garmin, AuthErr, TooMany = _import_garmin()
+    email    = os.environ.get("GARMIN_EMAIL", "").strip()
+    password = os.environ.get("GARMIN_PASSWORD", "").strip()
+    if not email or not password:
+        raise RuntimeError("GARMIN_EMAIL or GARMIN_PASSWORD missing from ~/.openclaw/.env")
 
-def _fetch(label: str, fn, *args, **kwargs):
+    TOKENSTORE.mkdir(parents=True, exist_ok=True)
+    mfa_cb = _mfa_prompt if interactive else None
+    client = Garmin(email=email, password=password, is_cn=False, prompt_mfa=mfa_cb)
     try:
-        result = fn(*args, **kwargs)
-        return result or {}
-    except Exception as e:
-        log(f"WARNING: {label} failed: {e}")
-        return {}
-
-
-def fetch_stats(client, today):
-    return _fetch("get_stats", client.get_stats, today)
-
-def fetch_hrv(client, today):
-    return _fetch("get_hrv_data", client.get_hrv_data, today)
-
-def fetch_sleep(client, today):
-    return _fetch("get_sleep_data", client.get_sleep_data, today)
-
-def fetch_spo2(client, today):
-    return _fetch("get_spo2_data", client.get_spo2_data, today)
-
-def fetch_respiration(client, today):
-    return _fetch("get_respiration_data", client.get_respiration_data, today)
-
-def fetch_body_battery(client, today):
+        client.login(str(TOKENSTORE))
+    except TooMany as e:
+        _mark_429()
+        raise RuntimeError(
+            f"Garmin SSO rate-limited (429): {e}. The ban is per-account and "
+            f"lasts 24-72h — do NOT retry. Wait, then run --setup once."
+        )
+    except AuthErr as e:
+        raise RuntimeError(f"Login failed (check credentials / MFA): {e}")
+    # Persist tokens explicitly (belt and braces — login() already dumps them).
     try:
-        data = client.get_body_battery(today, today)
-        return data
-    except Exception as e:
-        log(f"WARNING: get_body_battery failed: {e}")
-        return None
-
-def fetch_last_activity(client):
-    try:
-        acts = client.get_activities(0, 1)
-        return acts[0] if acts else {}
-    except Exception as e:
-        log(f"WARNING: get_activities failed: {e}")
-        return {}
-
-
-# ── Body battery parsing ──────────────────────────────────────────────────────
-
-def parse_body_battery(data):
-    """Return (high, low) strings from the raw body battery list."""
-    if not data:
-        return "n/a", "n/a"
-    values = []
-    try:
-        for entry in data:
-            charged = None
-            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
-                charged = entry[1]
-            elif isinstance(entry, dict):
-                charged = (entry.get("charged") or entry.get("value")
-                           or entry.get("bodyBatteryLevel"))
-            if charged is not None:
-                try:
-                    values.append(int(charged))
-                except (TypeError, ValueError):
-                    pass
-    except Exception as e:
-        log(f"WARNING: body battery parse error: {e}")
-    if not values:
-        return "n/a", "n/a"
-    return str(max(values)), str(min(values))
-
-
-# ── Markdown builder ──────────────────────────────────────────────────────────
-
-def build_markdown(stats: dict, hrv: dict, sleep: dict, spo2: dict,
-                   body_battery_raw, activity: dict) -> str:
-    now     = datetime.now()
-    today   = date.today().strftime("%A, %d %B %Y")
-    updated = now.strftime("%Y-%m-%d %H:%M")
-
-    # ── Stats ──
-    resting_hr    = _safe(stats.get("restingHeartRate"), " bpm")
-    steps         = _fmt_int(stats.get("totalSteps"))
-    calories      = _fmt_int(stats.get("totalKilocalories"))
-    active_cals   = _fmt_int(stats.get("activeKilocalories"))
-    avg_stress    = _safe(stats.get("averageStressLevel"))
-    avg_stress    = f"{avg_stress}/100" if avg_stress != "n/a" else "n/a"
-    intensity_mod = _fmt_int(stats.get("moderateIntensityMinutes"))
-    intensity_vig = _fmt_int(stats.get("vigorousIntensityMinutes"))
-    active_mins   = "n/a"
-    try:
-        m = int(stats.get("moderateIntensityMinutes") or 0)
-        v = int(stats.get("vigorousIntensityMinutes") or 0)
-        if m or v:
-            active_mins = f"{m + v} min ({m} mod + {v} vig)"
-    except (TypeError, ValueError):
-        pass
-
-    # ── HRV ──
-    hrv_summary  = hrv.get("hrvSummary") or {}
-    hrv_status   = _safe(hrv_summary.get("status"))
-    hrv_last     = _safe(hrv_summary.get("lastNight"), " ms")
-    hrv_weekly   = _safe(hrv_summary.get("weeklyAvg"), " ms")
-
-    # ── Sleep ──
-    sleep_dto    = sleep.get("dailySleepDTO") or {}
-    scores       = sleep_dto.get("sleepScores") or {}
-    overall      = scores.get("overall") or {}
-    sleep_score  = _safe(overall.get("value"), "/100")
-    sleep_secs   = (sleep_dto.get("sleepTimeSeconds")
-                    or sleep_dto.get("sleepTimeTotalSeconds"))
-    sleep_dur    = _fmt_dur(sleep_secs)
-    deep_dur     = _fmt_dur(sleep_dto.get("deepSleepSeconds"))
-    rem_dur      = _fmt_dur(sleep_dto.get("remSleepSeconds"))
-    light_dur    = _fmt_dur(sleep_dto.get("lightSleepSeconds"))
-    awake_dur    = _fmt_dur(sleep_dto.get("awakeSleepSeconds"))
-    avg_sleep_hr = _safe(sleep_dto.get("averageSpO2Value"))  # sometimes stored here
-    sleep_avg_hr = _safe(sleep_dto.get("averageSleepStress"))  # fallback label
-    # Avg HR during sleep — may be under restingHeartRate or sleepHeartRate
-    sleep_hr = _safe(sleep_dto.get("sleepHeartRate") or sleep_dto.get("avgSleepHeartRate"), " bpm")
-
-    # ── SpO2 ──
-    spo2_avg = "n/a"
-    try:
-        if isinstance(spo2, dict):
-            spo2_avg = _safe(spo2.get("averageSpO2") or spo2.get("averageSpo2"), " %")
-        elif isinstance(spo2, list) and spo2:
-            vals = [e.get("value") or e.get("spo2") for e in spo2 if isinstance(e, dict)]
-            vals = [v for v in vals if v is not None]
-            if vals:
-                spo2_avg = f"{sum(vals) / len(vals):.0f} %"
+        client.garth.dump(str(TOKENSTORE))
     except Exception:
         pass
+    _clear_cooldown()
+    try:
+        os.chmod(TOKENSTORE, 0o700)
+        for f in TOKENSTORE.glob("*"):
+            os.chmod(f, 0o600)
+    except OSError:
+        pass
+    return client
 
-    # ── Body battery ──
-    bb_high, bb_low = parse_body_battery(body_battery_raw)
 
-    # ── Activity ──
-    act_name = (activity.get("activityName")
-                or (activity.get("activityType") or {}).get("typeKey") or "n/a")
-    act_dist = _fmt_km(activity.get("distance"))
-    act_dur  = _fmt_dur(activity.get("duration"))
-    act_hr   = _safe(activity.get("averageHR"), " bpm")
-    act_date = (activity.get("startTimeLocal") or activity.get("startTimeGMT") or "")[:10] or "n/a"
+def get_client_for_run():
+    """
+    Auth path for scheduled/backfill runs. NEVER performs a credential login.
+    Exits cleanly with a clear flag if setup is needed.
+    """
+    mins = _in_cooldown()
+    if mins:
+        log(f"Garmin: in 429 cooldown for {mins}m more — skipping run to avoid worsening the ban.")
+        sys.exit(0)
+
+    if not _tokens_present():
+        log("ERROR: No cached Garmin tokens.")
+        log("FLAG TO TOM: run one-time setup → python3 ~/.openclaw/integrations/garmin/poll-garmin.py --setup")
+        sys.exit(1)
+
+    try:
+        client = resume_client()
+        log("Garmin: resumed session from cached tokens (auto-refresh).")
+        return client
+    except RuntimeError as e:
+        err = str(e)
+        if "RATE_LIMITED" in err:
+            log(f"ERROR: Garmin rate-limited (429) on resume — cooldown set. {err}")
+            sys.exit(1)
+        log(f"ERROR: Cached Garmin tokens rejected/invalid ({err}).")
+        log("FLAG TO TOM: re-run setup → python3 ~/.openclaw/integrations/garmin/poll-garmin.py --setup")
+        sys.exit(1)
+
+
+# ── Safe API call wrapper ──────────────────────────────────────────────────────-
+
+def _call(client, label: str, method_name: str, *args):
+    """Call a garminconnect method by name, swallowing per-metric errors."""
+    _, _, TooMany = _import_garmin()
+    fn = getattr(client, method_name, None)
+    if fn is None:
+        log(f"WARNING: {label}: method {method_name}() not in this garminconnect version")
+        return None
+    try:
+        return fn(*args)
+    except TooMany as e:
+        _mark_429()
+        log(f"ERROR: Garmin rate-limited (429) on {label} — cooldown set. {e}")
+        sys.exit(1)
+    except Exception as e:
+        log(f"WARNING: {label} failed: {e}")
+        return None
+
+
+# ── Data fetch ──────────────────────────────────────────────────────────────────
+
+def fetch_all(client, day: str) -> dict:
+    log(f"Garmin: fetching data for {day}")
+    data = {
+        "stats":      _call(client, "stats",      "get_stats",              day) or {},
+        "hr":         _call(client, "heart_rate",  "get_heart_rates",       day) or {},
+        "hrv":        _call(client, "hrv",         "get_hrv_data",          day) or {},
+        "sleep":      _call(client, "sleep",       "get_sleep_data",        day) or {},
+        "spo2":       _call(client, "spo2",        "get_spo2_data",         day) or {},
+        "stress":     _call(client, "stress",      "get_stress_data",       day) or {},
+        "readiness":  _call(client, "readiness",   "get_training_readiness", day) or {},
+        "body_bat":   _call(client, "body_battery", "get_body_battery",     day, day) or [],
+        "max_metrics": _call(client, "max_metrics", "get_max_metrics",      day) or {},
+    }
+    acts = _call(client, "activities", "get_activities", 0, 5)
+    data["activities"] = acts if isinstance(acts, list) else (acts or [])
+
+    # Post-workout recovery HR lives in activity details — fetch for the latest one.
+    data["recovery_hr"] = None
+    if data["activities"]:
+        latest = data["activities"][0]
+        rhr = _deep_find(latest, "recoveryHeartRate")
+        if rhr is None:
+            act_id = latest.get("activityId")
+            if act_id is not None:
+                details = _call(client, "activity_details", "get_activity", act_id)
+                rhr = _deep_find(details or {}, "recoveryHeartRate")
+        data["recovery_hr"] = rhr
+    return data
+
+
+# ── Extraction ───────────────────────────────────────────────────────────────---
+
+def extract(day: str, data: dict) -> dict:
+    stats     = data.get("stats") or {}
+    hr        = data.get("hr") or {}
+    hrv       = data.get("hrv") or {}
+    sleep_raw = data.get("sleep") or {}
+    spo2      = data.get("spo2") or {}
+    stress    = data.get("stress") or {}
+    readiness = data.get("readiness") or {}
+    body_bat  = data.get("body_bat") or []
+    maxm      = data.get("max_metrics") or {}
+    acts      = data.get("activities") or []
+
+    if isinstance(readiness, list):
+        readiness = readiness[0] if readiness else {}
+
+    out = {}
+    out["resting_hr"] = (stats.get("restingHeartRate")
+                         or hr.get("restingHeartRate"))
+
+    # HRV
+    hrv_summary = hrv.get("hrvSummary") if isinstance(hrv, dict) else {}
+    hrv_summary = hrv_summary or {}
+    out["hrv_last"]   = hrv_summary.get("lastNightAvg")
+    out["hrv_status"] = hrv_summary.get("status")
+    out["hrv_weekly"] = hrv_summary.get("weeklyAvg")
+
+    # Training readiness (recovery readiness)
+    out["readiness_score"]    = readiness.get("score")
+    out["readiness_level"]    = readiness.get("level")
+    out["readiness_feedback"] = (readiness.get("feedbackShort")
+                                 or readiness.get("feedbackLong"))
+
+    # Sleep
+    sdto = (sleep_raw.get("dailySleepDTO") if isinstance(sleep_raw, dict) else {}) or {}
+    out["sleep_secs"]  = sdto.get("sleepTimeSeconds")
+    out["deep_secs"]   = sdto.get("deepSleepSeconds")
+    out["rem_secs"]    = sdto.get("remSleepSeconds")
+    out["light_secs"]  = sdto.get("lightSleepSeconds")
+    out["awake_secs"]  = sdto.get("awakeSleepSeconds")
+    scores = sdto.get("sleepScores") or {}
+    out["sleep_score"] = (scores.get("overall") or {}).get("value") if isinstance(scores, dict) else None
+    out["sleep_hr"]    = sleep_raw.get("restingHeartRate") if isinstance(sleep_raw, dict) else None
+
+    # SpO2
+    out["spo2_avg"] = spo2.get("averageSpO2") if isinstance(spo2, dict) else None
+    out["spo2_low"] = spo2.get("lowestSpO2") if isinstance(spo2, dict) else None
+
+    # Stress (prefer dedicated endpoint, fall back to stats)
+    avg_stress = stress.get("avgStressLevel") if isinstance(stress, dict) else None
+    max_stress = stress.get("maxStressLevel") if isinstance(stress, dict) else None
+    if avg_stress in (None, -1):
+        avg_stress = stats.get("averageStressLevel")
+    if max_stress in (None, -1):
+        max_stress = stats.get("maxStressLevel")
+    out["avg_stress"] = avg_stress
+    out["max_stress"] = max_stress
+
+    # Body Battery (peak/low)
+    out["bb_high"], out["bb_low"] = _parse_body_battery(body_bat, stats)
+
+    # VO2 max
+    gen = maxm.get("generic") if isinstance(maxm, dict) else None
+    if isinstance(maxm, list) and maxm:
+        gen = (maxm[0] or {}).get("generic")
+    out["vo2max"] = (gen or {}).get("vo2MaxPreciseValue") or (gen or {}).get("vo2MaxValue") if gen else None
+
+    # Steps / calories / intensity minutes
+    out["steps"]       = stats.get("totalSteps")
+    out["calories"]    = stats.get("totalKilocalories")
+    out["active_cals"] = stats.get("activeKilocalories")
+    try:
+        mod = int(stats.get("moderateIntensityMinutes") or 0)
+        vig = int(stats.get("vigorousIntensityMinutes") or 0)
+        out["intensity_min"] = (mod, vig) if (mod or vig) else None
+    except (TypeError, ValueError):
+        out["intensity_min"] = None
+
+    # Recent activity + recovery HR
+    out["recovery_hr"] = data.get("recovery_hr")
+    if acts:
+        a = acts[0]
+        out["act_name"] = (a.get("activityName")
+                           or (a.get("activityType") or {}).get("typeKey") or "n/a")
+        out["act_date"] = (a.get("startTimeLocal") or a.get("startTimeGMT") or "")[:10] or "n/a"
+        out["act_dist"] = a.get("distance")
+        out["act_dur"]  = a.get("duration")
+        out["act_avg_hr"] = a.get("averageHR")
+        out["act_max_hr"] = a.get("maxHR")
+    else:
+        out["act_name"] = None
+    return out
+
+
+def _parse_body_battery(body_bat, stats) -> tuple:
+    high = low = None
+    if isinstance(stats, dict):
+        high = stats.get("bodyBatteryHighestValue")
+        low  = stats.get("bodyBatteryLowestValue")
+    if (high is None or low is None) and isinstance(body_bat, list):
+        levels = []
+        for day_entry in body_bat:
+            arr = (day_entry or {}).get("bodyBatteryValuesArray") or []
+            for point in arr:
+                # point shapes: [ts, level] or [ts, status, level]
+                if isinstance(point, list) and point:
+                    val = point[-1]
+                    if isinstance(val, (int, float)):
+                        levels.append(val)
+        if levels:
+            high = max(levels) if high is None else high
+            low  = min(levels) if low is None else low
+    return high, low
+
+
+# ── Markdown builders ────────────────────────────────────────────────────────---
+
+def build_markdown(day: str, x: dict) -> str:
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    if x.get("intensity_min"):
+        mod, vig = x["intensity_min"]
+        active_mins = f"{mod + vig} min ({mod} mod + {vig} vig)"
+    else:
+        active_mins = "n/a"
 
     lines = [
-        f"# Garmin Daily — {today}",
+        f"# Garmin Daily — {day}",
         f"_Last updated: {updated}_",
         "",
-        "## Heart Rate",
-        f"- **Resting HR**: {resting_hr}",
-        f"- **Avg HR during sleep**: {sleep_hr}",
+        "## Recovery & Readiness",
+        f"- **Training readiness**: {_safe(x.get('readiness_score'), '/100')}"
+        + (f" ({x['readiness_level']})" if x.get("readiness_level") else ""),
+        f"- **Readiness note**: {_safe(x.get('readiness_feedback'))}",
+        f"- **HRV status**: {_safe(x.get('hrv_status'))}",
+        f"- **HRV last night**: {_safe(x.get('hrv_last'), ' ms')}",
+        f"- **HRV weekly avg**: {_safe(x.get('hrv_weekly'), ' ms')}",
+        f"- **Body Battery high**: {_safe(x.get('bb_high'))}",
+        f"- **Body Battery low**: {_safe(x.get('bb_low'))}",
         "",
-        "## HRV",
-        f"- **Status**: {hrv_status}",
-        f"- **Last night**: {hrv_last}",
-        f"- **Weekly average**: {hrv_weekly}",
+        "## Heart Rate",
+        f"- **Resting HR**: {_safe(x.get('resting_hr'), ' bpm')}",
+        f"- **Avg HR during sleep**: {_safe(x.get('sleep_hr'), ' bpm')}",
+        f"- **Post-workout recovery HR**: {_safe(x.get('recovery_hr'), ' bpm')}",
         "",
         "## Sleep",
-        f"- **Duration**: {sleep_dur}",
-        f"- **Score**: {sleep_score}",
-        f"- **Deep**: {deep_dur}",
-        f"- **REM**: {rem_dur}",
-        f"- **Light**: {light_dur}",
-        f"- **Awake**: {awake_dur}",
+        f"- **Duration**: {_fmt_dur(x.get('sleep_secs'))}",
+        f"- **Score**: {_safe(x.get('sleep_score'), '/100')}",
+        f"- **Deep**: {_fmt_dur(x.get('deep_secs'))}",
+        f"- **REM**: {_fmt_dur(x.get('rem_secs'))}",
+        f"- **Light**: {_fmt_dur(x.get('light_secs'))}",
+        f"- **Awake**: {_fmt_dur(x.get('awake_secs'))}",
         "",
-        "## Oxygen",
-        f"- **SpO2 (overnight avg)**: {spo2_avg}",
+        "## Oxygen & Stress",
+        f"- **SpO2 (overnight avg)**: {_safe(x.get('spo2_avg'), '%')}",
+        f"- **SpO2 (lowest)**: {_safe(x.get('spo2_low'), '%')}",
+        f"- **Average stress**: {_safe(x.get('avg_stress'), '/100')}",
+        f"- **Peak stress**: {_safe(x.get('max_stress'), '/100')}",
         "",
-        "## Stress & Energy",
-        f"- **Average stress**: {avg_stress}",
-        f"- **Body battery high**: {bb_high}",
-        f"- **Body battery low**: {bb_low}",
-        "",
-        "## Activity",
-        f"- **Steps**: {steps}",
-        f"- **Calories (total)**: {calories} kcal",
-        f"- **Calories (active)**: {active_cals} kcal",
+        "## Fitness & Activity",
+        f"- **VO2 max**: {_safe(x.get('vo2max'))}",
+        f"- **Steps**: {_fmt_int(x.get('steps'))}",
+        f"- **Calories (total)**: {_safe(x.get('calories'), ' kcal')}",
+        f"- **Calories (active)**: {_safe(x.get('active_cals'), ' kcal')}",
         f"- **Active minutes**: {active_mins}",
         "",
         "## Most Recent Activity",
     ]
-
-    if activity:
+    if x.get("act_name"):
         lines += [
-            f"- **Name**: {act_name}",
-            f"- **Date**: {act_date}",
-            f"- **Distance**: {act_dist}",
-            f"- **Duration**: {act_dur}",
-            f"- **Avg HR**: {act_hr}",
+            f"- **Name**: {x.get('act_name')}",
+            f"- **Date**: {x.get('act_date')}",
+            f"- **Distance**: {_fmt_km(x.get('act_dist'))}",
+            f"- **Duration**: {_fmt_dur(x.get('act_dur'))}",
+            f"- **Avg HR**: {_safe(x.get('act_avg_hr'), ' bpm')}",
+            f"- **Max HR**: {_safe(x.get('act_max_hr'), ' bpm')}",
+            f"- **Recovery HR**: {_safe(x.get('recovery_hr'), ' bpm')}",
         ]
     else:
         lines.append("- No activity recorded")
-
     lines.append("")
     return "\n".join(lines)
 
 
-# ── Rolling archive (28-day compact history) ──────────────────────────────────
-
-def build_archive_entry(stats: dict, hrv: dict, sleep: dict, spo2: dict,
-                        body_battery_raw, activity: dict) -> str:
-    resting_hr  = _safe(stats.get("restingHeartRate"), " bpm")
-    steps       = _fmt_int(stats.get("totalSteps"))
-    avg_stress  = _safe(stats.get("averageStressLevel"), "/100")
-
-    hrv_summary = hrv.get("hrvSummary") or {}
-    hrv_val     = _safe(hrv_summary.get("lastNight"), " ms")
-    hrv_status  = _safe(hrv_summary.get("status"))
-    hrv_str     = f"{hrv_val} ({hrv_status})" if hrv_val != "n/a" else "n/a"
-
-    sleep_dto   = sleep.get("dailySleepDTO") or {}
-    scores      = sleep_dto.get("sleepScores") or {}
-    overall     = scores.get("overall") or {}
-    sleep_score = _safe(overall.get("value"), "/100")
-    sleep_secs  = (sleep_dto.get("sleepTimeSeconds")
-                   or sleep_dto.get("sleepTimeTotalSeconds"))
-    sleep_dur   = _fmt_dur(sleep_secs)
-    sleep_str   = f"{sleep_dur} ({sleep_score})" if sleep_dur != "n/a" else "n/a"
-
-    bb_high, bb_low = parse_body_battery(body_battery_raw)
-    bb_str = f"{bb_high}↑ {bb_low}↓" if bb_high != "n/a" else "n/a"
-
-    act_name = (activity.get("activityName")
-                or (activity.get("activityType") or {}).get("typeKey") or "")
-    act_dist = _fmt_km(activity.get("distance"))
-    act_str  = f"{act_name} {act_dist}".strip() if activity else "n/a"
-
+def build_archive_entry(x: dict) -> str:
+    rhr   = _safe(x.get("resting_hr"), " bpm")
+    ready = _safe(x.get("readiness_score"), "/100")
+    hrv_v = _safe(x.get("hrv_last"), " ms")
+    hrv_s = x.get("hrv_status")
+    hrv   = f"{hrv_v} ({hrv_s})" if hrv_v != "n/a" and hrv_s else hrv_v
+    sleep = _fmt_dur(x.get("sleep_secs"))
+    sc    = x.get("sleep_score")
+    sleep_str = f"{sleep} ({sc}/100)" if sleep != "n/a" and sc else sleep
+    stress = _safe(x.get("avg_stress"), "/100")
+    bb_h, bb_l = x.get("bb_high"), x.get("bb_low")
+    bb = f"{bb_h}↑ {bb_l}↓" if bb_h is not None else "n/a"
+    steps = _fmt_int(x.get("steps"))
+    act = x.get("act_name") or ""
+    act_str = f"{act} {_fmt_km(x.get('act_dist'))}".strip() if act else "n/a"
     return (
-        f"HR: {resting_hr} | HRV: {hrv_str} | Sleep: {sleep_str} | "
-        f"Stress: {avg_stress} | BB: {bb_str} | Steps: {steps} | Activity: {act_str}"
+        f"Readiness: {ready} | HR: {rhr} | HRV: {hrv} | Sleep: {sleep_str} | "
+        f"Stress: {stress} | BB: {bb} | Steps: {steps} | Activity: {act_str}"
     )
 
 
 def update_archive(entry_line: str, today_str: str):
     import re
     cutoff = (date.today() - timedelta(days=ARCHIVE_RETAIN_DAYS)).strftime("%Y-%m-%d")
-
     try:
         raw = ARCHIVE_MD.read_text(encoding="utf-8") if ARCHIVE_MD.exists() else ""
     except Exception as e:
@@ -471,7 +596,7 @@ def update_archive(entry_line: str, today_str: str):
 
     date_pattern = re.compile(r"^## (\d{4}-\d{2}-\d{2})$", re.MULTILINE)
     matches = list(date_pattern.finditer(raw))
-    sections: dict[str, str] = {}
+    sections: dict = {}
     for i, m in enumerate(matches):
         sec_date = m.group(1)
         start    = m.end()
@@ -502,31 +627,145 @@ def update_archive(entry_line: str, today_str: str):
         log(f"WARNING: Could not write archive: {e}")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Backfill ────────────────────────────────────────────────────────────────────
+
+def run_backfill(client, days: int):
+    import re
+    log(f"Backfill: starting — requesting {days} days of history")
+    raw = ARCHIVE_MD.read_text(encoding="utf-8") if ARCHIVE_MD.exists() else ""
+    date_pattern = re.compile(r"^## (\d{4}-\d{2}-\d{2})$", re.MULTILINE)
+    matches = list(date_pattern.finditer(raw))
+    sections: dict = {}
+    for i, m in enumerate(matches):
+        sec_date = m.group(1)
+        start    = m.end()
+        end      = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        sections[sec_date] = raw[start:end].strip()
+
+    today = date.today()
+    fetched = skipped = failed = 0
+    for offset in range(1, days + 1):
+        target = (today - timedelta(days=offset)).strftime("%Y-%m-%d")
+        if target in sections and sections[target].count(": n/a") < 5 \
+           and "n/a |" not in sections[target]:
+            skipped += 1
+            continue
+        try:
+            data  = fetch_all(client, target)
+            x     = extract(target, data)
+            sections[target] = build_archive_entry(x)
+            fetched += 1
+            log(f"Backfill: {target} — OK")
+        except SystemExit:
+            raise
+        except Exception as e:
+            log(f"Backfill: {target} — FAILED: {e}")
+            failed += 1
+        time.sleep(1)  # gentle pacing
+
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = [
+        "# Garmin Archive — Rolling History",
+        f"_Last updated: {updated} (backfill — {fetched} new days)_",
+        "",
+        "_One entry per day. HR = resting heart rate. BB = body battery high↑/low↓. "
+        "Sleep shown as duration (score/100)._",
+        "",
+    ]
+    for d in sorted(sections.keys(), reverse=True):
+        lines.append(f"## {d}")
+        lines.append(sections[d])
+        lines.append("")
+    try:
+        write_atomic(ARCHIVE_MD, "\n".join(lines))
+        log(f"Backfill complete: {fetched} fetched, {skipped} skipped, {failed} failed")
+    except Exception as e:
+        log(f"ERROR: Could not write archive after backfill: {e}")
+
+
+# ── Setup / status commands ──────────────────────────────────────────────────---
+
+def cmd_setup():
+    _load_dotenv()
+    say("=== Garmin Setup (one-time) ===")
+    say("Authenticating with GARMIN_EMAIL + GARMIN_PASSWORD from ~/.openclaw/.env")
+    interactive = sys.stdin.isatty()
+    if interactive:
+        say("If your account has MFA enabled you will be prompted for a code.")
+    try:
+        client = login_and_save(interactive=interactive)
+        name = client.get_full_name()
+        say(f"SUCCESS — logged in as: {name}")
+        say(f"Tokens cached in: {TOKENSTORE}/")
+        say("The daily cron at 09:00 will now resume from these tokens automatically.")
+    except RuntimeError as e:
+        say(f"ERROR: {e}")
+        sys.exit(1)
+    except Exception as e:
+        say(f"ERROR: setup failed: {e}")
+        sys.exit(1)
+
+
+def cmd_status():
+    _load_dotenv()
+    mins = _in_cooldown()
+    if mins:
+        say(f"429 cooldown active: {mins} minutes remaining (logins suppressed).")
+        say("Skipping token probe during cooldown to avoid contacting Garmin.")
+        return
+    if not _tokens_present():
+        say("No cached tokens — run setup: python3 poll-garmin.py --setup")
+        sys.exit(1)
+    try:
+        age_s = time.time() - (TOKENSTORE / "oauth1_token.json").stat().st_mtime
+        say(f"Token age: {int(age_s / 86400)} days (oauth1 token; auto-refreshes).")
+    except OSError:
+        pass
+    try:
+        client = resume_client()
+        name = client.get_full_name()
+        say(f"OK — tokens valid. Logged in as: {name}")
+    except RuntimeError as e:
+        if "RATE_LIMITED" in str(e):
+            say(f"Garmin rate-limited (429): {e}")
+        else:
+            say(f"Tokens invalid/rejected ({e}) — re-run setup: python3 poll-garmin.py --setup")
+        sys.exit(1)
+
+
+# ── Main ────────────────────────────────────────────────────────────────────────
 
 def main():
+    parser = argparse.ArgumentParser(description="Garmin Connect poller (garminconnect library)")
+    parser.add_argument("--setup", action="store_true",
+                        help="One-time credential login; caches tokens. MFA prompt if needed.")
+    parser.add_argument("--status", action="store_true",
+                        help="Report token validity/age. Never logs in.")
+    parser.add_argument("--backfill", type=int, metavar="DAYS", nargs="?", const=30,
+                        help="Fetch historical data into GARMIN_ARCHIVE.md (default 30 days).")
+    args = parser.parse_args()
+
+    if args.setup:
+        cmd_setup()
+        return
+    if args.status:
+        cmd_status()
+        return
+
+    _load_dotenv()
     log("Garmin poller starting")
     today = date.today().strftime("%Y-%m-%d")
 
-    try:
-        client = get_client()
-    except SystemExit:
-        raise
-    except Exception as e:
-        log(f"ERROR: Garmin login failed: {e}")
-        log("FLAG TO TOM: poll-garmin.py could not authenticate with Garmin Connect.")
-        sys.exit(1)
+    client = get_client_for_run()
 
-    log(f"Fetching data for {today}")
-    stats    = fetch_stats(client, today)
-    hrv      = fetch_hrv(client, today)
-    sleep    = fetch_sleep(client, today)
-    spo2     = fetch_spo2(client, today)
-    body_bat = fetch_body_battery(client, today)
-    activity = fetch_last_activity(client)
+    if args.backfill:
+        run_backfill(client, args.backfill)
+        return
 
-    md = build_markdown(stats, hrv, sleep, spo2, body_bat, activity)
+    data = fetch_all(client, today)
+    x    = extract(today, data)
 
+    md = build_markdown(today, x)
     try:
         write_atomic(OUTPUT_MD, md)
         log(f"Written: {OUTPUT_MD}")
@@ -536,12 +775,11 @@ def main():
         sys.exit(1)
 
     try:
-        archive_entry = build_archive_entry(stats, hrv, sleep, spo2, body_bat, activity)
-        update_archive(archive_entry, today)
+        update_archive(build_archive_entry(x), today)
     except Exception as e:
         log(f"WARNING: Archive update failed: {e} — daily file is unaffected")
 
-    log("Garmin poller complete")
+    say("Garmin poller complete")
 
 
 if __name__ == "__main__":
