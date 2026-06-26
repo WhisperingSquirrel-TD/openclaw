@@ -6,6 +6,22 @@ This file is the **map**. Detailed knowledge lives in [`knowledge/`](./knowledge
 
 ---
 
+## How to use & maintain this knowledge base
+
+**Using it (every session):**
+1. Read this map first — it is small and always worth loading. The "Critical rules" below apply on every session without opening any sub-file.
+2. To answer a question or do a task, find the matching entry in "Where to find things" and open **only** that file. Follow its "Related" links to siblings as needed — do not bulk-read `knowledge/`.
+3. Trust the file you open over your memory. A path/flag/command in a doc is a claim about a point in time; if it conflicts with the live repo or Pi, the live system wins — then fix the doc.
+
+**Maintaining it (whenever you learn or change something durable):**
+1. Put the detail in the **right topic file** under `knowledge/` (create a new one only for a genuinely new topic). Keep `replit.md` thin — never grow it back into a monolith.
+2. If you add or rename a topic file, add a one-line pointer here in "Where to find things" **and** a row in [`knowledge/README.md`](./knowledge/README.md).
+3. Cross-link: add the new file to the "Related" line of any sibling it relates to, and use relative anchors (e.g. `./security.md#exec-security-denylist`) for inline refs.
+4. A guardrail that must apply on *every* session goes in "Critical rules" below (because this map is always loaded); its detail goes in the topic file it links to.
+5. After any doc edit, verify links still resolve and remember these docs are **repo-only** (not deployed to the Pi) — so a doc change still needs a Git push to reach GitHub, but does not need the Pi install step.
+
+---
+
 ## Critical rules — always apply (do not need to open a sub-file)
 
 These are guardrails that apply on every session. Detail is linked, but the rule itself lives here so it is never missed.

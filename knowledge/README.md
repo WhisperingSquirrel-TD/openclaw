@@ -5,6 +5,14 @@
 >
 > These docs are **repo-only agent reference** — they are not deployed to the Pi (see [Pi deployment](./pi-deployment.md)).
 
+## How to maintain these files
+
+- **Add detail to the right topic file**, not to `../replit.md` (keep the map thin). Create a new file only for a genuinely new topic.
+- **When you add/rename a file**, update both this index table and the "Where to find things" pointer in [`../replit.md`](../replit.md).
+- **Cross-link**: every file starts with a Map + index link and a "Related" line to its siblings; inline refs use relative anchors (e.g. `./security.md#exec-security-denylist`). Add new files to the "Related" line of anything they relate to.
+- **Always-on guardrails** belong in `../replit.md`'s "Critical rules" section (that file is always loaded); the detail stays here in the linked topic file.
+- After editing, confirm internal links/anchors still resolve. Doc changes are repo-only — push to GitHub via the Replit Git pane, but they do **not** require the Pi install step.
+
 ## Core
 
 | File | What's in it |
