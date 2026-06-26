@@ -40,6 +40,9 @@ const TaskSystemToolSchema = Type.Object(
     kind: Type.Optional(stringEnum(TASK_ENTITY_KINDS)),
     id: Type.Optional(Type.String()),
     view: Type.Optional(stringEnum(TASK_SYSTEM_VIEWS)),
+    parent_id: Type.Optional(Type.String()),
+    state: Type.Optional(Type.String()),
+    owner: Type.Optional(Type.String()),
     payload: Type.Optional(Type.Object({}, { additionalProperties: true })),
     baseUrl: Type.Optional(Type.String()),
     authToken: Type.Optional(Type.String()),
@@ -118,6 +121,18 @@ function resolveViewPath(view: string) {
     default:
       throw new ToolInputError(`Unsupported view: ${view}`);
   }
+}
+
+function appendViewFilters(path: string, params: Record<string, unknown>) {
+  const query = new URLSearchParams();
+  for (const key of ["parent_id", "state", "owner"]) {
+    const value = readStringParam(params, key, { trim: true });
+    if (value) {
+      query.set(key, value);
+    }
+  }
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
 }
 
 async function callTaskSystem(params: {
@@ -274,7 +289,7 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
         const view = readStringParam(params, "view", { required: true });
         const result = await callTaskSystem({
           method: "GET",
-          path: `/${resolveViewPath(view)}`,
+          path: `/${appendViewFilters(resolveViewPath(view), params)}`,
           baseUrl,
           token: authToken,
           timeoutMs,
@@ -320,6 +335,7 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
           baseUrl,
           token: authToken,
           timeoutMs,
+          payload,
         });
         return jsonResult({ ok: true, result });
       }
