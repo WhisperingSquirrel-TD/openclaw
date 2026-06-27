@@ -56,13 +56,16 @@ OPENCLAW   = HOME / ".openclaw"
 WORKSPACE  = OPENCLAW / "workspace"
 MEMORY     = WORKSPACE / "memory"
 OUTPUT_MD  = WORKSPACE / "SYSTEM_HEALTH.md"
+BACKUP_HEALTH_MD = WORKSPACE / "memory/sharepoint-backup-health.md"
 CODE_REPO  = HOME / "openclaw"
 WORKSPACE_REPO = WORKSPACE
 SP_BACKUP_STATE = OPENCLAW / "integrations/microsoft/sharepoint-backup-state.json"
 SP_BACKUP_LOG = WORKSPACE / "memory/sharepoint-backup-log.txt"
 SP_BACKUP_TIMER = "openclaw-sharepoint-backup.timer"
-EXPENSE_WATCHER_STATE = OPENCLAW / "runtime/expense-intake-watcher/state.json"
-EXPENSE_WATCHER_LOG = OPENCLAW / "runtime/expense-intake-watcher/watcher.log"
+EXPENSE_WATCHER_STATE = OPENCLAW / "runtime/inbound-watch-router/state.json"
+EXPENSE_WATCHER_LEGACY_STATE = OPENCLAW / "runtime/expense-intake-watcher/state.json"
+EXPENSE_WATCHER_LOG = OPENCLAW / "runtime/inbound-watch-router/watcher.log"
+EXPENSE_WATCHER_LEGACY_LOG = OPENCLAW / "runtime/expense-intake-watcher/watcher.log"
 EXPENSE_WATCHER_TIMER = "expense-intake-watcher.timer"
 REPORT_POLLER_STATE = OPENCLAW / "integrations/stackstone/report-poller-state.json"
 ENQUIRY_POLLER_STATE = OPENCLAW / "integrations/stackstone/enquiry-poller-state.json"
@@ -414,25 +417,41 @@ def check_github_sync() -> tuple[list[str], list[str]]:
     return issues, info
 
 
-def check_sharepoint_backup_health() -> tuple[list[str], list[str]]:
+def check_sharepoint_backup_health() -> tuple[list[str], list[str], dict]:
     issues = []
     info = []
     recent_success = False
     age = _mtime_age_minutes(SP_BACKUP_STATE)
     state = _load_json_file(SP_BACKUP_STATE)
+    details: dict = {
+        "result_shape": "coverage_incomplete",
+        "status": "unknown",
+        "updated_age_minutes": None,
+        "recent_success": False,
+        "timer_enabled": None,
+        "timer_state_readable": True,
+        "notes": [],
+    }
 
     if age is None or state is None:
         issues.append("SharePoint backup: state file missing or unreadable — backup may never have completed")
+        details["notes"].append("State file missing or unreadable.")
     else:
         updated_age = _age_minutes_from_iso(state.get("updated_utc")) or age
         status = state.get("status") or "unknown"
+        details["status"] = status
+        details["updated_age_minutes"] = updated_age
         info.append(f"SharePoint backup: {status} — last successful state update {_format_age_minutes(updated_age)} ago")
         if updated_age > (26 * 60):
             issues.append(f"SharePoint backup: stale ({_format_age_minutes(updated_age)} since last successful state update)")
+            details["notes"].append("Last successful state update is beyond the allowed backup window.")
         if status != 'ok':
             issues.append("SharePoint backup: latest recorded state is not OK")
+            details["notes"].append("Latest recorded backup state is not OK.")
         else:
             recent_success = updated_age <= (26 * 60)
+            if recent_success:
+                details["notes"].append("Recent successful backup is proven by the state file.")
 
     log_age = _mtime_age_minutes(SP_BACKUP_LOG)
     if log_age is not None and log_age <= (26 * 60):
@@ -440,23 +459,42 @@ def check_sharepoint_backup_health() -> tuple[list[str], list[str]]:
             lines = SP_BACKUP_LOG.read_text(encoding='utf-8', errors='replace').splitlines()[-200:]
             if any('SharePoint backup completed successfully.' in line for line in lines):
                 recent_success = True
+                details["notes"].append("Recent successful backup is also corroborated by the backup log.")
         except Exception:
-            pass
+            details["notes"].append("Backup log could not be parsed for recent success corroboration.")
+
+    details["recent_success"] = recent_success
 
     rc, out, err = _run(["systemctl", "--user", "is-enabled", SP_BACKUP_TIMER])
+    timer_enabled = rc == 0 and out.strip() == 'enabled'
+    details["timer_enabled"] = timer_enabled
     if rc != 0 or out.strip() != 'enabled':
         if recent_success:
-            issues.append("SharePoint backup: timer state not readable as enabled, but recent backup success is proven by state/log")
+            details["notes"].append("Timer-read anomaly: timer not readable as enabled, but recent success is proven.")
         else:
             issues.append("SharePoint backup: timer not enabled")
+            details["notes"].append("Timer is not enabled and there is no strong recent-success proof to offset that.")
 
     rc, out, err = _run(["systemctl", "--user", "show", SP_BACKUP_TIMER, "--property=NextElapseUSecRealtime", "--property=LastTriggerUSec"], cwd=WORKSPACE)
+    timer_state_readable = rc == 0
+    details["timer_state_readable"] = timer_state_readable
     if rc != 0:
         if recent_success:
-            issues.append("SharePoint backup: could not read timer state, but recent backup success is proven by state/log")
+            details["notes"].append("Timer state could not be read, but recent success is proven.")
         else:
             issues.append("SharePoint backup: could not read timer state")
-    return issues, info
+            details["notes"].append("Timer state is unreadable and there is no strong recent-success proof.")
+
+    if recent_success and details["status"] == "ok" and timer_enabled and timer_state_readable:
+        details["result_shape"] = "healthy"
+    elif recent_success and details["status"] == "ok":
+        details["result_shape"] = "acceptable_drift"
+    elif issues:
+        details["result_shape"] = "persistent_failure"
+    else:
+        details["result_shape"] = "coverage_incomplete"
+
+    return issues, info, details
 
 
 def check_stackstone_report_poller_state() -> list[str]:
@@ -509,12 +547,35 @@ def build_health_report(issues: list[str], info: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_output(content: str) -> None:
-    OUTPUT_MD.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUTPUT_MD.with_suffix(".tmp")
+def build_sharepoint_backup_health_report(details: dict) -> str:
+    lines = [
+        "# SharePoint Backup Health",
+        f"_Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_",
+        "",
+        f"- Result shape: `{details.get('result_shape', 'unknown')}`",
+        f"- Latest recorded status: `{details.get('status', 'unknown')}`",
+        f"- Last successful state age: {_format_age_minutes(details.get('updated_age_minutes'))}",
+        f"- Recent success proven: `{details.get('recent_success')}`",
+        f"- Timer enabled: `{details.get('timer_enabled')}`",
+        f"- Timer state readable: `{details.get('timer_state_readable')}`",
+        "",
+        "## Notes",
+    ]
+    notes = details.get("notes") or []
+    if notes:
+        lines.extend(f"- {note}" for note in notes)
+    else:
+        lines.append("- No additional notes.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_output(content: str, path: Path = OUTPUT_MD) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
     try:
         tmp.write_text(content, encoding="utf-8")
-        tmp.replace(OUTPUT_MD)
+        tmp.replace(path)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
@@ -538,7 +599,7 @@ def main() -> None:
     report_issues = check_stackstone_report_poller_state()
     rem_issues  = check_reminder_failures()
     git_issues, git_info  = check_github_sync()
-    spb_issues, spb_info  = check_sharepoint_backup_health()
+    spb_issues, spb_info, sp_details  = check_sharepoint_backup_health()
 
     issues.extend(log_issues)
     issues.extend(feed_issues)
@@ -549,10 +610,12 @@ def main() -> None:
     issues.extend(git_issues)
     issues.extend(spb_issues)
     info.extend(git_info)
-    info.extend(spb_info)
+    if sp_details.get("result_shape") != "healthy":
+        info.extend(spb_info)
 
     report = build_health_report(issues, info)
     write_output(report)
+    write_output(build_sharepoint_backup_health_report(sp_details), BACKUP_HEALTH_MD)
 
     if issues:
         print(f"[{ts}] [health-check] {len(issues)} issue(s) found — written to SYSTEM_HEALTH.md",
