@@ -140,12 +140,12 @@ def _fmt_int(val) -> str:
         return "n/a"
 
 
-def _fmt_dur(seconds) -> str:
+def _fmt_dur(seconds, zero_ok: bool = False) -> str:
     try:
         s = int(seconds)
     except (TypeError, ValueError):
         return "n/a"
-    if s <= 0:
+    if s < 0 or (s == 0 and not zero_ok):
         return "n/a"
     h, m = divmod(s // 60, 60)
     return f"{h}h {m}m" if h else f"{m}m"
@@ -159,6 +159,29 @@ def _fmt_km(meters) -> str:
     if km <= 0:
         return "n/a"
     return f"{km:.2f} km"
+
+
+# Tokens for absent values — distinguish "we couldn't fetch it" from "the watch
+# didn't record it", so a normal gap doesn't read like a failure.
+MISSING_NO_DATA = "— not recorded"
+MISSING_ERROR   = "⚠️ unavailable (fetch failed)"
+
+
+def _val(value, errored: bool = False, fmt=None, suffix: str = "") -> str:
+    """Render a metric value, or a clear status when it's absent.
+
+    errored=True means the source endpoint actually failed to fetch this run
+    (→ reads as a problem); otherwise an absent value is shown as simply not
+    recorded, so a sensor that's off / not worn / not-yet-measured doesn't look
+    like an error.
+    """
+    missing = MISSING_ERROR if errored else MISSING_NO_DATA
+    if value is None or value == "" or value == -1:
+        return missing
+    if fmt is not None:
+        out = fmt(value)
+        return missing if out == "n/a" else out
+    return f"{value}{suffix}"
 
 
 def _deep_find(obj, key: str):
@@ -386,12 +409,19 @@ def get_client_for_run():
 
 # ── Safe API call wrapper ──────────────────────────────────────────────────────-
 
+# Endpoints that errored on the current run (raised, or method missing in the
+# installed garminconnect). The markdown writer reads this to tell a real fetch
+# failure ("unavailable") apart from data that simply wasn't recorded.
+_FETCH_ERRORS: set = set()
+
+
 def _call(client, label: str, method_name: str, *args):
     """Call a garminconnect method by name, swallowing per-metric errors."""
     _, _, TooMany = _import_garmin()
     fn = getattr(client, method_name, None)
     if fn is None:
         log(f"WARNING: {label}: method {method_name}() not in this garminconnect version")
+        _FETCH_ERRORS.add(label)
         return None
     try:
         return fn(*args)
@@ -401,6 +431,7 @@ def _call(client, label: str, method_name: str, *args):
         sys.exit(1)
     except Exception as e:
         log(f"WARNING: {label} failed: {e}")
+        _FETCH_ERRORS.add(label)
         return None
 
 
@@ -408,6 +439,7 @@ def _call(client, label: str, method_name: str, *args):
 
 def fetch_all(client, day: str) -> dict:
     log(f"Garmin: fetching data for {day}")
+    _FETCH_ERRORS.clear()
     data = {
         "stats":      _call(client, "stats",      "get_stats",              day) or {},
         "hr":         _call(client, "heart_rate",  "get_heart_rates",       day) or {},
@@ -433,6 +465,7 @@ def fetch_all(client, day: str) -> dict:
                 details = _call(client, "activity_details", "get_activity", act_id)
                 rhr = _deep_find(details or {}, "recoveryHeartRate")
         data["recovery_hr"] = rhr
+    data["_errors"] = set(_FETCH_ERRORS)
     return data
 
 
@@ -454,6 +487,7 @@ def extract(day: str, data: dict) -> dict:
         readiness = readiness[0] if readiness else {}
 
     out = {}
+    out["_errors"] = data.get("_errors") or set()
     out["resting_hr"] = (stats.get("restingHeartRate")
                          or hr.get("restingHeartRate"))
 
@@ -508,11 +542,16 @@ def extract(day: str, data: dict) -> dict:
     out["steps"]       = stats.get("totalSteps")
     out["calories"]    = stats.get("totalKilocalories")
     out["active_cals"] = stats.get("activeKilocalories")
-    try:
-        mod = int(stats.get("moderateIntensityMinutes") or 0)
-        vig = int(stats.get("vigorousIntensityMinutes") or 0)
-        out["intensity_min"] = (mod, vig) if (mod or vig) else None
-    except (TypeError, ValueError):
+    # Emit the pair whenever stats was fetched, so a genuine zero shows "0 min"
+    # instead of reading like missing data.
+    if isinstance(stats, dict) and stats:
+        try:
+            mod = int(stats.get("moderateIntensityMinutes") or 0)
+            vig = int(stats.get("vigorousIntensityMinutes") or 0)
+            out["intensity_min"] = (mod, vig)
+        except (TypeError, ValueError):
+            out["intensity_min"] = None
+    else:
         out["intensity_min"] = None
 
     # Recent activity + recovery HR
@@ -556,51 +595,67 @@ def _parse_body_battery(body_bat, stats) -> tuple:
 
 def build_markdown(day: str, x: dict) -> str:
     updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    err = x.get("_errors") or set()
 
-    if x.get("intensity_min"):
-        mod, vig = x["intensity_min"]
+    def failed(*labels) -> bool:
+        """True if any of these endpoints failed to fetch this run."""
+        return any(l in err for l in labels)
+
+    def failed_all(*labels) -> bool:
+        """True only if every fallback source for a field failed."""
+        return all(l in err for l in labels)
+
+    _dur = lambda v: _fmt_dur(v, zero_ok=True)
+
+    im = x.get("intensity_min")
+    if im is not None:
+        mod, vig = im
         active_mins = f"{mod + vig} min ({mod} mod + {vig} vig)"
     else:
-        active_mins = "n/a"
+        active_mins = MISSING_ERROR if failed("stats") else MISSING_NO_DATA
 
     lines = [
         f"# Garmin Daily — {day}",
         f"_Last updated: {updated}_",
         "",
+        f"_Status key — '{MISSING_NO_DATA}' = no reading captured (sensor off, "
+        f"watch not worn, or not yet measured); '{MISSING_ERROR}' = could not be "
+        f"fetched from Garmin (see log)._",
+        "",
         "## Recovery & Readiness",
-        f"- **Training readiness**: {_safe(x.get('readiness_score'), '/100')}"
+        f"- **Training readiness**: {_val(x.get('readiness_score'), failed('readiness'), suffix='/100')}"
         + (f" ({x['readiness_level']})" if x.get("readiness_level") else ""),
-        f"- **Readiness note**: {_safe(x.get('readiness_feedback'))}",
-        f"- **HRV status**: {_safe(x.get('hrv_status'))}",
-        f"- **HRV last night**: {_safe(x.get('hrv_last'), ' ms')}",
-        f"- **HRV weekly avg**: {_safe(x.get('hrv_weekly'), ' ms')}",
-        f"- **Body Battery high**: {_safe(x.get('bb_high'))}",
-        f"- **Body Battery low**: {_safe(x.get('bb_low'))}",
+        f"- **Readiness note**: {_val(x.get('readiness_feedback'), failed('readiness'))}",
+        f"- **HRV status**: {_val(x.get('hrv_status'), failed('hrv'))}",
+        f"- **HRV last night**: {_val(x.get('hrv_last'), failed('hrv'), suffix=' ms')}",
+        f"- **HRV weekly avg**: {_val(x.get('hrv_weekly'), failed('hrv'), suffix=' ms')}",
+        f"- **Body Battery high**: {_val(x.get('bb_high'), failed_all('stats', 'body_battery'))}",
+        f"- **Body Battery low**: {_val(x.get('bb_low'), failed_all('stats', 'body_battery'))}",
         "",
         "## Heart Rate",
-        f"- **Resting HR**: {_safe(x.get('resting_hr'), ' bpm')}",
-        f"- **Avg HR during sleep**: {_safe(x.get('sleep_hr'), ' bpm')}",
-        f"- **Post-workout recovery HR**: {_safe(x.get('recovery_hr'), ' bpm')}",
+        f"- **Resting HR**: {_val(x.get('resting_hr'), failed_all('stats', 'heart_rate'), suffix=' bpm')}",
+        f"- **Avg HR during sleep**: {_val(x.get('sleep_hr'), failed('sleep'), suffix=' bpm')}",
+        f"- **Post-workout recovery HR**: {_val(x.get('recovery_hr'), failed('activities', 'activity_details'), suffix=' bpm')}",
         "",
         "## Sleep",
-        f"- **Duration**: {_fmt_dur(x.get('sleep_secs'))}",
-        f"- **Score**: {_safe(x.get('sleep_score'), '/100')}",
-        f"- **Deep**: {_fmt_dur(x.get('deep_secs'))}",
-        f"- **REM**: {_fmt_dur(x.get('rem_secs'))}",
-        f"- **Light**: {_fmt_dur(x.get('light_secs'))}",
-        f"- **Awake**: {_fmt_dur(x.get('awake_secs'))}",
+        f"- **Duration**: {_val(x.get('sleep_secs'), failed('sleep'), fmt=_dur)}",
+        f"- **Score**: {_val(x.get('sleep_score'), failed('sleep'), suffix='/100')}",
+        f"- **Deep**: {_val(x.get('deep_secs'), failed('sleep'), fmt=_dur)}",
+        f"- **REM**: {_val(x.get('rem_secs'), failed('sleep'), fmt=_dur)}",
+        f"- **Light**: {_val(x.get('light_secs'), failed('sleep'), fmt=_dur)}",
+        f"- **Awake**: {_val(x.get('awake_secs'), failed('sleep'), fmt=_dur)}",
         "",
         "## Oxygen & Stress",
-        f"- **SpO2 (overnight avg)**: {_safe(x.get('spo2_avg'), '%')}",
-        f"- **SpO2 (lowest)**: {_safe(x.get('spo2_low'), '%')}",
-        f"- **Average stress**: {_safe(x.get('avg_stress'), '/100')}",
-        f"- **Peak stress**: {_safe(x.get('max_stress'), '/100')}",
+        f"- **SpO2 (overnight avg)**: {_val(x.get('spo2_avg'), failed('spo2'), suffix='%')}",
+        f"- **SpO2 (lowest)**: {_val(x.get('spo2_low'), failed('spo2'), suffix='%')}",
+        f"- **Average stress**: {_val(x.get('avg_stress'), failed_all('stress', 'stats'), suffix='/100')}",
+        f"- **Peak stress**: {_val(x.get('max_stress'), failed_all('stress', 'stats'), suffix='/100')}",
         "",
         "## Fitness & Activity",
-        f"- **VO2 max**: {_safe(x.get('vo2max'))}",
-        f"- **Steps**: {_fmt_int(x.get('steps'))}",
-        f"- **Calories (total)**: {_safe(x.get('calories'), ' kcal')}",
-        f"- **Calories (active)**: {_safe(x.get('active_cals'), ' kcal')}",
+        f"- **VO2 max**: {_val(x.get('vo2max'), failed('max_metrics'))}",
+        f"- **Steps**: {_val(x.get('steps'), failed('stats'), fmt=_fmt_int)}",
+        f"- **Calories (total)**: {_val(x.get('calories'), failed('stats'), suffix=' kcal')}",
+        f"- **Calories (active)**: {_val(x.get('active_cals'), failed('stats'), suffix=' kcal')}",
         f"- **Active minutes**: {active_mins}",
         "",
         "## Most Recent Activity",
@@ -609,14 +664,15 @@ def build_markdown(day: str, x: dict) -> str:
         lines += [
             f"- **Name**: {x.get('act_name')}",
             f"- **Date**: {x.get('act_date')}",
-            f"- **Distance**: {_fmt_km(x.get('act_dist'))}",
-            f"- **Duration**: {_fmt_dur(x.get('act_dur'))}",
-            f"- **Avg HR**: {_safe(x.get('act_avg_hr'), ' bpm')}",
-            f"- **Max HR**: {_safe(x.get('act_max_hr'), ' bpm')}",
-            f"- **Recovery HR**: {_safe(x.get('recovery_hr'), ' bpm')}",
+            f"- **Distance**: {_val(x.get('act_dist'), failed('activities'), fmt=_fmt_km)}",
+            f"- **Duration**: {_val(x.get('act_dur'), failed('activities'), fmt=_fmt_dur)}",
+            f"- **Avg HR**: {_val(x.get('act_avg_hr'), failed('activities'), suffix=' bpm')}",
+            f"- **Max HR**: {_val(x.get('act_max_hr'), failed('activities'), suffix=' bpm')}",
+            f"- **Recovery HR**: {_val(x.get('recovery_hr'), failed('activities', 'activity_details'), suffix=' bpm')}",
         ]
     else:
-        lines.append("- No activity recorded")
+        lines.append("- No activity recorded"
+                     + (" (could not fetch activities — see log)" if failed("activities") else ""))
     lines.append("")
     return "\n".join(lines)
 

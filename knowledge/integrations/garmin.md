@@ -73,14 +73,39 @@ responses (`get_stats`, `get_heart_rates`, `get_hrv_data`, `get_sleep_data`,
 `get_spo2_data`, `get_stress_data`, `get_training_readiness`, `get_body_battery`,
 `get_max_metrics`, `get_activities` / `get_activity`). Note the library exposes
 `get_rhr_day` / `get_heart_rates` — there is **no** `get_resting_heart_rate`. If a
-field is missing on a given account/device the poller writes `n/a` and continues;
-upgrade the library (`pip3 install --break-system-packages --upgrade garminconnect`)
-if Garmin changes a response shape.
+field is missing on a given account/device the poller writes a status token (see
+below) and continues; upgrade the library
+(`pip3 install --break-system-packages --upgrade garminconnect`) if Garmin changes
+a response shape.
 
-### Diagnosing partial data (some fields populate, others stay `n/a`)
+### Two status tokens in `GARMIN_DAILY.md` (absent ≠ error)
+
+`build_markdown()` never writes a bare `n/a`. Every absent field renders via
+`_val(value, errored=...)` as one of two tokens so a normal gap doesn't read like
+a failure:
+
+- **`— not recorded`** — the value is simply absent (sensor off / watch not worn /
+  metric not measured yet / device doesn't support it). This is the *expected*
+  state for things like SpO2 when Pulse Ox is off, or readiness on a model that
+  doesn't compute it. **Not an error.**
+- **`⚠️ unavailable (fetch failed)`** — the source endpoint actually failed this
+  run (raised, rate-limited→handled separately, or the method is missing in the
+  installed `garminconnect`). This *is* a problem — check the log.
+
+The writer decides which token by consulting `x["_errors"]`, a set of endpoint
+labels that errored on the run. `_call()` adds its `label` to module-level
+`_FETCH_ERRORS` on any failure; `fetch_all()` clears it at the start and snapshots
+it into `data["_errors"]`, which `extract()` carries to `out["_errors"]`. Fields
+with multiple fallback sources (e.g. resting HR from `stats` *or* `heart_rate`)
+only show the error token when **all** sources failed (`failed_all(...)`). A
+status-key legend line is printed near the top of the daily file. Genuine zeros
+(0 steps, 0 active minutes, 0m awake) render as real values, not as a missing
+token.
+
+### Diagnosing partial data (some fields populate, others show a status token)
 
 Symptom seen in the wild: resting HR, body battery and stress populate, but
-sleep, HRV, SpO2, VO2 max, active minutes and training readiness stay `n/a`. The
+sleep, HRV, SpO2, VO2 max, active minutes and training readiness stay absent. The
 working fields all come from `get_stats` / `get_body_battery` / `get_stress_data`;
 every blank field comes from a *different* endpoint, so the cause is per-endpoint,
 not auth. There are three distinct causes and they need different fixes:
@@ -91,13 +116,14 @@ not auth. There are three distinct causes and they need different fixes:
    garminconnect version`. Fix: upgrade `garminconnect`, or the endpoint is 404/5xx
    server-side (retry later).
 2. **Data genuinely absent** — the endpoint returns `{}`/`[]` or a dict missing the
-   key, with **no** warning. Common and *not a bug*: watch not worn overnight (no
-   sleep/HRV/SpO2/readiness for that day), 0 intense activity (active minutes
-   `n/a`), or the device model simply doesn't record that metric (older/basic
-   Garmin has no HRV status / training readiness / SpO2). VO2 max only refreshes
-   after a qualifying GPS run/ride.
+   key, with **no** warning, so the field shows `— not recorded`. Common and *not a
+   bug*: watch not worn overnight (no sleep/HRV/SpO2/readiness for that day), or the
+   device model simply doesn't record that metric (older/basic Garmin has no HRV
+   status / training readiness / SpO2). VO2 max only refreshes after a qualifying
+   GPS run/ride. (Note: 0 intense activity now renders as a real `0 min`, not a
+   missing token, as long as `stats` itself was fetched.)
 3. **Key drift** — the endpoint returns a populated dict but under keys
-   `extract()` doesn't read. No warning; field silently `n/a`.
+   `extract()` doesn't read. No warning; field silently shows `— not recorded`.
 
 Run **`python3 ~/.openclaw/integrations/garmin/poll-garmin.py --debug`** to tell
 these apart in one shot: it prints each endpoint's type + top-level keys + a JSON
