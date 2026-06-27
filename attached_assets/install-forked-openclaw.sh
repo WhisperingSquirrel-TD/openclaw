@@ -1878,8 +1878,13 @@ else
     warn "Gateway service unit not found at $GATEWAY_SVC — skipping PATH patch"
 fi
 
-# Step 12b: Restart L1 — l1-stop/l1-start first (Pi-native, works without DBUS),
-# then fall back to systemctl --user restart (works when DBUS env is available).
+# Step 12b: Restart L1 — prefer `systemctl --user restart` (the SAME path /restart
+# and the model-switch commands use; it leaves the unit reporting is-active=active),
+# and fall back to l1-start.sh only if systemd is unavailable. The old ordering ran
+# l1-start.sh FIRST, which started the gateway OUTSIDE systemd: `systemctl is-active`
+# then read "inactive" and the assistant stayed dormant until a manual model swap
+# forced a real systemctl restart. Stopping any l1-start process first prevents it
+# holding the port against the systemd-managed instance.
 #
 # Source .env so OPENCLAW_VAULT_PASSPHRASE is in the environment before gateway
 # startup — prevents interactive passphrase prompts during direct terminal runs.
@@ -1894,21 +1899,30 @@ fi
 
 echo ""
 warn "Restarting L1..."
-if [ -f "$HOME/l1-stop.sh" ] && [ -f "$HOME/l1-start.sh" ]; then
-    bash "$HOME/l1-stop.sh" 2>/dev/null || true
-    sleep 2
-    bash "$HOME/l1-start.sh" && \
-        info "L1 restarted via l1-start.sh — new code is live" || \
-        warn "l1-start.sh returned non-zero — check gateway.log"
-elif systemctl --user is-enabled openclaw-gateway.service 2>/dev/null | grep -q "enabled\|static"; then
-    systemctl --user restart openclaw-gateway.service && \
-        info "openclaw-gateway.service restarted — new code is live" || \
-        warn "Failed to restart openclaw-gateway.service"
-else
-    pkill -f "node.*openclaw" 2>/dev/null || true
-    pkill -f "ts-node.*openclaw" 2>/dev/null || true
-    sleep 2
-    warn "No restart method available — start L1 manually"
+# Stop any gateway a previous l1-start.sh launched OUTSIDE systemd so it can't
+# hold the port against the systemd-managed instance started below.
+[ -f "$HOME/l1-stop.sh" ] && bash "$HOME/l1-stop.sh" 2>/dev/null || true
+sleep 2
+_l1_started=false
+if systemctl --user is-enabled openclaw-gateway.service 2>/dev/null | grep -q "enabled\|static"; then
+    if systemctl --user restart openclaw-gateway.service; then
+        info "openclaw-gateway.service restarted (systemd-active) — new code is live"
+        _l1_started=true
+    else
+        warn "systemctl --user restart failed — falling back to l1-start.sh"
+    fi
+fi
+if [ "$_l1_started" = false ]; then
+    if [ -f "$HOME/l1-start.sh" ]; then
+        bash "$HOME/l1-start.sh" && \
+            info "L1 restarted via l1-start.sh — new code is live" || \
+            warn "l1-start.sh returned non-zero — check gateway.log"
+    else
+        pkill -f "node.*openclaw" 2>/dev/null || true
+        pkill -f "ts-node.*openclaw" 2>/dev/null || true
+        sleep 2
+        warn "No restart method available — start L1 manually"
+    fi
 fi
 
 # Step 13: Update integrity hashes

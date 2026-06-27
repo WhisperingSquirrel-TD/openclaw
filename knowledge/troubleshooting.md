@@ -15,6 +15,10 @@
 
 **Fixed in source (2026-04-18).** Cause: a raw `export VAR=value` line leaked from `.env` and was written verbatim as the model string in `openclaw.json`, so the gateway couldn't resolve the model and crash-looped. Now defended in three places: `cmd_switch` (mgmt-bot) strips the `export VAR=`/trailing-`.`, the install script's `_clean_model_string` sanitizes the whole config tree on every run, and `daily-reset.py` sanitizes on read+write. If you ever see it, run `cd ~/openclaw && git pull && bash ~/install-forked-openclaw.sh` — install strips the bad value and restarts. **Rule:** never write a raw `.env` value into `openclaw.json` without stripping the `export VAR=` prefix.
 
+## Gateway "inactive" after `/install` (and no auto "back online" message)
+
+**Fixed in source (2026-06-27).** Symptom: after running `/install` from the mgmt-bot, the gateway always reported **inactive** and the assistant stayed dormant until the user swapped models (or ran `/restart`) to wake it; the install wrapper also never sent a clear "back online" confirmation. **Cause:** the install's Step 12b restarted L1 via `l1-start.sh` **first**, which launches the gateway *outside* systemd — so `systemctl --user is-active openclaw-gateway.service` read "inactive". The model-switch/`/restart` path uses `systemctl --user restart`, the canonical systemd-managed start, which is why those forced it "active". The wrapper's completion tag derives from the same `is-active` check, so it reported "inconclusive" instead of "running". **Fix:** both the install script (Step 12b) and the mgmt-bot install wrapper's `gateway_up()` now **prefer `systemctl --user restart openclaw-gateway.service`** (stopping any stray `l1-start.sh` process first to avoid a port clash) and fall back to `l1-start.sh` only if systemd is unavailable. **Note:** a missing completion message can *also* be the Pi DNS/Tailscale MagicDNS SPOF — during a CPU-pegged install `api.telegram.org` may fail to resolve and the message is dropped despite retries.
+
 ## Outstanding items requiring Pi access
 
 | Item | Status | Pi commands |
