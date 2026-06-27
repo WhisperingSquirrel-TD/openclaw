@@ -77,4 +77,37 @@ field is missing on a given account/device the poller writes `n/a` and continues
 upgrade the library (`pip3 install --break-system-packages --upgrade garminconnect`)
 if Garmin changes a response shape.
 
+### Diagnosing partial data (some fields populate, others stay `n/a`)
+
+Symptom seen in the wild: resting HR, body battery and stress populate, but
+sleep, HRV, SpO2, VO2 max, active minutes and training readiness stay `n/a`. The
+working fields all come from `get_stats` / `get_body_battery` / `get_stress_data`;
+every blank field comes from a *different* endpoint, so the cause is per-endpoint,
+not auth. There are three distinct causes and they need different fixes:
+
+1. **Endpoint errored** — `_call()` swallows any exception to `None` and logs
+   `WARNING: <label> failed: <err>` (or `method <name>() not in this garminconnect
+   version`). Grep the poller log for `WARNING.*failed` / `not in this
+   garminconnect version`. Fix: upgrade `garminconnect`, or the endpoint is 404/5xx
+   server-side (retry later).
+2. **Data genuinely absent** — the endpoint returns `{}`/`[]` or a dict missing the
+   key, with **no** warning. Common and *not a bug*: watch not worn overnight (no
+   sleep/HRV/SpO2/readiness for that day), 0 intense activity (active minutes
+   `n/a`), or the device model simply doesn't record that metric (older/basic
+   Garmin has no HRV status / training readiness / SpO2). VO2 max only refreshes
+   after a qualifying GPS run/ride.
+3. **Key drift** — the endpoint returns a populated dict but under keys
+   `extract()` doesn't read. No warning; field silently `n/a`.
+
+Run **`python3 ~/.openclaw/integrations/garmin/poll-garmin.py --debug`** to tell
+these apart in one shot: it prints each endpoint's type + top-level keys + a JSON
+snippet, then every extracted value. The dump also goes to the poller log. (`--debug`
+still writes the daily/archive files as normal.) Empty `{}`/`[]` with no warning ⇒
+cause 2; populated dict whose keys don't match the extractor ⇒ cause 3 (update the
+key mapping in `extract()`); a `WARNING ... failed` line ⇒ cause 1.
+
+> **Note:** `--debug` writes raw Garmin response fragments (granular personal
+> health/activity data) to the poller log. Use it temporarily for diagnosis, then
+> clear/trim `poll-garmin-log.txt` — treat that log as sensitive.
+
 Cron schedule is 09:00 (per the [06:xx/07:xx scheduling constraint](../pi-deployment.md#scheduling-constraint--avoid-06xx-and-07xx)). Log: `~/.openclaw/workspace/memory/poll-garmin-log.txt`.

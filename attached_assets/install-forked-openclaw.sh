@@ -2054,6 +2054,7 @@ echo "      • From terminal:  python3 ~/.openclaw/integrations/garmin/poll-gar
 echo "      (uses GARMIN_EMAIL + GARMIN_PASSWORD from ~/.openclaw/.env)"
 echo "    Token status: python3 ~/.openclaw/integrations/garmin/poll-garmin.py --status   (or /garmin-status)"
 echo "    Test run:     python3 ~/.openclaw/integrations/garmin/poll-garmin.py"
+echo "    Diagnose missing fields: python3 ~/.openclaw/integrations/garmin/poll-garmin.py --debug"
 echo "    Backfill:     python3 ~/.openclaw/integrations/garmin/poll-garmin.py --backfill 30"
 echo "    Logs: ~/.openclaw/workspace/memory/poll-garmin-log.txt"
 echo ""

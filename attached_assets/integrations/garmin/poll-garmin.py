@@ -792,6 +792,43 @@ def cmd_status():
         sys.exit(1)
 
 
+# ── Debug dump ────────────────────────────────────────────────────────────────--
+
+def _debug_dump(day: str, data: dict, x: dict):
+    """Print the raw shape of every endpoint + the extracted values.
+
+    Distinguishes the three reasons a field shows 'n/a':
+      • endpoint ERRORED   → value is None/{}/[] AND a 'WARNING: <label> failed'
+                             line appears above in this output/log;
+      • data genuinely absent → endpoint returned {} or a dict missing the key
+                             (e.g. watch not worn overnight, or device lacks the
+                             feature) with NO warning;
+      • key drift          → endpoint returned a populated dict but under keys the
+                             extractor doesn't read (top-level keys shown below).
+    """
+    import json as _json
+    say(f"=== GARMIN RAW ENDPOINT DUMP (debug) — day={day} ===")
+    for key in ("stats", "hr", "hrv", "sleep", "spo2", "stress",
+                "readiness", "body_bat", "max_metrics", "activities"):
+        val = data.get(key)
+        if isinstance(val, dict):
+            say(f"[{key}] dict, top-level keys: {sorted(val.keys())}")
+        elif isinstance(val, list):
+            first = val[0] if val else None
+            fk = sorted(first.keys()) if isinstance(first, dict) else type(first).__name__
+            say(f"[{key}] list len={len(val)}, first item keys/type: {fk}")
+        else:
+            say(f"[{key}] {type(val).__name__}: {val!r}")
+        try:
+            say(f"    json[:1000]: {_json.dumps(val, default=str)[:1000]}")
+        except Exception as e:
+            say(f"    (json dump failed: {e})")
+    say("--- EXTRACTED VALUES (None/'n/a' = missing) ---")
+    for k in sorted(x.keys()):
+        say(f"    {k} = {x[k]!r}")
+    say("=== END DUMP ===")
+
+
 # ── Main ────────────────────────────────────────────────────────────────────────
 
 def main():
@@ -802,6 +839,9 @@ def main():
                         help="Report token validity/age. Never logs in.")
     parser.add_argument("--backfill", type=int, metavar="DAYS", nargs="?", const=30,
                         help="Fetch historical data into GARMIN_ARCHIVE.md (default 30 days).")
+    parser.add_argument("--debug", action="store_true",
+                        help="Dump raw endpoint responses + extracted values to diagnose "
+                             "missing fields, then write files as usual.")
     args = parser.parse_args()
 
     if args.setup:
@@ -823,6 +863,9 @@ def main():
 
     data = fetch_all(client, today)
     x    = extract(today, data)
+
+    if args.debug:
+        _debug_dump(today, data, x)
 
     md = build_markdown(today, x)
     try:
