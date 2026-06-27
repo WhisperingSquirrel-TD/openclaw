@@ -946,10 +946,10 @@ if [ -f "$GARMIN_DST" ]; then
     ( printf '%s\n' "$NEW_CRON"; echo "$GARMIN_CRON" ) | grep -v '^$' | crontab - || true
     info "Garmin poller cron set: daily at 09:00 (poll-garmin.py)"
 
-    # One-time auth check: tokens live in ~/.garminconnect/
+    # One-time auth check: tokens live in ~/.garminconnect/. Current garminconnect
+    # writes a single garmin_tokens.json; older versions wrote oauth1_token.json.
     GARMIN_ENV="$HOME/.openclaw/.env"
-    GARMIN_TOKENS="$HOME/.garminconnect/oauth1_token.json"
-    if [ -f "$GARMIN_TOKENS" ]; then
+    if [ -f "$HOME/.garminconnect/garmin_tokens.json" ] || [ -f "$HOME/.garminconnect/oauth1_token.json" ]; then
         info "Garmin tokens cached — poller will resume + auto-refresh (no login needed)."
     elif [ -f "$GARMIN_ENV" ] && grep -q "GARMIN_EMAIL" "$GARMIN_ENV" && grep -q "GARMIN_PASSWORD" "$GARMIN_ENV"; then
         warn "GARMIN_EMAIL + GARMIN_PASSWORD in .env but no token cached yet."

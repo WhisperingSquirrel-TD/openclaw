@@ -46,7 +46,8 @@ from pathlib import Path
 
 OPENCLAW    = Path.home() / ".openclaw"
 GARMIN_DIR  = OPENCLAW / "integrations" / "garmin"
-# garminconnect stores oauth1_token.json + oauth2_token.json here.
+# garminconnect caches its token(s) here (current versions: garmin_tokens.json;
+# older versions: oauth1_token.json + oauth2_token.json).
 TOKENSTORE  = Path(os.environ.get("GARMINTOKENS", str(Path.home() / ".garminconnect")))
 OUTPUT_MD   = OPENCLAW / "workspace" / "GARMIN_DAILY.md"
 ARCHIVE_MD  = OPENCLAW / "workspace" / "GARMIN_ARCHIVE.md"
@@ -220,8 +221,24 @@ def _import_garmin():
         )
 
 
+# Token filenames differ across garminconnect/garth versions: the current
+# garminconnect bundles a garth fork that writes a SINGLE consolidated
+# `garmin_tokens.json`, while older versions wrote `oauth1_token.json`
+# (+ `oauth2_token.json`). Detection must accept any known layout.
+TOKEN_FILENAMES = ("garmin_tokens.json", "oauth1_token.json")
+
+
+def _token_file():
+    """Return the cached token file (whichever layout exists), or None."""
+    for name in TOKEN_FILENAMES:
+        p = TOKENSTORE / name
+        if p.exists():
+            return p
+    return None
+
+
 def _tokens_present() -> bool:
-    return (TOKENSTORE / "oauth1_token.json").exists()
+    return _token_file() is not None
 
 
 def _persist_tokens(client) -> None:
@@ -757,8 +774,10 @@ def cmd_status():
         say("No cached tokens — run setup: python3 poll-garmin.py --setup")
         sys.exit(1)
     try:
-        age_s = time.time() - (TOKENSTORE / "oauth1_token.json").stat().st_mtime
-        say(f"Token age: {int(age_s / 86400)} days (oauth1 token; auto-refreshes).")
+        tf = _token_file()
+        if tf is not None:
+            age_s = time.time() - tf.stat().st_mtime
+            say(f"Token age: {int(age_s / 86400)} days ({tf.name}; auto-refreshes).")
     except OSError:
         pass
     try:

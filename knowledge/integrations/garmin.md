@@ -50,9 +50,15 @@ On a brand-new install the token dir is empty. Old `garminconnect`/`garth` versi
 - `login_and_save()` now forces a fresh credential login — it calls `client.login()` with **no** tokenstore argument (and temporarily clears `GARMINTOKENS`) so the library can never attempt the doomed load, then persists the tokens explicitly and verifies the file landed.
 - The install script always upgrades the library (above), so the Pi gets the version that also falls back gracefully.
 
-### Token save error: `'Garmin' object has no attribute 'garth'`
+### Token save error: `'Garmin' object has no attribute 'garth'` → then false "no token file was written"
 
-The garth client that holds the in-memory tokens is an internal attribute of the `Garmin` object whose **name changed across library versions**: `.garth` in older releases, `.client` in current ones. Hard-coding `client.garth.dump()` breaks on the upgraded library. `_persist_tokens()` now tries each known handle (`.garth`, then `.client`) and verifies `oauth1_token.json` actually exists; `login_and_save()` raises a clear error if no token file was written, so setup never reports false success.
+Two layered version-drift bugs in the upgraded library:
+
+1. **Dump handle renamed.** The garth client that holds the in-memory tokens is an internal attribute of the `Garmin` object whose name changed across versions: `.garth` in older releases, `.client` in current ones. Hard-coding `client.garth.dump()` breaks on the upgraded library. `_persist_tokens()` now tries each known handle (`.garth`, then `.client`).
+
+2. **Token filename changed (the real blocker).** The current garminconnect bundles its **own garth fork** whose `client.dump(dir)` writes a *single consolidated* `garmin_tokens.json` — **not** the legacy `oauth1_token.json` (+ `oauth2_token.json`) pair. So the dump was actually succeeding, but the post-login verification (and `--status`, and the install script) only looked for `oauth1_token.json` and wrongly reported "Login succeeded but no token file was written" — triggering pointless retries (→ 429). Detection is now filename-agnostic via `TOKEN_FILENAMES = ("garmin_tokens.json", "oauth1_token.json")` / `_token_file()`, used everywhere a token's presence/age is checked.
+
+> **Important:** because the dump was already working, a prior "failed" setup most likely **already wrote `~/.garminconnect/garmin_tokens.json`**. After deploying this fix, run `/garmin_status` first — it should report valid tokens with no new login (and no 429 risk). Only run `/garmin_setup` again if status says tokens are missing/invalid.
 
 > **429 caution:** every `--setup` does a real Garmin SSO login. If token-save silently failed, you'd retry repeatedly and Garmin IP-rate-limits you (`Mobile login returned 429`). The login itself usually still succeeds via a fallback transport, so once the save bug is fixed a **single** successful `--setup` is enough — do not loop on it. A hard 429 (`TooMany`) trips the [24h backoff](#auth-model--you-log-in-once); wait it out.
 
