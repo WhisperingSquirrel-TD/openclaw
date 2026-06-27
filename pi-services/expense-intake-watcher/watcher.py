@@ -371,7 +371,9 @@ def load_json(path: Path, default: Any) -> Any:
 
 def save_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+    tmp = path.with_suffix(path.suffix + '.tmp')
+    tmp.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+    tmp.replace(path)
 
 
 def default_state() -> dict[str, Any]:
