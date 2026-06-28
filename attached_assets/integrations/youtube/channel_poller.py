@@ -14,7 +14,9 @@ For watched-channel videos in normal cron mode it:
      processing once enough items accumulate or the oldest item has waited long enough
   4. When the batch result comes back later, overwrites the same resource file
      in place with the finished Useful Summary and Key Takeaways
-  5. Sends Telegram notifications for capture-now and batch-complete states
+  5. Sends a Telegram notification for the initial capture. Batch-complete
+     updates are silent by default so the same video does not feel like a
+     duplicate new-transcript alert.
 
 For manual / urgent single-video runs (for example --video, --sync, or OpenAI
 fallback mode), it still processes synchronously and writes the finished file
@@ -1042,13 +1044,17 @@ def process_pending_batches(state: dict) -> int:
                 except Exception:
                     date_str = now.strftime("%Y-%m-%d")
                 file_slug = f"{date_str} - {make_slug(title)}"
-                notify(
-                    f"📺 New transcript saved (batch)\n"
-                    f"Channel: {label}\n"
-                    f"Title: {title}\n"
-                    f"File: {file_slug}\n"
-                    f"Source: {v.get('url', '')}"
-                )
+                # Silent by default: watched-channel videos already notified at
+                # capture time, and the batch phase only enriches the same file.
+                # Avoid making one video feel like two separate transcript arrivals.
+                if os.environ.get("YOUTUBE_NOTIFY_ON_BATCH_COMPLETE", "").strip().lower() in {"1", "true", "yes", "on"}:
+                    notify(
+                        f"📺 Transcript summary completed (batch)\n"
+                        f"Channel: {label}\n"
+                        f"Title: {title}\n"
+                        f"File: {file_slug}\n"
+                        f"Source: {v.get('url', '')}"
+                    )
                 written += 1
             except Exception as e:
                 log_err(f"  Failed writing batch result for {vid}: {e}")
