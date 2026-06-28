@@ -40,7 +40,8 @@ For each new (unalerted) enquiry:
 FAILURE / STALENESS BEHAVIOUR
 ------------------------------
 - If the API call fails (network error, 5xx, auth error):
-    → Telegram alert sent immediately, no retry storm (next cron run = 2 min)
+    → Telegram alert sent only after repeated consecutive failure, then throttled
+      to avoid noise from one-off timeouts (next cron run = 2 min)
 - If the API returns 404:
     → Logged as "endpoint not deployed yet", no Telegram alert (expected during dev)
 - Quiet website handling:
@@ -99,9 +100,10 @@ STALE_HOURS            = 24   # alert if no enquiries seen in this many hours
 STALE_INTERVAL_HOURS   = 6    # only re-alert staleness every this many hours
 ENQUIRIES_RETAIN_DAYS  = 90   # rolling window kept in workspace file
 
-# Alert suppression: only Telegram-alert on the 1st API failure and then
-# every ALERT_EVERY_N_FAILURES runs thereafter.
-# At */2 cron that = every 30 min (15 runs × 2 min each).
+# Alert suppression: ignore a single transient API failure; Telegram-alert on
+# the 2nd consecutive failure and then every ALERT_EVERY_N_FAILURES runs
+# thereafter. At */2 cron, 15 runs = every 30 min.
+ALERT_FIRST_CONSECUTIVE_FAILURE = 2
 ALERT_EVERY_N_FAILURES = 15
 
 
@@ -588,19 +590,23 @@ def main() -> None:
 
     if enquiries is None:
         # API call failed — increment failure counter and conditionally alert.
-        # Avoids a Telegram flood when the website is down for an extended period.
+        # Ignore a single transient timeout; avoid Telegram flood when the website
+        # is down for an extended period.
         failures = state.get("consecutive_api_failures", 0) + 1
         state["consecutive_api_failures"] = failures
         state["last_failure_at"] = _now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
         state["last_failure_summary"] = "Could not reach /api/integration/enquiries"
         save_state(state)
-        if failures == 1 or failures % ALERT_EVERY_N_FAILURES == 0:
+        if failures == ALERT_FIRST_CONSECUTIVE_FAILURE or failures % ALERT_EVERY_N_FAILURES == 0:
             alert_api_failure(
                 f"Could not reach /api/integration/enquiries (failure #{failures}) — "
                 f"see enquiry-poller.log for detail"
             )
         else:
-            log(f"Suppressing Telegram alert — failure #{failures} (alerts on 1 and every {ALERT_EVERY_N_FAILURES})")
+            log(
+                f"Suppressing Telegram alert — failure #{failures} "
+                f"(alerts on {ALERT_FIRST_CONSECUTIVE_FAILURE} and every {ALERT_EVERY_N_FAILURES})"
+            )
         return
 
     # Successful fetch — reset failure counter and clear obsolete stale/failure alerts
