@@ -609,6 +609,12 @@ export async function runCronIsolatedAgentTurn(params: {
             runId: cronSession.sessionEntry.sessionId,
             requireExplicitMessageTarget: toolPolicy.requireExplicitMessageTarget,
             disableMessageTool: toolPolicy.disableMessageTool,
+            // Stored agentTurn cron jobs are internal automation created through the
+            // owner-gated cron surface. Preserve owner authorization so isolated
+            // jobs can use ownerOnly first-class tools (for example task_system)
+            // without requiring arbitrary exec. External hook content is still
+            // wrapped above unless explicitly marked unsafe-allowed.
+            senderIsOwner: true,
             allowTransientCooldownProbe: runOptions?.allowTransientCooldownProbe,
             abortSignal,
             bootstrapPromptWarningSignaturesSeen,

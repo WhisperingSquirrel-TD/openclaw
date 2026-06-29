@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
+import { createOpenClawCodingTools } from "./pi-tools.js";
 import {
   filterToolsByPolicy,
   isToolAllowedByPolicyName,
@@ -8,6 +9,22 @@ import {
 import { createStubTool } from "./test-helpers/pi-tool-stubs.js";
 
 describe("pi-tools.policy", () => {
+  it("keeps owner-only task_system hidden from non-owner isolated sessions but available to owner-authorized runs", () => {
+    const nonOwnerTools = createOpenClawCodingTools({
+      sessionKey: "agent:main:subagent:test-non-owner",
+      senderIsOwner: false,
+    });
+    expect(nonOwnerTools.map((tool) => tool.name)).not.toContain("task_system");
+
+    const ownerTools = createOpenClawCodingTools({
+      sessionKey: "agent:main:subagent:test-owner",
+      senderIsOwner: true,
+    });
+    const taskSystem = ownerTools.find((tool) => tool.name === "task_system");
+    expect(taskSystem).toBeTruthy();
+    expect(JSON.stringify(taskSystem?.parameters)).toContain("operator_check");
+  });
+
   it("treats * in allow as allow-all", () => {
     const tools = [createStubTool("read"), createStubTool("exec")];
     const filtered = filterToolsByPolicy(tools, { allow: ["*"] });
