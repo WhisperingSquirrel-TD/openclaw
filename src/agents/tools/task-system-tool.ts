@@ -29,6 +29,10 @@ const TASK_SYSTEM_ACTIONS = [
   "patch",
   "view",
   "seed",
+  "operator_state",
+  "operator_state_patch",
+  "operator_signal",
+  "operator_check",
 ] as const;
 
 const TASK_ENTITY_KINDS = ["strategy", "objective", "task", "subtask"] as const;
@@ -181,7 +185,7 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
     name: "task_system",
     ownerOnly: true,
     description:
-      "Operate the Workspace Control Panel task system directly over its bearer-authenticated Pi gateway without shell exec. Supports fast capture/capture_batch, intake decompose/commit, entity context/timeline, CRUD, views, and seed.",
+      "Operate the Workspace Control Panel task system directly over its bearer-authenticated Pi gateway without shell exec. Supports fast capture/capture_batch, intake decompose/commit, entity context/timeline, CRUD, views, seed, and operator control actions.",
     parameters: TaskSystemToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -293,6 +297,53 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
           baseUrl,
           token: authToken,
           timeoutMs,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "operator_state") {
+        const result = await callTaskSystem({
+          method: "GET",
+          path: "/task-system/operator-state",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "operator_state_patch") {
+        const result = await callTaskSystem({
+          method: "PATCH",
+          path: "/task-system/operator-state",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "operator_signal") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-system/operator-signal",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "operator_check") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-system/operator-check",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
         });
         return jsonResult({ ok: true, result });
       }
