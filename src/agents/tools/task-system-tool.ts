@@ -127,6 +127,19 @@ function resolveViewPath(view: string) {
   }
 }
 
+function inferParentKindForCreate(kind: string) {
+  switch (kind) {
+    case "objective":
+      return "strategy";
+    case "task":
+      return "objective";
+    case "subtask":
+      return "task";
+    default:
+      return null;
+  }
+}
+
 function appendViewFilters(path: string, params: Record<string, unknown>) {
   const query = new URLSearchParams();
   for (const key of ["parent_id", "state", "owner"]) {
@@ -203,7 +216,7 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
       const timeoutMs = normalizeTimeoutMs(params.timeoutMs);
       const payload =
         params.payload && typeof params.payload === "object" && !Array.isArray(params.payload)
-          ? (params.payload as JsonRecord)
+          ? ({ ...(params.payload as JsonRecord) } as JsonRecord)
           : undefined;
 
       if (action === "summary") {
@@ -363,13 +376,24 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
       }
 
       if (action === "create") {
+        const createPayload: JsonRecord = { ...payload };
+        const parentId = readStringParam(params, "parent_id", { trim: true });
+        if (parentId) {
+          createPayload.parent_id = parentId;
+          if (!readStringParam(createPayload, "parent_kind", { trim: true })) {
+            const inferredParentKind = inferParentKindForCreate(kind);
+            if (inferredParentKind) {
+              createPayload.parent_kind = inferredParentKind;
+            }
+          }
+        }
         const result = await callTaskSystem({
           method: "POST",
           path: `/${entityPath}`,
           baseUrl,
           token: authToken,
           timeoutMs,
-          payload,
+          payload: createPayload,
         });
         return jsonResult({ ok: true, result });
       }
