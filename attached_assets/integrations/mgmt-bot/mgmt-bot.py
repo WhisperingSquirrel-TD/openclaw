@@ -18,7 +18,8 @@ COMMANDS
   /opus46       — switch to Anthropic Opus 4.6 and restart gateway
   /gpt5mini     — switch to OpenAI GPT-5 mini and restart gateway
   /gpt54        — switch to OpenAI GPT-5.4 and restart gateway
-  /qwen         — switch to Local Qwen3 Coder (Mac Mini) and restart gateway
+  /qwenCN       — switch to Local Qwen3 Coder Next (Mac Mini) and restart gateway
+  /qwen30b      — switch to Local Qwen3 Coder 30b (Mac Mini) and restart gateway
   /restart      — restart the L1 gateway service
   /pull         — git pull latest from GitHub (does NOT reinstall)
   /reboot       — reboot the Pi (refused if auto-start safety check fails)
@@ -56,7 +57,8 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
   OPENCLAW_OPUS_MODEL         override /opus46,      default anthropic/claude-opus-4-6
   OPENCLAW_OPENAI_MODEL       override /gpt5mini,    default openai/gpt-5-mini
   OPENCLAW_GPT54_MODEL        override /gpt54,       default openai/gpt-5.4
-  OPENCLAW_LOCAL_QWEN_MODEL   override /qwen,        default custom-192-168-86-45-11434/qwen3-coder-next
+  OPENCLAW_LOCAL_QWENCN_MODEL  override /qwenCN,     default custom-192-168-86-45-11434/qwen3-coder-next
+  OPENCLAW_LOCAL_QWEN30B_MODEL override /qwen30b,    default custom-192-168-86-45-11434/qwen3-coder:30b
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
 OPTIONAL ENV VARS
@@ -509,10 +511,12 @@ MODEL_REGISTRY = {
     # --- OpenAI API (needs OPENAI_API_KEY) ---
     "gpt5mini":    ("OPENCLAW_OPENAI_MODEL",       "openai/gpt-5-mini",            "OPENAI_API_KEY", "openai",      "OpenAI GPT-5 mini"),
     "gpt54":       ("OPENCLAW_GPT54_MODEL",        "openai/gpt-5.4",               "OPENAI_API_KEY", "openai",      "OpenAI GPT-5.4"),
-    # --- Local LLM on the LAN (Mac Mini, OpenAI-compatible custom provider, no API key) ---
+    # --- Local LLMs on the LAN (Mac Mini, OpenAI-compatible custom provider, no API key) ---
     # Model string is "<endpoint-id>/<model-id>" and must match the custom provider
     # already configured in openclaw.json. Override the exact string via .env if it drifts.
-    "qwen":        ("OPENCLAW_LOCAL_QWEN_MODEL",   "custom-192-168-86-45-11434/qwen3-coder-next", None, "custom-192-168-86-45-11434", "Local Qwen3 Coder (Mac Mini)"),
+    # Registry keys are lowercase (incoming commands are lower-cased before dispatch).
+    "qwencn":      ("OPENCLAW_LOCAL_QWENCN_MODEL",  "custom-192-168-86-45-11434/qwen3-coder-next", None, "custom-192-168-86-45-11434", "Local Qwen3 Coder Next (Mac Mini)"),
+    "qwen30b":     ("OPENCLAW_LOCAL_QWEN30B_MODEL", "custom-192-168-86-45-11434/qwen3-coder:30b",  None, "custom-192-168-86-45-11434", "Local Qwen3 Coder 30b (Mac Mini)"),
 }
 
 
@@ -2305,7 +2309,8 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/opus46 — Anthropic Opus 4.6 + restart\n"
          "/gpt5mini — OpenAI GPT-5 mini + restart\n"
          "/gpt54 — OpenAI GPT-5.4 + restart\n"
-         "/qwen — Local Qwen3 Coder (Mac Mini) + restart\n"
+         "/qwenCN — Local Qwen3 Coder Next (Mac Mini) + restart\n"
+         "/qwen30b — Local Qwen3 Coder 30b (Mac Mini) + restart\n"
          "/codex_reauth — start remote phone-first Codex OAuth re-auth\n\n"
          "*Services*\n"
          "/restart — restart the L1 gateway\n"
@@ -2374,7 +2379,8 @@ MENU_COMMANDS = [
     ("opus46",      "Switch to Anthropic Opus 4.6"),
     ("gpt5mini",    "Switch to OpenAI GPT-5 mini"),
     ("gpt54",       "Switch to OpenAI GPT-5.4"),
-    ("qwen",        "Switch to Local Qwen3 Coder (Mac Mini)"),
+    ("qwencn",      "Switch to Local Qwen3 Coder Next (Mac Mini)"),
+    ("qwen30b",     "Switch to Local Qwen3 Coder 30b (Mac Mini)"),
     ("codex_reauth", "Start remote phone-first Codex OAuth re-auth"),
     # Integrations
     ("garmin",       "Manually trigger the Garmin poller"),
@@ -2788,7 +2794,8 @@ COMMANDS = {
     "/opus46":       lambda t, c: cmd_switch(t, c, "opus46"),
     "/gpt5mini":     lambda t, c: cmd_switch(t, c, "gpt5mini"),
     "/gpt54":        lambda t, c: cmd_switch(t, c, "gpt54"),
-    "/qwen":         lambda t, c: cmd_switch(t, c, "qwen"),
+    "/qwencn":       lambda t, c: cmd_switch(t, c, "qwencn"),
+    "/qwen30b":      lambda t, c: cmd_switch(t, c, "qwen30b"),
     "/codex-reauth": cmd_codex_reauth,
     "/codex_reauth": cmd_codex_reauth,
     "/restart":    cmd_restart,
