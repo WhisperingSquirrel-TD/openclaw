@@ -21,7 +21,7 @@ FEED / FILE FRESHNESS — for each workspace file:
   • This catches silent cron failures where the process exits without logging
 
 SPECIAL CASES:
-  • Garmin: only flagged stale after 10:00 AM (cron runs at 09:00)
+  • Garmin: expected before standups (06:35 and 13:35 via the same route as management-bot /garmin)
   • CRM: only flagged stale if a new prospects folder exists but CRM not updated
   • Enquiry poller: stale threshold 15 min (cron every 2 min)
 
@@ -103,7 +103,7 @@ FEED_CHECKS = [
     ("WHATSAPP_RECENT.md",      WORKSPACE / "WHATSAPP_RECENT.md",      T15,  0),
     ("STACKSTONE_REPORTS.md",   WORKSPACE / "STACKSTONE_REPORTS.md",   T5,   0),
     ("STACKSTONE_ENQUIRIES.md", WORKSPACE / "STACKSTONE_ENQUIRIES.md", T2,   0),
-    ("GARMIN_DAILY.md",         WORKSPACE / "GARMIN_DAILY.md",         T24H, 10),  # only flag after 10:00
+    ("GARMIN_DAILY.md",         WORKSPACE / "GARMIN_DAILY.md",         T24H, 10),  # expected before standups via 06:35/13:35 Garmin cron
 ]
 
 # Error patterns to scan for in recent log lines
