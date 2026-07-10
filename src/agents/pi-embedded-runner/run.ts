@@ -981,6 +981,38 @@ export async function runEmbeddedPiAgent(
           if (contextOverflowError) {
             const overflowDiagId = createCompactionDiagId();
             const errorText = contextOverflowError.text;
+            if (attempt.contextPreflight) {
+              log.warn(
+                `[context-preflight] refusing auto-compaction for fixed over-budget interactive context ` +
+                  `sessionKey=${params.sessionKey ?? params.sessionId} provider=${provider}/${modelId} ` +
+                  `estimatedTokens=${attempt.contextPreflight.estimatedTokens} ` +
+                  `contextWindow=${attempt.contextPreflight.contextWindowTokens} diagId=${overflowDiagId}`,
+              );
+              return {
+                payloads: [
+                  {
+                    text:
+                      "Context overflow: the fixed interactive prompt/history is already too large for this model. " +
+                      "Use /reset (or /new) to start fresh, or switch to a larger-context model.",
+                    isError: true,
+                  },
+                ],
+                meta: {
+                  durationMs: Date.now() - started,
+                  agentMeta: buildErrorAgentMeta({
+                    sessionId: sessionIdUsed,
+                    provider,
+                    model: model.id,
+                    usageAccumulator,
+                    lastRunPromptUsage,
+                    lastAssistant,
+                    lastTurnTotal,
+                  }),
+                  systemPromptReport: attempt.systemPromptReport,
+                  error: { kind: "context_overflow", message: errorText },
+                },
+              };
+            }
             const msgCount = attempt.messagesSnapshot?.length ?? 0;
             log.warn(
               `[context-overflow-diag] sessionKey=${params.sessionKey ?? params.sessionId} ` +
@@ -1348,7 +1380,7 @@ export async function runEmbeddedPiAgent(
               // the timer fired, which would otherwise shadow the real cause.
               const message = timedOut
                 ? "LLM request timed out."
-                : ((lastAssistant
+                : (lastAssistant
                     ? formatAssistantErrorText(lastAssistant, {
                         cfg: params.config,
                         sessionKey: params.sessionKey ?? params.sessionId,
@@ -1366,14 +1398,12 @@ export async function runEmbeddedPiAgent(
                         )
                       : authFailure
                         ? "LLM request unauthorized."
-                        : "LLM request failed."));
+                        : "LLM request failed.");
               // When the run timed out, always use "timeout" as the reason —
               // assistantFailoverReason is typically null (stream was aborted
               // before the model returned an error message), which would
               // otherwise become the misleading "unknown" reason.
-              const failoverReason = timedOut
-                ? "timeout"
-                : (assistantFailoverReason ?? "unknown");
+              const failoverReason = timedOut ? "timeout" : (assistantFailoverReason ?? "unknown");
               const status =
                 resolveFailoverStatus(failoverReason) ??
                 (isTimeoutErrorMessage(message) ? 408 : undefined);

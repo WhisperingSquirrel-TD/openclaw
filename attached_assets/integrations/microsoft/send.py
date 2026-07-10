@@ -22,6 +22,9 @@ Options:
   --recipients-file <path> Read To: recipients from this file — one per line or
                            comma-separated. Overrides the <to> positional arg.
                            All addresses end up on the SAME email (not separate sends).
+  --bcc <addresses>        BCC recipient address(es), comma-separated.
+  --bcc-file <path>        Read BCC recipients from this file — one per line or
+                           comma-separated. Adds Graph bccRecipients.
   --subject-file <path>    Read subject from this file (overrides subject positional arg)
   --body-file <path>       Read body from this file (overrides body positional arg).
                            Avoids passing large/sensitive content as a shell argument.
@@ -71,6 +74,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--recipients-file",  default=None,
                    help="Read To: recipients from this file — one per line or comma-separated. "
                         "All addresses go on ONE email. Overrides <to> positional arg.")
+    p.add_argument("--bcc",              default="",
+                   help="BCC recipient email address(es) — comma-separated for multiple")
+    p.add_argument("--bcc-file",         default=None,
+                   help="Read BCC recipients from this file — one per line or comma-separated. "
+                        "All addresses go on ONE email as bccRecipients.")
     p.add_argument("--subject-file",     default=None,
                    help="Read subject from this file (overrides subject positional arg)")
     p.add_argument("--body-file",        default=None,
@@ -264,9 +272,11 @@ def send_email(
     reply_to_message_id: str | None = None,
     attachments: list[dict] | None = None,
     reply_all: bool = False,
+    bcc_recipients: list[str] | None = None,
 ) -> None:
-    if not recipients:
-        print("ERROR: no valid recipient addresses found", file=sys.stderr)
+    bcc_recipients = bcc_recipients or []
+    if not recipients and not bcc_recipients:
+        print("ERROR: no valid To or BCC recipient addresses found", file=sys.stderr)
         sys.exit(3)
 
     headers = {
@@ -276,6 +286,7 @@ def send_email(
 
     # All recipients go on ONE email — never loop and send separately.
     to_recipients = [{"emailAddress": {"address": addr}} for addr in recipients]
+    graph_bcc_recipients = [{"emailAddress": {"address": addr}} for addr in bcc_recipients]
 
     graph_body_type = "HTML" if body_content_type.lower() == "html" else "Text"
     message: dict = {
@@ -286,6 +297,8 @@ def send_email(
         },
         "toRecipients": to_recipients,
     }
+    if graph_bcc_recipients:
+        message["bccRecipients"] = graph_bcc_recipients
     if attachments:
         message["attachments"] = attachments
 
@@ -307,6 +320,8 @@ def send_email(
             "body": message["body"],
             "toRecipients": to_recipients,
         }
+        if graph_bcc_recipients:
+            draft_patch["bccRecipients"] = graph_bcc_recipients
         if attachments:
             draft_patch["attachments"] = attachments
         resp = requests.patch(update_url, headers=headers, json=draft_patch, timeout=15)
@@ -328,8 +343,9 @@ def send_email(
         )
 
     if resp.status_code in (200, 202, 204):
-        to_display = ", ".join(recipients)
-        print(f"Email sent to: {to_display}")
+        to_display = ", ".join(recipients) if recipients else "(none)"
+        bcc_display = ", ".join(bcc_recipients) if bcc_recipients else "(none)"
+        print(f"Email sent. To: {to_display}; BCC: {bcc_display}")
     else:
         print(f"Send failed: {resp.status_code} {resp.text}", file=sys.stderr)
         sys.exit(2)
@@ -365,8 +381,18 @@ def main() -> None:
             sys.exit(3)
 
     recipients = parse_recipients(recipient_raw)
-    if not recipients:
-        print("ERROR: at least one recipient is required (positional <to> or --recipients-file)",
+
+    bcc_raw = args.bcc or ""
+    if args.bcc_file:
+        try:
+            bcc_raw = Path(args.bcc_file).read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"ERROR: Cannot read --bcc-file {args.bcc_file}: {e}", file=sys.stderr)
+            sys.exit(3)
+    bcc_recipients = parse_recipients(bcc_raw)
+
+    if not recipients and not bcc_recipients:
+        print("ERROR: at least one To or BCC recipient is required (positional <to>, --recipients-file, --bcc, or --bcc-file)",
               file=sys.stderr)
         sys.exit(3)
 
@@ -406,6 +432,7 @@ def main() -> None:
         reply_to_message_id=args.reply_to_message_id,
         attachments=attachments,
         reply_all=args.reply_all,
+        bcc_recipients=bcc_recipients,
     )
 
 

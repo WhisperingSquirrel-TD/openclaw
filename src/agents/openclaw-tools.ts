@@ -12,6 +12,7 @@ import type { AnyAgentTool } from "./tools/common.js";
 import { createCronTool } from "./tools/cron-tool.js";
 import { createGatewayTool } from "./tools/gateway-tool.js";
 import { createImageTool } from "./tools/image-tool.js";
+import { createLinkedInMessageMirrorTool } from "./tools/linkedin-message-mirror-tool.js";
 import { createMessageTool } from "./tools/message-tool.js";
 import { createNodesTool } from "./tools/nodes-tool.js";
 import { createPdfTool } from "./tools/pdf-tool.js";
@@ -156,6 +157,7 @@ export function createOpenClawTools(
       config: options?.config,
     }),
     createTaskSystemTool(),
+    createLinkedInMessageMirrorTool(),
     createAgentsListTool({
       agentSessionKey: options?.agentSessionKey,
       requesterAgentIdOverride: options?.requesterAgentIdOverride,

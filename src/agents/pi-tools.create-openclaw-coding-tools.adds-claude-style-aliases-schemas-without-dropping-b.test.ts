@@ -7,7 +7,16 @@ const defaultTools = createOpenClawCodingTools({ senderIsOwner: true });
 
 describe("createOpenClawCodingTools", () => {
   it("preserves action enums in normalized schemas", () => {
-    const toolNames = ["browser", "canvas", "nodes", "cron", "task_system", "gateway", "message"];
+    const toolNames = [
+      "browser",
+      "canvas",
+      "nodes",
+      "cron",
+      "task_system",
+      "linkedin_message_mirror",
+      "gateway",
+      "message",
+    ];
 
     const collectActionValues = (schema: unknown, values: Set<string>): void => {
       if (!schema || typeof schema !== "object") {
@@ -55,6 +64,7 @@ describe("createOpenClawCodingTools", () => {
     expect(defaultTools.some((tool) => tool.name === "exec")).toBe(true);
     expect(defaultTools.some((tool) => tool.name === "process")).toBe(true);
     expect(defaultTools.some((tool) => tool.name === "task_system")).toBe(true);
+    expect(defaultTools.some((tool) => tool.name === "linkedin_message_mirror")).toBe(true);
     expect(defaultTools.some((tool) => tool.name === "apply_patch")).toBe(false);
 
     const enabledConfig: OpenClawConfig = {

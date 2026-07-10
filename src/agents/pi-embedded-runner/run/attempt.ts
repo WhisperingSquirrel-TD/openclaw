@@ -708,6 +708,71 @@ function summarizeMessagePayload(msg: AgentMessage): { textChars: number; imageB
   return { textChars, imageBlocks };
 }
 
+const CONTEXT_PREFLIGHT_CHARS_PER_TOKEN = 4;
+const INTERACTIVE_CONTEXT_PREFLIGHT_HEADROOM = 0.9;
+const RESET_COMMAND_RE = /^\s*\/(?:reset|new)(?:\s|$)/i;
+
+export function isMainInteractiveSession(params: {
+  sessionKey?: string;
+  messageChannel?: string;
+  messageProvider?: string;
+}): boolean {
+  const sessionKey = params.sessionKey?.trim() ?? "";
+  if (!sessionKey.startsWith("agent:main:") || isSubagentSessionKey(sessionKey)) {
+    return false;
+  }
+  const channel = (params.messageChannel ?? params.messageProvider ?? "").trim();
+  return channel.length > 0;
+}
+
+export function evaluateInteractiveContextPreflight(params: {
+  sessionKey?: string;
+  messageChannel?: string;
+  messageProvider?: string;
+  prompt: string;
+  systemPromptChars: number;
+  promptChars: number;
+  historyTextChars: number;
+  contextWindowTokens?: number;
+}):
+  | {
+      kind: "interactive_baseline_exceeds_context";
+      estimatedTokens: number;
+      contextWindowTokens: number;
+      systemPromptChars: number;
+      promptChars: number;
+      historyTextChars: number;
+    }
+  | undefined {
+  if (!isMainInteractiveSession(params)) {
+    return undefined;
+  }
+  if (RESET_COMMAND_RE.test(params.prompt)) {
+    return undefined;
+  }
+  const contextWindowTokens = Math.floor(params.contextWindowTokens ?? 0);
+  if (contextWindowTokens <= 0) {
+    return undefined;
+  }
+  const totalChars = Math.max(
+    0,
+    params.systemPromptChars + params.promptChars + params.historyTextChars,
+  );
+  const estimatedTokens = Math.ceil(totalChars / CONTEXT_PREFLIGHT_CHARS_PER_TOKEN);
+  const usableTokens = Math.floor(contextWindowTokens * INTERACTIVE_CONTEXT_PREFLIGHT_HEADROOM);
+  if (estimatedTokens <= usableTokens) {
+    return undefined;
+  }
+  return {
+    kind: "interactive_baseline_exceeds_context",
+    estimatedTokens,
+    contextWindowTokens,
+    systemPromptChars: params.systemPromptChars,
+    promptChars: params.promptChars,
+    historyTextChars: params.historyTextChars,
+  };
+}
+
 function summarizeSessionContext(messages: AgentMessage[]): {
   roleCounts: string;
   totalTextChars: number;
@@ -1650,6 +1715,7 @@ export async function runEmbeddedAttempt(
 
       let promptError: unknown = null;
       let promptErrorSource: "prompt" | "compaction" | null = null;
+      let contextPreflight: EmbeddedRunAttemptResult["contextPreflight"];
       const prePromptMessageCount = activeSession.messages.length;
       try {
         const promptStartedAt = Date.now();
@@ -1774,7 +1840,30 @@ export async function runEmbeddedAttempt(
             );
           }
 
-          if (hookRunner?.hasHooks("llm_input")) {
+          contextPreflight = evaluateInteractiveContextPreflight({
+            sessionKey: params.sessionKey,
+            messageChannel: params.messageChannel,
+            messageProvider: params.messageProvider,
+            prompt: effectivePrompt,
+            systemPromptChars: systemPromptText?.length ?? 0,
+            promptChars: effectivePrompt.length,
+            historyTextChars: summarizeSessionContext(activeSession.messages).totalTextChars,
+            contextWindowTokens: params.contextTokenBudget ?? params.model.contextWindow,
+          });
+          if (contextPreflight) {
+            const message =
+              `Preflight context overflow: fixed interactive context is ~${contextPreflight.estimatedTokens} tokens ` +
+              `before generation, exceeding the usable ${contextPreflight.contextWindowTokens}-token model window. ` +
+              `Use /reset (or /new) or switch to a larger-context model.`;
+            promptError = new Error(message);
+            promptErrorSource = "prompt";
+            log.warn(
+              `[context-preflight] ${message} provider=${params.provider}/${params.modelId} ` +
+                `sessionKey=${params.sessionKey ?? params.sessionId}`,
+            );
+          }
+
+          if (!contextPreflight && hookRunner?.hasHooks("llm_input")) {
             hookRunner
               .runLlmInput(
                 {
@@ -1800,12 +1889,16 @@ export async function runEmbeddedAttempt(
               });
           }
 
-          // Only pass images option if there are actually images to pass
-          // This avoids potential issues with models that don't expect the images parameter
-          if (imageResult.images.length > 0) {
-            await abortable(activeSession.prompt(effectivePrompt, { images: imageResult.images }));
-          } else {
-            await abortable(activeSession.prompt(effectivePrompt));
+          if (!contextPreflight) {
+            // Only pass images option if there are actually images to pass
+            // This avoids potential issues with models that don't expect the images parameter
+            if (imageResult.images.length > 0) {
+              await abortable(
+                activeSession.prompt(effectivePrompt, { images: imageResult.images }),
+              );
+            } else {
+              await abortable(activeSession.prompt(effectivePrompt));
+            }
           }
         } catch (err) {
           promptError = err;
@@ -1827,15 +1920,17 @@ export async function runEmbeddedAttempt(
         const preCompactionSessionId = activeSession.sessionId;
 
         try {
-          // Flush buffered block replies before waiting for compaction so the
-          // user receives the assistant response immediately.  Without this,
-          // coalesced/buffered blocks stay in the pipeline until compaction
-          // finishes — which can take minutes on large contexts (#35074).
-          if (params.onBlockReplyFlush) {
-            await params.onBlockReplyFlush();
-          }
+          if (!contextPreflight) {
+            // Flush buffered block replies before waiting for compaction so the
+            // user receives the assistant response immediately.  Without this,
+            // coalesced/buffered blocks stay in the pipeline until compaction
+            // finishes — which can take minutes on large contexts (#35074).
+            if (params.onBlockReplyFlush) {
+              await params.onBlockReplyFlush();
+            }
 
-          await abortable(waitForCompactionRetry());
+            await abortable(waitForCompactionRetry());
+          }
         } catch (err) {
           if (isRunnerAbortError(err)) {
             if (!promptError) {
@@ -1860,7 +1955,7 @@ export async function runEmbeddedAttempt(
         // prepareCompaction() guard that checks the last entry type, leading to
         // double-compaction. See: https://github.com/openclaw/openclaw/issues/9282
         // Skip when timed out during compaction — session state may be inconsistent.
-        if (!timedOutDuringCompaction && !compactionOccurredThisAttempt) {
+        if (!contextPreflight && !timedOutDuringCompaction && !compactionOccurredThisAttempt) {
           const shouldTrackCacheTtl =
             params.config?.agents?.defaults?.contextPruning?.mode === "cache-ttl" &&
             isCacheTtlEligibleProvider(params.provider, params.modelId);
@@ -2077,6 +2172,7 @@ export async function runEmbeddedAttempt(
         ),
         attemptUsage: getUsageTotals(),
         compactionCount: getCompactionCount(),
+        contextPreflight,
         // Client tool call detected (OpenResponses hosted tools)
         clientToolCall: clientToolCallDetected ?? undefined,
       };

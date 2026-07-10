@@ -18,7 +18,7 @@ COMMANDS
   /opus46       — switch to Anthropic Opus 4.6 and restart gateway
   /gpt5mini     — switch to OpenAI GPT-5 mini and restart gateway
   /gpt54        — switch to OpenAI GPT-5.4 and restart gateway
-  /qwen30b      — switch to Local Qwen3 Coder 30b (Mac Mini) and restart gateway
+  /qwen30b      — switch to Local Qwen3 Coder 30b 131k (Mac Mini) and restart gateway
   /restart      — restart the L1 gateway service
   /pull         — git pull latest from GitHub (does NOT reinstall)
   /reboot       — reboot the Pi (refused if auto-start safety check fails)
@@ -56,7 +56,7 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
   OPENCLAW_OPUS_MODEL         override /opus46,      default anthropic/claude-opus-4-6
   OPENCLAW_OPENAI_MODEL       override /gpt5mini,    default openai/gpt-5-mini
   OPENCLAW_GPT54_MODEL        override /gpt54,       default openai/gpt-5.4
-  OPENCLAW_LOCAL_QWEN30B_MODEL override /qwen30b,    default custom-192-168-86-45-11434/qwen3-coder:30b
+  OPENCLAW_LOCAL_QWEN30B_MODEL override /qwen30b,    default custom-mac-ollama/qwen3-coder-131k
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
 OPTIONAL ENV VARS
@@ -162,6 +162,11 @@ def _require(key: str) -> str:
 # Telegram helpers (no external library — stdlib only)
 # ---------------------------------------------------------------------------
 
+def _audit(msg: str) -> None:
+    ts = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    print(f"[mgmt-bot] {ts} {msg}", file=sys.stderr, flush=True)
+
+
 def _tg(token: str, method: str, **kwargs) -> dict:
     url  = TELEGRAM_API.format(token=token, method=method)
     data = json.dumps(kwargs).encode()
@@ -172,21 +177,33 @@ def _tg(token: str, method: str, **kwargs) -> dict:
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
+            body = resp.read().decode("utf-8", errors="replace")
+            try:
+                return json.loads(body)
+            except Exception:
+                _audit(f"Telegram API invalid JSON ({method}): {body[:500]}")
+                return {"ok": False, "description": "invalid JSON response"}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+        _audit(f"Telegram API HTTP error ({method}): {e}; body={body[:1000]}")
+        try:
+            return json.loads(body) if body else {"ok": False, "description": str(e)}
+        except Exception:
+            return {"ok": False, "description": f"{e}; {body[:300]}"}
     except Exception as e:
-        print(f"Telegram API error ({method}): {e}", file=sys.stderr)
-        return {}
+        _audit(f"Telegram API error ({method}): {e}")
+        return {"ok": False, "description": str(e)}
 
 
-def send(token: str, chat_id: str, text: str) -> None:
-    resp = _tg(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="Markdown")
-    # Telegram rejects messages whose Markdown is malformed (e.g. unbalanced
-    # backticks/underscores in an interpolated error string) with a 400, which
-    # _tg swallows and returns {}. Without this fallback the reply silently
-    # vanishes and the command appears unresponsive. Retry once as plain text
-    # so the user always gets feedback.
-    if not resp.get("ok"):
-        _tg(token, "sendMessage", chat_id=chat_id, text=text)
+def send(token: str, chat_id: str, text: str) -> bool:
+    # Plain text first: management replies are operational, so reliability beats Markdown styling.
+    _audit(f"sendMessage attempt chat_id={chat_id} chars={len(text)}")
+    resp = _tg(token, "sendMessage", chat_id=chat_id, text=text)
+    if resp.get("ok"):
+        _audit("sendMessage ok")
+        return True
+    _audit(f"sendMessage failed: {resp.get('description', resp)}")
+    return False
 
 
 def get_updates(token: str, offset: int) -> list:
@@ -347,14 +364,102 @@ def _service_status() -> str:
     return r.stdout.strip()
 
 
-def _restart_gateway() -> tuple[bool, str]:
+def _service_state_details(service: str) -> dict:
     r = subprocess.run(
-        ["systemctl", "--user", "restart", _service()],
-        capture_output=True, text=True, timeout=30,
+        [
+            "systemctl", "--user", "show", service,
+            "--property=ActiveState,SubState,Result,ExecMainPID,LoadState,UnitFileState",
+        ],
+        capture_output=True, text=True, timeout=10,
     )
-    if r.returncode == 0:
-        return True, "Gateway restarted successfully."
-    return False, f"Restart failed:\n```{r.stderr.strip() or r.stdout.strip()}```"
+    props: dict[str, str] = {}
+    for line in (r.stdout or "").splitlines():
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        props[k.strip()] = v.strip()
+    return {
+        "active": props.get("ActiveState") or "unknown",
+        "sub": props.get("SubState") or "unknown",
+        "result": props.get("Result") or "unknown",
+        "pid": props.get("ExecMainPID") or "0",
+        "load": props.get("LoadState") or "unknown",
+        "unit_file": props.get("UnitFileState") or "unknown",
+    }
+
+
+def _restart_gateway() -> tuple[bool, str]:
+    svc = _service()
+    _audit(f"restart requested service={svc}")
+    try:
+        before = _service_state_details(svc)
+        before_pid = (before.get("pid") or "0").strip()
+        r = subprocess.run(
+            ["systemctl", "--user", "restart", "--no-block", svc],
+            capture_output=True, text=True, timeout=15,
+        )
+    except Exception as e:
+        _audit(f"restart launch exception service={svc}: {e}")
+        return False, f"Restart launch failed: {e}"
+    if r.returncode != 0:
+        detail = (r.stderr.strip() or r.stdout.strip() or f"exit {r.returncode}")
+        _audit(f"restart launch failed service={svc}: {detail}")
+        return False, f"Restart failed: {detail}"
+
+    deadline = time.time() + 90
+    saw_transition = False
+    last = before
+    while time.time() < deadline:
+        try:
+            last = _service_state_details(svc)
+        except Exception as e:
+            _audit(f"restart poll exception service={svc}: {e}")
+            time.sleep(2)
+            continue
+
+        active = last["active"]
+        sub = last["sub"]
+        result = last["result"]
+        pid = (last["pid"] or "0").strip()
+        pid_changed = pid not in {"", "0"} and pid != before_pid
+
+        if active in {"activating", "deactivating", "reloading"}:
+            saw_transition = True
+            time.sleep(2)
+            continue
+
+        if active == "failed":
+            _audit(f"restart failed service={svc} active={active} sub={sub} result={result}")
+            return False, f"Restart failed: service entered failed/{sub} (result: {result})."
+
+        if active == "inactive":
+            if saw_transition:
+                time.sleep(2)
+                continue
+            time.sleep(2)
+            continue
+
+        if active == "active":
+            if saw_transition or pid_changed:
+                _audit(
+                    f"restart complete service={svc} active={active} sub={sub} pid={pid} "
+                    f"result={result} before_pid={before_pid} pid_changed={pid_changed} "
+                    f"saw_transition={saw_transition}"
+                )
+                if pid_changed:
+                    return True, f"Gateway restarted successfully (active/{sub}, pid changed to {pid})."
+                return True, f"Gateway restarted successfully (active/{sub})."
+            time.sleep(2)
+            continue
+
+        time.sleep(2)
+
+    summary = (
+        f"active={last['active']}, sub={last['sub']}, result={last['result']}, "
+        f"pid={last['pid']}, before_pid={before_pid}, saw_transition={saw_transition}"
+    )
+    _audit(f"restart timed out service={svc} {summary}")
+    return False, f"Restart requested but service did not become healthy within 90s ({summary})."
 
 
 # ---------------------------------------------------------------------------
@@ -513,7 +618,7 @@ MODEL_REGISTRY = {
     # Model string is "<endpoint-id>/<model-id>" and must match the custom provider
     # already configured in openclaw.json. Override the exact string via .env if it drifts.
     # Registry keys are lowercase (incoming commands are lower-cased before dispatch).
-    "qwen30b":     ("OPENCLAW_LOCAL_QWEN30B_MODEL", "custom-192-168-86-45-11434/qwen3-coder:30b",  None, "custom-192-168-86-45-11434", "Local Qwen3 Coder 30b (Mac Mini)"),
+    "qwen30b":     ("OPENCLAW_LOCAL_QWEN30B_MODEL", "custom-mac-ollama/qwen3-coder-131k",  None, "custom-mac-ollama", "Local Qwen3 Coder 30b 131k (Mac Mini)"),
 }
 
 
@@ -554,19 +659,35 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
 
     try:
         config  = _read_config()
+        provider_id = model.split("/", 1)[0] if "/" in model else gateway_prefix
+        if provider_id.startswith("custom-") and provider_id not in config.get("models", {}).get("providers", {}):
+            send(token, chat_id,
+                 f"❌ Provider {provider_id} is not configured in openclaw.json yet.\n"
+                 f"Run the protected config patch first, then retry {model}.")
+            return
         current = _get_current_model(config)
+        _audit(f"cmd_switch provider={provider} label={label} current={current} requested={model}")
         if current == model:
-            send(token, chat_id, f"ℹ️ Already using `{model}` ({label}) — no change.")
+            send(token, chat_id, f"ℹ️ Already using {model} ({label}) — no change.")
             return
         config = _set_model(config, model)
         _write_config(config)
+        after = _get_current_model(_read_config())
+        _audit(f"cmd_switch config_written provider={provider} after={after}")
     except Exception as e:
-        send(token, chat_id, f"❌ Failed to update config:\n```{e}```")
+        _audit(f"cmd_switch failed provider={provider}: {e}")
+        send(token, chat_id, f"❌ Failed to update config: {e}")
         return
 
-    send(token, chat_id, f"✅ Model set to `{model}` ({label})\nRestarting gateway…")
+    send(token, chat_id, f"✅ Model set to {model} ({label})\nRestarting gateway…")
     ok, msg = _restart_gateway()
-    send(token, chat_id, f"{'✅' if ok else '❌'} {msg}")
+    try:
+        proof_model = _get_current_model(_read_config())
+    except Exception as e:
+        proof_model = f"unreadable: {e}"
+    svc_state = _service_status()
+    _audit(f"cmd_switch complete provider={provider} ok={ok} model={proof_model} gateway={svc_state} msg={msg}")
+    send(token, chat_id, f"{'✅' if ok else '❌'} {msg}\nModel now: {proof_model}\nGateway: {svc_state}")
 
 
 def cmd_restart(token: str, chat_id: str) -> None:
@@ -634,21 +755,10 @@ def cmd_install(token: str, chat_id: str) -> None:
         send(token, chat_id, f"❌ Install script not found: `{install_sh}`")
         return
 
-    send(token, chat_id, "⬇️ Pulling latest from GitHub…")
-    pull = subprocess.run(
-        ["git", "-C", str(git_dir), "pull"],
-        capture_output=True, text=True, timeout=60,
-    )
-    pull_out = (pull.stdout + pull.stderr).strip()
-    if pull.returncode != 0:
-        send(token, chat_id, f"❌ Pull failed — install aborted:\n```{pull_out}```")
-        return
-
     send(token, chat_id,
-         f"✅ Pull complete:\n```{pull_out}```\n\n"
-         f"🔧 Running install script in background…\n"
-         f"_(this takes ~5 min — you will get a Telegram message when it finishes, "
-         f"even after I restart)_")
+         "🔧 Starting install in background…\n"
+         "_(it will pull latest from GitHub first, then run the install script; "
+         "you should get a Telegram message when it finishes, even after I restart)_")
 
     # Write a self-contained Python wrapper that:
     #   1. runs the install script via subprocess (capturing output)
@@ -660,15 +770,18 @@ def cmd_install(token: str, chat_id: str) -> None:
     _vault_pass = _cfg("OPENCLAW_VAULT_PASSPHRASE", "")
 
     wrapper_path = Path("/tmp/openclaw-install-wrapper.py")
+    wrapper_log_path = str(STATE_DIR / "integrations/mgmt-bot/install-wrapper.log")
+    wrapper_launch_log_path = str(STATE_DIR / "integrations/mgmt-bot/install-wrapper-launch.log")
     wrapper_path.write_text(
         "#!/usr/bin/env python3\n"
         "import subprocess, urllib.request, urllib.error, json, sys, time, os\n"
         f"TOKEN   = {token!r}\n"
         f"CHAT_ID = {chat_id!r}\n"
         f"INSTALL = {str(install_sh)!r}\n"
+        f"GIT_DIR = {str(git_dir)!r}\n"
         f"VAULT_PASS = {_vault_pass!r}\n"
         "\n"
-        "LOG = '/tmp/openclaw-install-wrapper.log'\n"
+        f"LOG = {wrapper_log_path!r}\n"
         "def log(line):\n"
         "    try:\n"
         "        with open(LOG, 'a') as f:\n"
@@ -814,7 +927,17 @@ def cmd_install(token: str, chat_id: str) -> None:
         "# Mark as non-interactive so the install script skips any TTY-gated prompts.\n"
         "install_env['OPENCLAW_NONINTERACTIVE'] = '1'\n"
         "\n"
-        "log('wrapper started; running install script')\n"
+        "log('wrapper started; pulling latest before install')\n"
+        "pull = subprocess.run(['git', '-C', GIT_DIR, 'pull', '--ff-only'],\n"
+        "                      capture_output=True, text=True, timeout=300)\n"
+        "pull_out = (pull.stdout + pull.stderr).strip()\n"
+        "if pull.returncode != 0:\n"
+        "    msg = '❌ Pull failed — install aborted.\\n\\n```' + (pull_out or 'no output')[-3000:] + '```'\n"
+        "    log('git pull failed before install')\n"
+        "    tg(msg)\n"
+        "    raise SystemExit(1)\n"
+        "\n"
+        "log('git pull complete; running install script')\n"
         "\n"
         "def svc_active(name):\n"
         "    r = subprocess.run(['systemctl', '--user', 'is-active', name],\n"
@@ -894,8 +1017,10 @@ def cmd_install(token: str, chat_id: str) -> None:
     # puts the wrapper in its own transient unit with its own cgroup.
     # Falls back to start_new_session if systemd-run is unavailable.
     # Capture the launcher's own output so a systemd-run failure (e.g. missing
-    # XDG_RUNTIME_DIR/D-Bus) is visible in a log instead of vanishing.
-    _launch_log = open("/tmp/openclaw-install-wrapper-launch.log", "ab")
+    # XDG_RUNTIME_DIR/D-Bus) is visible in a durable log instead of vanishing.
+    Path(wrapper_log_path).parent.mkdir(parents=True, exist_ok=True)
+    _audit(f"cmd_install wrapper_logs wrapper={wrapper_log_path} launch={wrapper_launch_log_path}")
+    _launch_log = open(wrapper_launch_log_path, "ab")
     _sdr = shutil.which("systemd-run")
     if _sdr:
         subprocess.Popen(
@@ -1334,6 +1459,44 @@ def cmd_disk(token: str, chat_id: str) -> None:
              f"```{header}\n{data}```")
     else:
         send(token, chat_id, f"```{r.stdout.strip()}```")
+
+
+def cmd_qwen_status(token: str, chat_id: str) -> None:
+    """Check the Mac mini Ollama/Qwen route without changing the main gateway model."""
+    base = _cfg("LOCAL_QWEN_BASE_URL", "http://192.168.86.46:11434").rstrip("/")
+    wanted = _cfg("LOCAL_QWEN_MODEL", "qwen3-coder-131k")
+    try:
+        with urllib.request.urlopen(f"{base}/api/tags", timeout=10) as resp:
+            data = json.loads(resp.read())
+        models = [m.get("name", "") for m in data.get("models", [])]
+        model_bases = [m.split(":", 1)[0] for m in models]
+        present = wanted in models or wanted in model_bases
+        preview = "\n".join(f"• `{m}`" for m in models[:12]) or "(none returned)"
+        send(token, chat_id,
+             f"{'✅' if present else '⚠️'} *Local Qwen route*\n\n"
+             f"Endpoint: `{base}`\n"
+             f"Target: `{wanted}` {'present' if present else 'NOT FOUND'}\n\n"
+             f"*Models:*\n{preview}")
+    except Exception as e:
+        send(token, chat_id, f"❌ Local Qwen route unavailable at `{base}`:\n```{e}```")
+
+
+def cmd_qwen_test(token: str, chat_id: str) -> None:
+    """Run the bounded task-worker self-test against Mac mini Qwen."""
+    script = STATE_DIR / "workspace" / "projects" / "workspace-control-panel" / "scripts" / "local-qwen-task-worker.py"
+    if not script.exists():
+        send(token, chat_id, f"❌ Local Qwen worker script not found: `{script}`")
+        return
+    send(token, chat_id, "🧪 Running local Qwen task-worker self-test…")
+    try:
+        r = subprocess.run(["python3", str(script), "--self-test"], capture_output=True, text=True, timeout=240)
+    except subprocess.TimeoutExpired:
+        send(token, chat_id, "⏱ Local Qwen self-test timed out after 240s.")
+        return
+    out = (r.stdout + r.stderr).strip()
+    tail = out[-2500:] if out else "(no output)"
+    icon = "✅" if r.returncode == 0 else "❌"
+    send(token, chat_id, f"{icon} *Local Qwen self-test*\n\n```{tail}```")
 
 
 def _run_wcp_script(script_name: str) -> str:
@@ -2306,7 +2469,9 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/opus46 — Anthropic Opus 4.6 + restart\n"
          "/gpt5mini — OpenAI GPT-5 mini + restart\n"
          "/gpt54 — OpenAI GPT-5.4 + restart\n"
-         "/qwen30b — Local Qwen3 Coder 30b (Mac Mini) + restart\n"
+         "/qwen30b — Local Qwen3 Coder 30b 131k (Mac Mini) + restart\n"
+         "/qwen-status — check Mac mini Ollama/Qwen route\n"
+         "/qwen-test — run bounded task-worker self-test\n"
          "/codex_reauth — start remote phone-first Codex OAuth re-auth\n\n"
          "*Services*\n"
          "/restart — restart the L1 gateway\n"
@@ -2375,7 +2540,9 @@ MENU_COMMANDS = [
     ("opus46",      "Switch to Anthropic Opus 4.6"),
     ("gpt5mini",    "Switch to OpenAI GPT-5 mini"),
     ("gpt54",       "Switch to OpenAI GPT-5.4"),
-    ("qwen30b",     "Switch to Local Qwen3 Coder 30b (Mac Mini)"),
+    ("qwen30b",     "Switch to Local Qwen3 Coder 30b 131k (Mac Mini)"),
+    ("qwen_status", "Check Mac mini Ollama/Qwen route"),
+    ("qwen_test",   "Run local Qwen task-worker self-test"),
     ("codex_reauth", "Start remote phone-first Codex OAuth re-auth"),
     # Integrations
     ("garmin",       "Manually trigger the Garmin poller"),
@@ -2790,6 +2957,10 @@ COMMANDS = {
     "/gpt5mini":     lambda t, c: cmd_switch(t, c, "gpt5mini"),
     "/gpt54":        lambda t, c: cmd_switch(t, c, "gpt54"),
     "/qwen30b":      lambda t, c: cmd_switch(t, c, "qwen30b"),
+    "/qwen-status":  cmd_qwen_status,
+    "/qwen_status":  cmd_qwen_status,
+    "/qwen-test":    cmd_qwen_test,
+    "/qwen_test":    cmd_qwen_test,
     "/codex-reauth": cmd_codex_reauth,
     "/codex_reauth": cmd_codex_reauth,
     "/restart":    cmd_restart,

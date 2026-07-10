@@ -63,6 +63,23 @@ MAX_FILE_KB_DEFAULT    = 500
 
 BINARY_MAX_FILE_KB_DEFAULT = 5000  # 5 MB — binaries larger than this are skipped
 
+# Folders that should remain visible in SharePoint at the tree level but should
+# not be recursively traversed for local content mirroring. These are typically
+# dependency/build/cache folders that create a lot of low-value IO on the Pi.
+EXCLUDED_PATH_SEGMENTS = {
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    ".next",
+    "coverage",
+    ".turbo",
+    ".cache",
+    ".venv",
+    "venv",
+    "__pycache__",
+}
+
 # Binary extraction is imported lazily so the poller works even if the
 # extractor module or its dependencies are not yet installed.
 import sys as _sys
@@ -307,6 +324,9 @@ def _collect_all_files(
         is_dir  = "folder" in item
         sp_path = (path.rstrip("/") + "/" + name).lstrip("/")
 
+        if _has_excluded_path_segment(sp_path):
+            continue
+
         if is_dir:
             _collect_all_files(token, site_id, drive_id, sp_path, all_files)
         else:
@@ -375,6 +395,16 @@ def _in_sync_paths(sp_path: str, sync_paths: list[str]) -> bool:
         if sp_lower == prefix or sp_lower.startswith(prefix + "/"):
             return True
     return False
+
+
+def _has_excluded_path_segment(sp_path: str) -> bool:
+    """Return True if the SharePoint path contains a low-value technical folder.
+
+    This preserves broad SharePoint visibility while avoiding recursive mirroring
+    of dependency/build/cache trees that create disproportionate load.
+    """
+    segments = [segment.lower() for segment in Path(sp_path).parts if segment not in ("", "/")]
+    return any(segment in EXCLUDED_PATH_SEGMENTS for segment in segments)
 
 
 # ---------------------------------------------------------------------------

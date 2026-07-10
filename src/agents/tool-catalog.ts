@@ -202,6 +202,14 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     includeInOpenClawGroup: true,
   },
   {
+    id: "linkedin_message_mirror",
+    label: "linkedin_message_mirror",
+    description: "Read-only LinkedIn message mirror",
+    sectionId: "automation",
+    profiles: ["coding"],
+    includeInOpenClawGroup: true,
+  },
+  {
     id: "gateway",
     label: "gateway",
     description: "Gateway control",

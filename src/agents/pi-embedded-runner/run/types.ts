@@ -61,6 +61,15 @@ export type EmbeddedRunAttemptResult = {
   cloudCodeAssistFormatError: boolean;
   attemptUsage?: NormalizedUsage;
   compactionCount?: number;
+  /** Prompt was not sent because fixed interactive context already exceeds the model window. */
+  contextPreflight?: {
+    kind: "interactive_baseline_exceeds_context";
+    estimatedTokens: number;
+    contextWindowTokens: number;
+    systemPromptChars: number;
+    promptChars: number;
+    historyTextChars: number;
+  };
   /** Client tool call detected (OpenResponses hosted tools). */
   clientToolCall?: { name: string; params: Record<string, unknown> };
 };

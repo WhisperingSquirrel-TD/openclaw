@@ -51,6 +51,7 @@ GARMIN_DIR  = OPENCLAW / "integrations" / "garmin"
 TOKENSTORE  = Path(os.environ.get("GARMINTOKENS", str(Path.home() / ".garminconnect")))
 OUTPUT_MD   = OPENCLAW / "workspace" / "GARMIN_DAILY.md"
 ARCHIVE_MD  = OPENCLAW / "workspace" / "GARMIN_ARCHIVE.md"
+INTRADAY_MD = OPENCLAW / "workspace" / "GARMIN_INTRADAY.md"
 LOG_FILE    = OPENCLAW / "workspace" / "memory" / "poll-garmin-log.txt"
 BACKOFF_FILE = GARMIN_DIR / ".garmin_429_backoff"
 
@@ -101,6 +102,54 @@ def write_atomic(path: Path, content: str):
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def _fmt_intraday(today, metrics, latest_activity=None):
+    date_str = today.isoformat() if hasattr(today, "isoformat") else str(today)
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    def pick(*keys):
+        for key in keys:
+            val = metrics.get(key)
+            if val not in (None, "", -1):
+                return val
+        return None
+
+    body_battery = pick("bodyBatteryMostRecentValue", "currentBodyBattery", "bodyBattery")
+    stress = pick("stressLevel", "currentStressLevel", "stress")
+    steps = pick("steps", "totalSteps")
+    active = pick("activeMinutes", "activeTimeInMinutes", "moderateIntensityMinutes")
+
+    if latest_activity:
+        name = latest_activity.get("activityName") or latest_activity.get("activityType", {}).get("typeKey") or "Activity"
+        start = latest_activity.get("startTimeLocal") or latest_activity.get("startTimeGMT") or latest_activity.get("activityDate")
+        dist = _fmt_km(latest_activity.get("distance"))
+        dur = _fmt_dur(latest_activity.get("duration"), zero_ok=True)
+        bits = []
+        if start:
+            bits.append(str(start))
+        bits.append(str(name))
+        if dist != "n/a":
+            bits.append(dist)
+        if dur != "n/a":
+            bits.append(dur)
+        latest_line = " — ".join(bits)
+    else:
+        latest_line = "None new / unavailable"
+
+    lines = [
+        f"# Garmin Intraday — {date_str}",
+        f"_Last updated: {updated}_",
+        "",
+        f"- **Body Battery now**: {_val(body_battery)}",
+        f"- **Stress now**: {_val(stress, suffix='/100')}",
+        f"- **Steps**: {_val(steps, fmt=_fmt_int)}",
+        f"- **Active minutes**: {_val(active, suffix=' min')}",
+        f"- **Latest activity**: {latest_line}",
+        "",
+        "_Compact intraday layer: body battery, stress, steps, active minutes, latest activity only._",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 # ── .env loader ───────────────────────────────────────────────────────────────--
@@ -530,7 +579,7 @@ def extract(day: str, data: dict) -> dict:
     out["max_stress"] = max_stress
 
     # Body Battery (peak/low)
-    out["bb_high"], out["bb_low"] = _parse_body_battery(body_bat, stats)
+    out["bb_now"], out["bb_high"], out["bb_low"] = _parse_body_battery(body_bat, stats)
 
     # VO2 max
     gen = maxm.get("generic") if isinstance(maxm, dict) else None
@@ -571,7 +620,7 @@ def extract(day: str, data: dict) -> dict:
 
 
 def _parse_body_battery(body_bat, stats) -> tuple:
-    high = low = None
+    now = high = low = None
     if isinstance(stats, dict):
         high = stats.get("bodyBatteryHighestValue")
         low  = stats.get("bodyBatteryLowestValue")
@@ -579,19 +628,55 @@ def _parse_body_battery(body_bat, stats) -> tuple:
         levels = []
         for day_entry in body_bat:
             arr = (day_entry or {}).get("bodyBatteryValuesArray") or []
+            last_val = None
             for point in arr:
                 # point shapes: [ts, level] or [ts, status, level]
                 if isinstance(point, list) and point:
                     val = point[-1]
                     if isinstance(val, (int, float)):
                         levels.append(val)
+                        last_val = val
+            if last_val is not None:
+                now = last_val
         if levels:
             high = max(levels) if high is None else high
             low  = min(levels) if low is None else low
-    return high, low
+    return now, high, low
 
 
 # ── Markdown builders ────────────────────────────────────────────────────────---
+
+def build_intraday_markdown(day: str, x: dict) -> str:
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    latest_bits = []
+    act_name = x.get("act_name")
+    if act_name:
+        act_date = x.get("act_date")
+        if act_date:
+            latest_bits.append(str(act_date))
+        latest_bits.append(str(act_name))
+        dist = _fmt_km(x.get("act_dist"))
+        dur = _fmt_dur(x.get("act_dur"), zero_ok=True)
+        if dist != "n/a":
+            latest_bits.append(dist)
+        if dur != "n/a":
+            latest_bits.append(dur)
+    latest_line = " — ".join(latest_bits) if latest_bits else "None new / unavailable"
+    avg_stress = x.get("avg_stress")
+    lines = [
+        f"# Garmin Intraday — {day}",
+        f"_Last updated: {updated}_",
+        "",
+        f"- **Body Battery now**: {_val(x.get('bb_now'))}",
+        f"- **Stress now**: {_val(avg_stress, suffix='/100')}",
+        f"- **Steps**: {_val(x.get('steps'), fmt=_fmt_int)}",
+        f"- **Active minutes**: {_val(sum(x.get('intensity_min')) if isinstance(x.get('intensity_min'), tuple) else None, suffix=' min')}",
+        f"- **Latest activity**: {latest_line}",
+        "",
+        "_Compact intraday layer: body battery, stress, steps, active minutes, latest activity only._",
+    ]
+    return "\n".join(lines) + "\n"
+
 
 def build_markdown(day: str, x: dict) -> str:
     updated = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -924,9 +1009,12 @@ def main():
         _debug_dump(today, data, x)
 
     md = build_markdown(today, x)
+    intraday_md = build_intraday_markdown(today, x)
     try:
         write_atomic(OUTPUT_MD, md)
+        write_atomic(INTRADAY_MD, intraday_md)
         log(f"Written: {OUTPUT_MD}")
+        log(f"Written: {INTRADAY_MD}")
     except Exception as e:
         log(f"ERROR: Failed to write {OUTPUT_MD}: {e}")
         log("FLAG TO TOM: poll-garmin.py could not write GARMIN_DAILY.md.")
