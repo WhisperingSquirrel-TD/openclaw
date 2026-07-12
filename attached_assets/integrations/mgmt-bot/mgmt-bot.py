@@ -2178,6 +2178,27 @@ def cmd_codex_reauth(token: str, chat_id: str) -> None:
                  f"⚠️ Could not cleanly stop the gateway before the token copy: `{e}`\n"
                  "Continuing anyway — if auth doesn't stick, run /codex_reauth again.")
 
+        # The gateway can also be running OUTSIDE systemd (l1-start.sh legacy
+        # path). A stray process survives the systemctl stop and keeps serving
+        # with the OLD tokens — which the fresh sign-in just invalidated. Kill
+        # any leftover gateway process so only the restarted one serves.
+        try:
+            l1_stop = os.path.join(os.path.expanduser("~"), "l1-stop.sh")
+            if os.path.isfile(l1_stop):
+                subprocess.run(["bash", l1_stop], capture_output=True, timeout=60)
+            for _ in range(3):
+                stray = subprocess.run(
+                    ["pgrep", "-f", "openclaw.*gateway"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if stray.returncode != 0 or not stray.stdout.strip():
+                    break
+                subprocess.run(["pkill", "-f", "openclaw.*gateway"],
+                               capture_output=True, timeout=10)
+                time.sleep(2)
+        except Exception:
+            pass  # best-effort; systemd stop above is the primary path
+
         # Step 2: copy tokens, then ALWAYS start the gateway again — even if
         # the copy failed — so the assistant is never left down.
         copy_err = None
@@ -2223,40 +2244,71 @@ def cmd_codex_reauth(token: str, chat_id: str) -> None:
 
         # Step 3: verify. Right after a restart the Pi CPU is often pegged and the
         # Node CLI cold start alone can blow a short timeout even though auth is
-        # fine — so retry a few times with generous limits before worrying anyone.
-        verify_out = ""
-        verify_note = "no output"
-        for attempt in range(3):
-            if attempt:
-                time.sleep(20)
-            try:
-                verify = subprocess.run(
-                    "openclaw config auth-status 2>&1 | grep -A 5 'openai-codex'",
-                    shell=True, capture_output=True, text=True, timeout=120,
-                )
-            except subprocess.TimeoutExpired:
-                verify_note = "auth-status timed out (2 min)"
-                continue
-            except Exception as e:
-                verify_note = f"auth-status failed: {e}"
-                continue
-            verify_out = (verify.stdout + verify.stderr).strip()
-            if verify_out and "Failed to refresh OAuth token" not in verify_out:
-                break
+        # fine. Verify READ-ONLY by comparing files on disk — the previous
+        # `openclaw config auth-status` call was not a real subcommand and
+        # always produced "(no output)". This check is definitive: the tokens
+        # the gateway will load either match the fresh CLI sign-in or they don't.
+        home = os.path.expanduser("~")
+        problems = []
+        details = []
+        try:
+            cli_tokens = json.loads(
+                open(os.path.join(home, ".codex", "auth.json")).read()
+            ).get("tokens") or {}
+            cli_access = cli_tokens.get("access_token") or ""
+            main_file = os.path.join(home, ".openclaw", "agents", "main",
+                                     "agent", "auth-profiles.json")
+            data = json.loads(open(main_file).read())
+            profs = data.get("profiles")
+            entry = (profs.get("openai-codex:default")
+                     if isinstance(profs, dict) else None) or \
+                    data.get("openai-codex:default") or {}
+            gw_access = entry.get("access") or ""
+            if not cli_access:
+                problems.append("~/.codex/auth.json has no access token")
+            if not gw_access:
+                problems.append("main agent auth-profiles.json has no openai-codex entry")
+            if cli_access and gw_access:
+                if hashlib.sha256(cli_access.encode()).hexdigest() == \
+                   hashlib.sha256(gw_access.encode()).hexdigest():
+                    details.append("• Tokens in OpenClaw match the fresh sign-in ✅")
+                else:
+                    problems.append("gateway tokens do NOT match the fresh sign-in "
+                                    "(copy did not land)")
+            exp = entry.get("expires")
+            if isinstance(exp, (int, float)):
+                mins = (exp / 1000 - time.time()) / 60
+                details.append(f"• Access token valid ~{mins:.0f} min ({'OK' if mins > 0 else 'ALREADY EXPIRED'})")
+                if mins <= 0:
+                    problems.append("copied access token is already expired")
+        except Exception as e:
+            problems.append(f"could not read auth files for verification: {e}")
 
-        if not verify_out or "Failed to refresh OAuth token" in verify_out:
-            tail = verify_out[-1500:] if verify_out else f"({verify_note})"
+        try:
+            active = subprocess.run(
+                ["systemctl", "--user", "is-active", "openclaw-gateway.service"],
+                capture_output=True, text=True, timeout=15,
+            ).stdout.strip()
+            details.append(f"• Gateway service: {active}")
+            if active != "active":
+                problems.append(f"gateway service is '{active}' — try /restart")
+        except Exception:
+            pass
+
+        detail_text = "\n".join(details) if details else ""
+        if problems:
             send(token, chat_id,
-                 "⚠️ Codex sign-in, token copy and gateway restart all *succeeded*, but I "
-                 "could not positively verify auth afterwards.\n"
-                 "It has most likely still worked — test by messaging the assistant, or run "
-                 "`openclaw config auth-status` on the Pi.\n\n"
-                 f"```{tail}```")
+                 "⚠️ Codex sign-in and gateway restart ran, but verification found issues:\n"
+                 + "\n".join(f"• {p}" for p in problems)
+                 + (f"\n\n{detail_text}" if detail_text else "")
+                 + "\n\nRun /codex_reauth again; if it repeats, this needs a closer look.")
             return
 
         send(token, chat_id,
-             f"✅ *OpenAI Codex re-auth complete*\n\n"
-             f"Tokens copied into OpenClaw, gateway restarted, and auth verification passed.\n\n```{verify_out[-1200:]}```")
+             "✅ *OpenAI Codex re-auth complete*\n\n"
+             "Fresh tokens are in place and the gateway is running:\n"
+             f"{detail_text}\n\n"
+             "Message the assistant to confirm it responds.")
 
     def _run() -> None:
         # Crash guard + interruption marker: any uncaught exception previously
