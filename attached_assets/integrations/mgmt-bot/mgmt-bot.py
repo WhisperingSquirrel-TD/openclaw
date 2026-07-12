@@ -724,17 +724,44 @@ def cmd_pull(token: str, chat_id: str) -> None:
         send(token, chat_id, f"❌ Git directory not found: `{git_dir}`")
         return
     send(token, chat_id, "⬇️ Pulling latest from GitHub…")
+
+    # Local edits to tracked files make `git pull` refuse to merge. GitHub is
+    # authoritative for this repo, so auto-stash them (recoverable via
+    # `git stash pop` on the Pi) instead of failing the pull.
+    stash_note = ""
+    try:
+        st = subprocess.run(
+            ["git", "-C", str(git_dir), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if st.stdout.strip():
+            label = "mgmt-bot auto-stash before /pull " + time.strftime("%Y-%m-%d %H:%M:%S")
+            sr = subprocess.run(
+                ["git", "-C", str(git_dir), "stash", "push", "-m", label],
+                capture_output=True, text=True, timeout=120,
+            )
+            if sr.returncode != 0:
+                s_out = (sr.stdout + sr.stderr).strip()[-1500:]
+                send(token, chat_id,
+                     f"❌ Local changes found on the Pi but auto-stash failed — pull aborted.\n\n```{s_out}```")
+                return
+            stash_note = (f"⚠️ Local changes to tracked files were auto-stashed before pulling "
+                          f"as “{label}” (recover with `git stash list` / `git stash pop`).\n")
+    except Exception as e:
+        send(token, chat_id, f"❌ Pre-pull check failed: `{e}`")
+        return
+
     r = subprocess.run(
-        ["git", "-C", str(git_dir), "pull"],
-        capture_output=True, text=True, timeout=60,
+        ["git", "-C", str(git_dir), "pull", "--ff-only"],
+        capture_output=True, text=True, timeout=120,
     )
-    output = (r.stdout + r.stderr).strip()
+    output = (r.stdout + r.stderr).strip()[-1500:]
     if r.returncode == 0:
         send(token, chat_id,
-             f"✅ Pull complete:\n```{output}```\n\n"
+             f"✅ Pull complete:\n{stash_note}```{output}```\n\n"
              f"_Send /install to deploy the updated files._")
     else:
-        send(token, chat_id, f"❌ Pull failed:\n```{output}```")
+        send(token, chat_id, f"❌ Pull failed:\n{stash_note}```{output}```")
 
 
 def cmd_install(token: str, chat_id: str) -> None:
@@ -928,11 +955,31 @@ def cmd_install(token: str, chat_id: str) -> None:
         "install_env['OPENCLAW_NONINTERACTIVE'] = '1'\n"
         "\n"
         "log('wrapper started; pulling latest before install')\n"
+        "# Local edits to tracked files make `git pull` refuse to merge. GitHub is\n"
+        "# authoritative for this repo, so auto-stash them (recoverable via\n"
+        "# `git stash pop` on the Pi) instead of aborting the whole install.\n"
+        "stash_note = ''\n"
+        "st = subprocess.run(['git', '-C', GIT_DIR, 'status', '--porcelain', '--untracked-files=no'],\n"
+        "                    capture_output=True, text=True, timeout=60)\n"
+        "if st.stdout.strip():\n"
+        "    label = 'mgmt-bot auto-stash before /install ' + time.strftime('%Y-%m-%d %H:%M:%S')\n"
+        "    sr = subprocess.run(['git', '-C', GIT_DIR, 'stash', 'push', '-m', label],\n"
+        "                        capture_output=True, text=True, timeout=120)\n"
+        "    if sr.returncode != 0:\n"
+        "        s_out = (sr.stdout + sr.stderr).strip()\n"
+        "        log('git stash failed before install')\n"
+        "        tg('❌ Local changes found on the Pi but auto-stash failed — install aborted.\\n\\n```'\n"
+        "           + (s_out or 'no output')[-3000:] + '```')\n"
+        "        raise SystemExit(1)\n"
+        "    stash_note = ('⚠️ Local changes to tracked files on the Pi were auto-stashed before pulling '\n"
+        "                  'as \u201c' + label + '\u201d (recover with `git stash list` / `git stash pop`).\\n')\n"
+        "    log('auto-stashed local changes: ' + label)\n"
         "pull = subprocess.run(['git', '-C', GIT_DIR, 'pull', '--ff-only'],\n"
         "                      capture_output=True, text=True, timeout=300)\n"
         "pull_out = (pull.stdout + pull.stderr).strip()\n"
         "if pull.returncode != 0:\n"
-        "    msg = '❌ Pull failed — install aborted.\\n\\n```' + (pull_out or 'no output')[-3000:] + '```'\n"
+        "    msg = ('❌ Pull failed — install aborted.\\n' + stash_note + '\\n```'\n"
+        "           + (pull_out or 'no output')[-3000:] + '```')\n"
         "    log('git pull failed before install')\n"
         "    tg(msg)\n"
         "    raise SystemExit(1)\n"
@@ -993,9 +1040,9 @@ def cmd_install(token: str, chat_id: str) -> None:
         "gw_tag = '✅ Gateway: running' if gw_ok else '⚠️ Gateway check inconclusive — verify with /status'\n"
         "\n"
         "if res.returncode == 0:\n"
-        "    head = f'✅ Install complete.\\n{gw_tag}\\n\\n'\n"
+        "    head = f'✅ Install complete.\\n{gw_tag}\\n{stash_note}\\n'\n"
         "else:\n"
-        "    head = f'⚠️ Install finished with errors (rc={res.returncode}).\\n{gw_tag}\\n\\n'\n"
+        "    head = f'⚠️ Install finished with errors (rc={res.returncode}).\\n{gw_tag}\\n{stash_note}\\n'\n"
         "# Telegram returns HTTP 400 for any message over 4096 chars. That's a\n"
         "# hard length limit, not a Markdown problem, so the plain-text fallback\n"
         "# can't rescue it — we MUST trim the embedded log tail so the whole\n"
