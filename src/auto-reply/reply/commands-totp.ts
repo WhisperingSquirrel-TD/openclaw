@@ -12,6 +12,18 @@ import {
 } from "../../infra/totp/totp-session.js";
 import type { CommandHandler } from "./commands-types.js";
 
+/**
+ * Replace the message body the agent will see. The agent prompt is built from
+ * `BodyStripped` (see get-reply-run.ts: `sessionCtx.BodyStripped ?? sessionCtx.Body`),
+ * so mutating `BodyForAgent` alone is NOT enough — the injected text must be
+ * mirrored into `BodyStripped` or the model receives the original raw body.
+ */
+function setAgentBody(ctx: unknown, text: string): void {
+  const mutable = ctx as Record<string, unknown>;
+  mutable.BodyForAgent = text;
+  mutable.BodyStripped = text;
+}
+
 const TOTP_SETUP_COMMAND = "/totp-setup";
 const TOTP_STATUS_COMMAND = "/totp-status";
 const TOTP_LOCK_COMMAND = "/totp-lock";
@@ -151,12 +163,19 @@ export const handleTotpPreGate: CommandHandler = async (params, allowTextCommand
     if (!READ_ONLY_FAST.some((re) => re.test(lower)) && status) {
       const expiresAtStr = new Date(Date.now() + status.remainingSeconds * 1000).toLocaleTimeString();
       logVerbose("TOTP pre-gate: window active — injecting PROCEED signal");
-      const original = params.ctx.BodyForAgent ?? params.ctx.Body ?? normalized;
-      params.ctx.BodyForAgent =
+      const ctxRecord = params.ctx as Record<string, unknown> & typeof params.ctx;
+      const original =
+        (typeof ctxRecord.BodyStripped === "string" ? ctxRecord.BodyStripped : undefined) ??
+        params.ctx.BodyForAgent ??
+        params.ctx.Body ??
+        normalized;
+      setAgentBody(
+        params.ctx,
         `[SYSTEM – TOTP GATE: ✅ Approval window is ACTIVE (expires ${expiresAtStr}). ` +
-        `Execute the requested action IMMEDIATELY. ` +
-        `Do NOT ask for a TOTP code — one has already been verified. ` +
-        `Do NOT confirm, double-check, or pause. Just do it.]\n\n${original}`;
+          `Execute the requested action IMMEDIATELY. ` +
+          `Do NOT ask for a TOTP code — one has already been verified. ` +
+          `Do NOT confirm, double-check, or pause. Just do it.]\n\n${original}`,
+      );
     }
     return null;
   }
@@ -218,13 +237,20 @@ export const handleTotpPreGate: CommandHandler = async (params, allowTextCommand
   // code immediately as its very first reply, before spending time planning or
   // calling any tools. No resend needed: L1 already has the full task context.
   logVerbose("TOTP pre-gate: action keywords detected, injecting TOTP-first instruction");
-  const original = params.ctx.BodyForAgent ?? params.ctx.Body ?? normalized;
-  params.ctx.BodyForAgent =
+  const ctxRecord = params.ctx as Record<string, unknown> & typeof params.ctx;
+  const original =
+    (typeof ctxRecord.BodyStripped === "string" ? ctxRecord.BodyStripped : undefined) ??
+    params.ctx.BodyForAgent ??
+    params.ctx.Body ??
+    normalized;
+  setAgentBody(
+    params.ctx,
     `[SYSTEM – TOTP GATE: No approval window is currently active. ` +
-    `Your FIRST and ONLY response right now must be: "🔐 Please send your TOTP code to open the gate." ` +
-    `Do NOT plan, draft, analyse, or call any tools first. ` +
-    `When the code is verified you will receive a [SYSTEM – TOTP GATE: ✅ …] message — ` +
-    `at that point proceed with the task below without waiting for anything else.]\n\n${original}`;
+      `Your FIRST and ONLY response right now must be: "🔐 Please send your TOTP code to open the gate." ` +
+      `Do NOT plan, draft, analyse, or call any tools first. ` +
+      `When the code is verified you will receive a [SYSTEM – TOTP GATE: ✅ …] message — ` +
+      `at that point proceed with the task below without waiting for anything else.]\n\n${original}`,
+  );
 
   return null; // shouldContinue — L1 gets the message with the injected instruction
 };
@@ -311,11 +337,13 @@ export const handleTotpCodeInput: CommandHandler = async (params, allowTextComma
   // the gate opened and resumes the pending task on its own — the user should
   // not have to say "the gate is open, continue". The raw 6-digit code is
   // replaced with a system note so it never reaches the model.
-  params.ctx.BodyForAgent =
+  setAgentBody(
+    params.ctx,
     `[SYSTEM – TOTP GATE: ✅ Code verified. Approval window is now OPEN for ` +
-    `${windowMinutes} minute${windowMinutes > 1 ? "s" : ""} (until ${expiresAtStr}). ` +
-    `Start your reply by confirming the gate is open, then IMMEDIATELY continue the task ` +
-    `that was waiting for this approval — do NOT ask for the code again and do NOT wait ` +
-    `for further user input. If no task was waiting, just confirm the gate is open.]`;
+      `${windowMinutes} minute${windowMinutes > 1 ? "s" : ""} (until ${expiresAtStr}). ` +
+      `Start your reply by confirming the gate is open, then IMMEDIATELY continue the task ` +
+      `that was waiting for this approval — do NOT ask for the code again and do NOT wait ` +
+      `for further user input. If no task was waiting, just confirm the gate is open.]`,
+  );
   return { shouldContinue: true };
 };
