@@ -93,9 +93,22 @@ if [ -z "${OPENCLAW_REEXEC:-}" ]; then
     echo ""
     if [ -d "$HOME/openclaw" ]; then
         warn "Pulling latest changes..."
-        git -C "$HOME/openclaw" stash 2>/dev/null || true
+        STASHED=0
+        if [ -n "$(git -C "$HOME/openclaw" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+            git -C "$HOME/openclaw" stash push -m "install auto-stash $(date '+%F %T')" 2>/dev/null && STASHED=1
+        fi
         git -C "$HOME/openclaw" pull || warn "Git pull failed — proceeding with existing code"
-        git -C "$HOME/openclaw" stash pop 2>/dev/null || true
+        if [ "$STASHED" -eq 1 ] && ! git -C "$HOME/openclaw" stash pop 2>/dev/null; then
+            # A conflicted pop leaves literal <<<<<<< markers in the working
+            # tree — and services (e.g. mgmt-bot) are SYMLINKED to these files,
+            # so that would crash them. On conflict the stash is kept, so a
+            # hard reset restores clean upstream files without losing the edits.
+            git -C "$HOME/openclaw" reset --hard HEAD >/dev/null 2>&1 || true
+            warn "git stash pop CONFLICTED — restored clean upstream files instead."
+            warn "  Your local edits are safe in the stash: git -C ~/openclaw stash list"
+            warn "  Review them with: git -C ~/openclaw stash show -p"
+            warn "  Do NOT 'stash pop' again onto files that changed upstream — cherry-pick the hunks manually."
+        fi
         info "Code updated"
     else
         warn "Cloning fork from GitHub..."
@@ -1372,7 +1385,7 @@ if [ -f "$MGMT_BOT_SRC" ]; then
     # Guard: never (re)start a syntactically broken bot. The bot is SYMLINKED
     # to the repo working tree, so leftover merge-conflict markers (e.g. from
     # a manual `git stash pop` that conflicted) crash-loop the live service.
-    if ! python3 -c "compile(open('$MGMT_BOT_SRC').read(), 'mgmt-bot.py', 'exec')" 2>/tmp/mgmt-bot-syntax.err; then
+    if ! python3 -c 'import sys; compile(open(sys.argv[1]).read(), "mgmt-bot.py", "exec")' "$MGMT_BOT_SRC" 2>/tmp/mgmt-bot-syntax.err; then
         MGMT_BOT_SYNTAX_OK=0
         warn "mgmt-bot.py FAILS to compile — the management bot will NOT be restarted."
         warn "  $(head -3 /tmp/mgmt-bot-syntax.err | tr '\n' ' ')"
