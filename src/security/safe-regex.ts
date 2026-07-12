@@ -149,3 +149,24 @@ export function compileSafeRegex(source: string, flags = ""): RegExp | null {
   }
   return compiled;
 }
+
+const BOUNDED_TEST_MAX_INPUT = 2048;
+
+export function testRegexWithBoundedInput(
+  regex: RegExp,
+  input: string,
+  maxLength = BOUNDED_TEST_MAX_INPUT,
+): boolean {
+  // Defense-in-depth alongside compileSafeRegex: even a pattern that passed the
+  // nested-repetition check can be slow on pathological inputs, so cap the
+  // input length before testing.
+  const bounded = input.length > maxLength ? input.slice(0, maxLength) : input;
+  if (regex.global || regex.sticky) {
+    regex.lastIndex = 0;
+  }
+  try {
+    return regex.test(bounded);
+  } catch {
+    return false;
+  }
+}
