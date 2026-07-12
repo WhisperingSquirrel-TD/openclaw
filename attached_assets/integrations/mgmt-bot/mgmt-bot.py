@@ -11,6 +11,9 @@ COMMANDS
   /status       — current provider, service state, Pi uptime
   /codex54full  — switch to Codex Web 5.4 full (default) and restart gateway
   /codex55full  — switch to Codex Web 5.5 full and restart gateway
+  /codex56sol   — switch to Codex Web 5.6 Sol (frontier) and restart gateway
+  /codex56terra — switch to Codex Web 5.6 Terra (balanced) and restart gateway
+  /codex56luna  — switch to Codex Web 5.6 Luna (fast) and restart gateway
   /codex53mini  — switch to Codex Web 5.3 mini and restart gateway
   /codex54mini  — switch to Codex Web 5.4 mini and restart gateway
   /sonnet45     — switch to Anthropic Sonnet 4.5 and restart gateway
@@ -18,6 +21,7 @@ COMMANDS
   /opus46       — switch to Anthropic Opus 4.6 and restart gateway
   /gpt5mini     — switch to OpenAI GPT-5 mini and restart gateway
   /gpt54        — switch to OpenAI GPT-5.4 and restart gateway
+  /gpt56        — switch to OpenAI GPT-5.6 Sol (API key) and restart gateway
   /qwen30b      — switch to Local Qwen3 Coder 30b 131k (Mac Mini) and restart gateway
   /restart      — restart the L1 gateway service
   /pull         — git pull latest from GitHub (does NOT reinstall)
@@ -49,6 +53,9 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
   works out of the box. Set a var only to override the exact model ID string.
   OPENCLAW_CODEX_MODEL        override /codex54full, default openai-codex/gpt-5.4
   OPENCLAW_CODEX55_MODEL      override /codex55full, default openai-codex/gpt-5.5
+  OPENCLAW_CODEX56_SOL_MODEL  override /codex56sol,  default openai-codex/gpt-5.6-sol
+  OPENCLAW_CODEX56_TERRA_MODEL override /codex56terra, default openai-codex/gpt-5.6-terra
+  OPENCLAW_CODEX56_LUNA_MODEL override /codex56luna, default openai-codex/gpt-5.6-luna
   OPENCLAW_CODEX_MINI_MODEL   override /codex53mini, default openai-codex/gpt-5.3-codex-spark
   OPENCLAW_CODEX_MINI54_MODEL override /codex54mini, default openai-codex/gpt-5.4-mini
   OPENCLAW_ANTHROPIC_MODEL    override /sonnet45,    default anthropic/claude-sonnet-4-5
@@ -56,6 +63,7 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
   OPENCLAW_OPUS_MODEL         override /opus46,      default anthropic/claude-opus-4-6
   OPENCLAW_OPENAI_MODEL       override /gpt5mini,    default openai/gpt-5-mini
   OPENCLAW_GPT54_MODEL        override /gpt54,       default openai/gpt-5.4
+  OPENCLAW_GPT56_MODEL        override /gpt56,       default openai/gpt-5.6-sol
   OPENCLAW_LOCAL_QWEN30B_MODEL override /qwen30b,    default custom-mac-ollama/qwen3-coder-131k
   OPENCLAW_VAULT_PASSPHRASE Passphrase used to encrypt SOUL.md (already in .env)
 
@@ -609,6 +617,10 @@ MODEL_REGISTRY = {
     # --- Codex Web (OAuth, no API key). gpt-5.4 is the daily-reset default. ---
     "codex54full": ("OPENCLAW_CODEX_MODEL",        "openai-codex/gpt-5.4",         None,            "openai-codex", "Codex 5.4 (full)"),
     "codex55full": ("OPENCLAW_CODEX55_MODEL",      "openai-codex/gpt-5.5",         None,            "openai-codex", "Codex 5.5 (full)"),
+    # gpt-5.6 family (July 2026): Sol = frontier, Terra = balanced, Luna = fast.
+    "codex56sol":  ("OPENCLAW_CODEX56_SOL_MODEL",  "openai-codex/gpt-5.6-sol",     None,            "openai-codex", "Codex 5.6 Sol (frontier)"),
+    "codex56terra":("OPENCLAW_CODEX56_TERRA_MODEL","openai-codex/gpt-5.6-terra",   None,            "openai-codex", "Codex 5.6 Terra (balanced)"),
+    "codex56luna": ("OPENCLAW_CODEX56_LUNA_MODEL", "openai-codex/gpt-5.6-luna",    None,            "openai-codex", "Codex 5.6 Luna (fast)"),
     "codex53mini": ("OPENCLAW_CODEX_MINI_MODEL",   "openai-codex/gpt-5.3-codex-spark", None,        "openai-codex", "Codex 5.3 Spark (Pro)"),
     "codex54mini": ("OPENCLAW_CODEX_MINI54_MODEL", "openai-codex/gpt-5.4-mini",    None,            "openai-codex", "Codex 5.4 mini"),
     # --- Anthropic API (auth handled internally by the gateway) ---
@@ -618,6 +630,7 @@ MODEL_REGISTRY = {
     # --- OpenAI API (needs OPENAI_API_KEY) ---
     "gpt5mini":    ("OPENCLAW_OPENAI_MODEL",       "openai/gpt-5-mini",            "OPENAI_API_KEY", "openai",      "OpenAI GPT-5 mini"),
     "gpt54":       ("OPENCLAW_GPT54_MODEL",        "openai/gpt-5.4",               "OPENAI_API_KEY", "openai",      "OpenAI GPT-5.4"),
+    "gpt56":       ("OPENCLAW_GPT56_MODEL",        "openai/gpt-5.6-sol",           "OPENAI_API_KEY", "openai",      "OpenAI GPT-5.6 Sol (API)"),
     # --- Local LLMs on the LAN (Mac Mini, OpenAI-compatible custom provider, no API key) ---
     # Model string is "<endpoint-id>/<model-id>" and must match the custom provider
     # already configured in openclaw.json. Override the exact string via .env if it drifts.
@@ -2690,6 +2703,9 @@ def cmd_help(token: str, chat_id: str) -> None:
          "*Provider (model switch)*\n"
          "/codex54full — Codex 5.4 full [default] + restart\n"
          "/codex55full — Codex 5.5 full + restart\n"
+         "/codex56sol — Codex 5.6 Sol (frontier) + restart\n"
+         "/codex56terra — Codex 5.6 Terra (balanced) + restart\n"
+         "/codex56luna — Codex 5.6 Luna (fast) + restart\n"
          "/codex53mini — Codex 5.3 mini + restart\n"
          "/codex54mini — Codex 5.4 mini + restart\n"
          "/sonnet45 — Anthropic Sonnet 4.5 + restart\n"
@@ -2697,6 +2713,7 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/opus46 — Anthropic Opus 4.6 + restart\n"
          "/gpt5mini — OpenAI GPT-5 mini + restart\n"
          "/gpt54 — OpenAI GPT-5.4 + restart\n"
+         "/gpt56 — OpenAI GPT-5.6 Sol (API key) + restart\n"
          "/qwen30b — Local Qwen3 Coder 30b 131k (Mac Mini) + restart\n"
          "/qwen-status — check Mac mini Ollama/Qwen route\n"
          "/qwen-test — run bounded task-worker self-test\n"
@@ -2761,6 +2778,9 @@ MENU_COMMANDS = [
     # Model switching
     ("codex54full", "Switch to Codex Web 5.4 full (default)"),
     ("codex55full", "Switch to Codex Web 5.5 full"),
+    ("codex56sol",  "Switch to Codex Web 5.6 Sol (frontier)"),
+    ("codex56terra","Switch to Codex Web 5.6 Terra (balanced)"),
+    ("codex56luna", "Switch to Codex Web 5.6 Luna (fast)"),
     ("codex53mini", "Switch to Codex Web 5.3 mini"),
     ("codex54mini", "Switch to Codex Web 5.4 mini"),
     ("sonnet45",    "Switch to Anthropic Sonnet 4.5"),
@@ -2768,6 +2788,7 @@ MENU_COMMANDS = [
     ("opus46",      "Switch to Anthropic Opus 4.6"),
     ("gpt5mini",    "Switch to OpenAI GPT-5 mini"),
     ("gpt54",       "Switch to OpenAI GPT-5.4"),
+    ("gpt56",       "Switch to OpenAI GPT-5.6 Sol (API key)"),
     ("qwen30b",     "Switch to Local Qwen3 Coder 30b 131k (Mac Mini)"),
     ("qwen_status", "Check Mac mini Ollama/Qwen route"),
     ("qwen_test",   "Run local Qwen task-worker self-test"),
@@ -3177,6 +3198,9 @@ COMMANDS = {
     "/status":     cmd_status,
     "/codex54full":  lambda t, c: cmd_switch(t, c, "codex54full"),
     "/codex55full":  lambda t, c: cmd_switch(t, c, "codex55full"),
+    "/codex56sol":   lambda t, c: cmd_switch(t, c, "codex56sol"),
+    "/codex56terra": lambda t, c: cmd_switch(t, c, "codex56terra"),
+    "/codex56luna":  lambda t, c: cmd_switch(t, c, "codex56luna"),
     "/codex53mini":  lambda t, c: cmd_switch(t, c, "codex53mini"),
     "/codex54mini":  lambda t, c: cmd_switch(t, c, "codex54mini"),
     "/sonnet45":     lambda t, c: cmd_switch(t, c, "sonnet45"),
@@ -3184,6 +3208,7 @@ COMMANDS = {
     "/opus46":       lambda t, c: cmd_switch(t, c, "opus46"),
     "/gpt5mini":     lambda t, c: cmd_switch(t, c, "gpt5mini"),
     "/gpt54":        lambda t, c: cmd_switch(t, c, "gpt54"),
+    "/gpt56":        lambda t, c: cmd_switch(t, c, "gpt56"),
     "/qwen30b":      lambda t, c: cmd_switch(t, c, "qwen30b"),
     "/qwen-status":  cmd_qwen_status,
     "/qwen_status":  cmd_qwen_status,

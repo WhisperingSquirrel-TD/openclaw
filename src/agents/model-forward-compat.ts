@@ -15,6 +15,13 @@ const OPENAI_GPT_54_PRO_TEMPLATE_MODEL_IDS = ["gpt-5.2-pro", "gpt-5.2"] as const
 // same template path as gpt-5.4 so users don't get "Unknown model" errors.
 const OPENAI_GPT_55_MODEL_ID = "gpt-5.5";
 
+// gpt-5.6 family (July 2026): tiered naming — Sol (frontier), Terra (balanced),
+// Luna (fast). IDs: gpt-5.6-sol, gpt-5.6-sol-pro, gpt-5.6-terra, gpt-5.6-luna,
+// plus the bare "gpt-5.6" alias (OpenAI routes it to Sol). Prefix-match so all
+// tiers resolve without catalog updates.
+const OPENAI_GPT_56_MODEL_PREFIX = "gpt-5.6";
+const OPENAI_CODEX_GPT_56_TEMPLATE_MODEL_IDS = ["gpt-5.3-codex", "gpt-5.2-codex"] as const;
+
 const OPENAI_CODEX_GPT_55_MODEL_ID = "gpt-5.5";
 const OPENAI_CODEX_GPT_55_TEMPLATE_MODEL_IDS = ["gpt-5.3-codex", "gpt-5.2-codex"] as const;
 const OPENAI_CODEX_GPT_54_MODEL_ID = "gpt-5.4";
@@ -57,7 +64,12 @@ function resolveOpenAIGpt54ForwardCompatModel(
   const trimmedModelId = modelId.trim();
   const lower = trimmedModelId.toLowerCase();
   let templateIds: readonly string[];
-  if (lower === OPENAI_GPT_54_MODEL_ID || lower === OPENAI_GPT_55_MODEL_ID) {
+  if (
+    lower === OPENAI_GPT_54_MODEL_ID ||
+    lower === OPENAI_GPT_55_MODEL_ID ||
+    lower === OPENAI_GPT_56_MODEL_PREFIX ||
+    lower.startsWith(`${OPENAI_GPT_56_MODEL_PREFIX}-`)
+  ) {
     templateIds = OPENAI_GPT_54_TEMPLATE_MODEL_IDS;
   } else if (lower === OPENAI_GPT_54_PRO_MODEL_ID) {
     templateIds = OPENAI_GPT_54_PRO_TEMPLATE_MODEL_IDS;
@@ -133,7 +145,13 @@ function resolveOpenAICodexForwardCompatModel(
 
   let templateIds: readonly string[];
   let eligibleProviders: Set<string>;
-  if (lower === OPENAI_CODEX_GPT_55_MODEL_ID) {
+  if (
+    lower === OPENAI_GPT_56_MODEL_PREFIX ||
+    lower.startsWith(`${OPENAI_GPT_56_MODEL_PREFIX}-`)
+  ) {
+    templateIds = OPENAI_CODEX_GPT_56_TEMPLATE_MODEL_IDS;
+    eligibleProviders = CODEX_GPT54_ELIGIBLE_PROVIDERS;
+  } else if (lower === OPENAI_CODEX_GPT_55_MODEL_ID) {
     templateIds = OPENAI_CODEX_GPT_55_TEMPLATE_MODEL_IDS;
     eligibleProviders = CODEX_GPT54_ELIGIBLE_PROVIDERS;
   } else if (lower === OPENAI_CODEX_GPT_54_MODEL_ID) {

@@ -367,6 +367,37 @@ describe("resolveForwardCompatModel", () => {
     expect(model?.maxTokens).toBe(128_000);
   });
 
+  it("resolves openai-codex gpt-5.6 family (sol/terra/luna + bare alias) via codex template", () => {
+    const registry = createRegistry({
+      "openai-codex/gpt-5.2-codex": createOpenAICodexTemplateModel("gpt-5.2-codex"),
+    });
+    for (const id of ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-sol-pro", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+      const model = resolveForwardCompatModel("openai-codex", id, registry);
+      expectResolvedForwardCompat(model, { provider: "openai-codex", id });
+      expect(model?.api).toBe("openai-codex-responses");
+      expect(model?.baseUrl).toBe("https://chatgpt.com/backend-api");
+    }
+  });
+
+  it("resolves openai-codex gpt-5.6 without templates using codex fallback defaults", () => {
+    const registry = createRegistry({});
+    const model = resolveForwardCompatModel("openai-codex", "gpt-5.6-terra", registry);
+    expectResolvedForwardCompat(model, { provider: "openai-codex", id: "gpt-5.6-terra" });
+    expect(model?.api).toBe("openai-codex-responses");
+    expect(model?.baseUrl).toBe("https://chatgpt.com/backend-api");
+    expect(model?.reasoning).toBe(true);
+  });
+
+  it("resolves openai gpt-5.6 tiers via gpt-5.2 template", () => {
+    const registry = createRegistry({
+      "openai/gpt-5.2": createOpenAITemplateModel("gpt-5.2"),
+    });
+    const model = resolveForwardCompatModel("openai", "gpt-5.6-sol", registry);
+    expectResolvedForwardCompat(model, { provider: "openai", id: "gpt-5.6-sol" });
+    expect(model?.api).toBe("openai-responses");
+    expect(model?.baseUrl).toBe("https://api.openai.com/v1");
+  });
+
   it("resolves anthropic opus 4.6 via 4.5 template", () => {
     const registry = createRegistry({
       "anthropic/claude-opus-4-5": createTemplateModel("anthropic", "claude-opus-4-5"),
