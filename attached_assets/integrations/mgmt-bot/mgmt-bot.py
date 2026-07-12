@@ -2068,45 +2068,84 @@ def cmd_codex_reauth(token: str, chat_id: str) -> None:
                  f"❌ Codex device auth did not complete successfully (exit {rc}).\n\n```{tail}```")
             return
 
+        # Step 1: copy tokens into OpenClaw.
         try:
             copy = subprocess.run(
                 ["python3", str(helper)],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=120,
             )
-            if copy.returncode != 0:
-                tail = (copy.stdout + copy.stderr).strip()[-1500:]
-                send(token, chat_id,
-                     f"⚠️ Sign-in succeeded but token copy failed.\n\n```{tail}```")
-                return
+        except subprocess.TimeoutExpired:
+            send(token, chat_id,
+                 "⚠️ Codex sign-in completed, but the *token copy* step timed out (2 min).\n"
+                 "Run the re-auth again; if this repeats, check CPU load on the Pi.")
+            return
+        except Exception as e:
+            send(token, chat_id, f"⚠️ Codex sign-in completed, but token copy failed: `{e}`")
+            return
+        if copy.returncode != 0:
+            tail = (copy.stdout + copy.stderr).strip()[-1500:]
+            send(token, chat_id,
+                 f"⚠️ Sign-in succeeded but token copy failed.\n\n```{tail}```")
+            return
 
+        # Step 2: restart the gateway. A cold gateway start on the Pi routinely
+        # exceeds 30s (boot embed pegs the CPU), so allow up to 3 minutes.
+        try:
             restart = subprocess.run(
                 ["systemctl", "--user", "restart", "openclaw-gateway.service"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=180,
             )
-            if restart.returncode != 0:
-                tail = (restart.stdout + restart.stderr).strip()[-1500:]
-                send(token, chat_id,
-                     f"⚠️ Tokens copied, but gateway restart failed.\n\n```{tail}```")
-                return
-
-            verify = subprocess.run(
-                "openclaw config auth-status 2>&1 | grep -A 5 'openai-codex'",
-                shell=True, capture_output=True, text=True, timeout=30,
-            )
-            verify_out = (verify.stdout + verify.stderr).strip()
-            if "Failed to refresh OAuth token" in verify_out or not verify_out:
-                tail = verify_out[-1500:] if verify_out else "No auth-status output captured."
-                send(token, chat_id,
-                     f"⚠️ Codex sign-in completed, but verification still looks unhealthy.\n\n```{tail}```")
-                return
-
-            send(token, chat_id,
-                 f"✅ *OpenAI Codex re-auth complete*\n\n"
-                 f"Tokens copied into OpenClaw, gateway restarted, and auth verification passed.\n\n```{verify_out[-1200:]}```")
         except subprocess.TimeoutExpired:
-            send(token, chat_id, "⚠️ Codex sign-in completed, but follow-up verification timed out.")
+            send(token, chat_id,
+                 "⚠️ Sign-in and token copy succeeded, but the *gateway restart* is taking "
+                 "longer than 3 minutes. Auth itself is almost certainly fine — give the Pi "
+                 "a few minutes, then check /status or message the assistant.")
+            return
         except Exception as e:
-            send(token, chat_id, f"⚠️ Codex sign-in completed, but follow-up steps failed: `{e}`")
+            send(token, chat_id, f"⚠️ Tokens copied, but gateway restart failed: `{e}`")
+            return
+        if restart.returncode != 0:
+            tail = (restart.stdout + restart.stderr).strip()[-1500:]
+            send(token, chat_id,
+                 f"⚠️ Tokens copied, but gateway restart failed.\n\n```{tail}```")
+            return
+
+        # Step 3: verify. Right after a restart the Pi CPU is often pegged and the
+        # Node CLI cold start alone can blow a short timeout even though auth is
+        # fine — so retry a few times with generous limits before worrying anyone.
+        verify_out = ""
+        verify_note = "no output"
+        for attempt in range(3):
+            if attempt:
+                time.sleep(20)
+            try:
+                verify = subprocess.run(
+                    "openclaw config auth-status 2>&1 | grep -A 5 'openai-codex'",
+                    shell=True, capture_output=True, text=True, timeout=120,
+                )
+            except subprocess.TimeoutExpired:
+                verify_note = "auth-status timed out (2 min)"
+                continue
+            except Exception as e:
+                verify_note = f"auth-status failed: {e}"
+                continue
+            verify_out = (verify.stdout + verify.stderr).strip()
+            if verify_out and "Failed to refresh OAuth token" not in verify_out:
+                break
+
+        if not verify_out or "Failed to refresh OAuth token" in verify_out:
+            tail = verify_out[-1500:] if verify_out else f"({verify_note})"
+            send(token, chat_id,
+                 "⚠️ Codex sign-in, token copy and gateway restart all *succeeded*, but I "
+                 "could not positively verify auth afterwards.\n"
+                 "It has most likely still worked — test by messaging the assistant, or run "
+                 "`openclaw config auth-status` on the Pi.\n\n"
+                 f"```{tail}```")
+            return
+
+        send(token, chat_id,
+             f"✅ *OpenAI Codex re-auth complete*\n\n"
+             f"Tokens copied into OpenClaw, gateway restarted, and auth verification passed.\n\n```{verify_out[-1200:]}```")
 
     threading.Thread(target=_run, daemon=True).start()
 
