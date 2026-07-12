@@ -1367,7 +1367,21 @@ MGMT_BOT_DST="$HOME/.openclaw/integrations/mgmt-bot/mgmt-bot.py"
 MGMT_SERVICE="openclaw-mgmt-bot.service"
 MGMT_SERVICE_FILE="$HOME/.config/systemd/user/$MGMT_SERVICE"
 
+MGMT_BOT_SYNTAX_OK=1
 if [ -f "$MGMT_BOT_SRC" ]; then
+    # Guard: never (re)start a syntactically broken bot. The bot is SYMLINKED
+    # to the repo working tree, so leftover merge-conflict markers (e.g. from
+    # a manual `git stash pop` that conflicted) crash-loop the live service.
+    if ! python3 -c "compile(open('$MGMT_BOT_SRC').read(), 'mgmt-bot.py', 'exec')" 2>/tmp/mgmt-bot-syntax.err; then
+        MGMT_BOT_SYNTAX_OK=0
+        warn "mgmt-bot.py FAILS to compile — the management bot will NOT be restarted."
+        warn "  $(head -3 /tmp/mgmt-bot-syntax.err | tr '\n' ' ')"
+        if grep -q '^<<<<<<<' "$MGMT_BOT_SRC"; then
+            warn "  Unresolved merge-conflict markers (<<<<<<<) found in the file."
+            warn "  Fix: cd ~/openclaw && git checkout -- attached_assets/integrations/mgmt-bot/mgmt-bot.py"
+            warn "  then re-run this install script."
+        fi
+    fi
     mkdir -p "$HOME/.openclaw/integrations/mgmt-bot"
     ln -sf "$MGMT_BOT_SRC" "$MGMT_BOT_DST"
     info "Management bot linked: $MGMT_BOT_DST"
@@ -2224,7 +2238,11 @@ fi
 # Uses a 5-second deferred restart so this script can finish (and the bot can
 # send its "install complete" message) before systemd kills the old process.
 # ---------------------------------------------------------------------------
-if systemctl --user is-active openclaw-mgmt-bot.service >/dev/null 2>&1; then
+if [ "${MGMT_BOT_SYNTAX_OK:-1}" -eq 0 ]; then
+    warn "mgmt-bot NOT restarted — mgmt-bot.py fails to compile (see warning above)."
+    warn "  Restarting it would only crash-loop the service. Fix the file, then:"
+    warn "  systemctl --user restart openclaw-mgmt-bot.service"
+elif systemctl --user is-active openclaw-mgmt-bot.service >/dev/null 2>&1; then
     nohup sh -c 'sleep 5 && systemctl --user restart openclaw-mgmt-bot.service' \
         >/dev/null 2>&1 &
     info "mgmt-bot restarting in 5 seconds — new code will be live automatically"
