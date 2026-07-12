@@ -2163,46 +2163,62 @@ def cmd_codex_reauth(token: str, chat_id: str) -> None:
                  f"❌ Codex device auth did not complete successfully (exit {rc}).\n\n```{tail}```")
             return
 
-        # Step 1: copy tokens into OpenClaw.
+        # Step 1: STOP the gateway before touching tokens. The gateway rewrites
+        # auth-profiles.json on start/shutdown, so copying tokens while it runs
+        # gets clobbered by its stale in-memory state — the classic "re-auth
+        # looked fine but never stuck" failure. Safe order: stop → copy → start.
+        send(token, chat_id, "✅ Sign-in detected — stopping gateway, copying tokens…")
+        try:
+            subprocess.run(
+                ["systemctl", "--user", "stop", "openclaw-gateway.service"],
+                capture_output=True, text=True, timeout=90,
+            )
+        except Exception as e:
+            send(token, chat_id,
+                 f"⚠️ Could not cleanly stop the gateway before the token copy: `{e}`\n"
+                 "Continuing anyway — if auth doesn't stick, run /codex_reauth again.")
+
+        # Step 2: copy tokens, then ALWAYS start the gateway again — even if
+        # the copy failed — so the assistant is never left down.
+        copy_err = None
         try:
             copy = subprocess.run(
                 ["python3", str(helper)],
                 capture_output=True, text=True, timeout=120,
             )
+            if copy.returncode != 0:
+                copy_err = (copy.stdout + copy.stderr).strip()[-1500:] or "no output"
         except subprocess.TimeoutExpired:
-            send(token, chat_id,
-                 "⚠️ Codex sign-in completed, but the *token copy* step timed out (2 min).\n"
-                 "Run the re-auth again; if this repeats, check CPU load on the Pi.")
-            return
+            copy_err = "token copy timed out (2 min) — check CPU load on the Pi"
         except Exception as e:
-            send(token, chat_id, f"⚠️ Codex sign-in completed, but token copy failed: `{e}`")
-            return
-        if copy.returncode != 0:
-            tail = (copy.stdout + copy.stderr).strip()[-1500:]
-            send(token, chat_id,
-                 f"⚠️ Sign-in succeeded but token copy failed.\n\n```{tail}```")
-            return
+            copy_err = str(e)
 
-        # Step 2: restart the gateway. A cold gateway start on the Pi routinely
-        # exceeds 30s (boot embed pegs the CPU), so allow up to 3 minutes.
+        start_err = None
         try:
-            restart = subprocess.run(
-                ["systemctl", "--user", "restart", "openclaw-gateway.service"],
+            start = subprocess.run(
+                ["systemctl", "--user", "start", "openclaw-gateway.service"],
                 capture_output=True, text=True, timeout=180,
             )
+            if start.returncode != 0:
+                start_err = (start.stdout + start.stderr).strip()[-1000:] or "no output"
         except subprocess.TimeoutExpired:
-            send(token, chat_id,
-                 "⚠️ Sign-in and token copy succeeded, but the *gateway restart* is taking "
-                 "longer than 3 minutes. Auth itself is almost certainly fine — give the Pi "
-                 "a few minutes, then check /status or message the assistant.")
-            return
+            start_err = ("gateway start is taking longer than 3 minutes — it usually "
+                         "settles on its own; check /status in a few minutes")
         except Exception as e:
-            send(token, chat_id, f"⚠️ Tokens copied, but gateway restart failed: `{e}`")
-            return
-        if restart.returncode != 0:
-            tail = (restart.stdout + restart.stderr).strip()[-1500:]
+            start_err = str(e)
+
+        if copy_err:
+            gw_note = ("\n⚠️ Gateway start also had trouble: " + start_err
+                       if start_err else "\nThe gateway was started again.")
             send(token, chat_id,
-                 f"⚠️ Tokens copied, but gateway restart failed.\n\n```{tail}```")
+                 f"⚠️ Sign-in succeeded but the *token copy* failed — auth is NOT fixed yet.\n\n"
+                 f"```{copy_err}```{gw_note}")
+            return
+        if start_err:
+            send(token, chat_id,
+                 "⚠️ Tokens copied, but the gateway start had trouble:\n"
+                 f"```{start_err}```\n"
+                 "Auth itself is most likely fine — check /status in a few minutes.")
             return
 
         # Step 3: verify. Right after a restart the Pi CPU is often pegged and the

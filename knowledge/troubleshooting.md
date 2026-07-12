@@ -83,6 +83,8 @@ Search for `resolveEnvApiKey` and `getCustomProviderApiKey` to trace the lookup 
 
 **auth-profiles.json is overwritten on every gateway start** — never manually edit it while the gateway or mgmt-bot is running. Always: stop both services → edit → start both.
 
+**Codex re-auth (2026-07-12):** `/codex_reauth` on the mgmt-bot now follows this exact rule: it stops the gateway, runs the repo-managed token-copy helper (`attached_assets/integrations/codex-reauth/reauth-copy-tokens.py`, deployed by the install script to `~/.openclaw/workspace/skills/codex-reauth/reauth-copy-tokens.py`), then starts the gateway again. The previous copy-then-restart order let the gateway clobber the fresh tokens with its stale in-memory state — the classic "re-auth looked fine but never stuck" failure. The helper writes `openai-codex:default` into every agent's `auth-profiles.json`, handles both profiles shapes (dict of credentials vs list of names + top-level credentials), takes expiry from the access token's own `exp` claim, and copies `accountId`.
+
 **Services to stop/start:**
 ```bash
 systemctl --user stop openclaw-mgmt-bot.service openclaw-gateway.service

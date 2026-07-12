@@ -1372,6 +1372,21 @@ if [ -f "$MGMT_BOT_SRC" ]; then
     ln -sf "$MGMT_BOT_SRC" "$MGMT_BOT_DST"
     info "Management bot linked: $MGMT_BOT_DST"
 
+    # Codex re-auth token-copy helper (used by /codex_reauth). Repo-managed —
+    # replaces the previously hand-maintained copy on the Pi so the token
+    # handoff logic is version-controlled and deployed like everything else.
+    CODEX_REAUTH_SRC="$HOME/openclaw/attached_assets/integrations/codex-reauth/reauth-copy-tokens.py"
+    CODEX_REAUTH_DST="$HOME/.openclaw/workspace/skills/codex-reauth/reauth-copy-tokens.py"
+    if [ -f "$CODEX_REAUTH_SRC" ]; then
+        mkdir -p "$(dirname "$CODEX_REAUTH_DST")"
+        # Remove any pre-existing regular file so the symlink can take its place
+        [ -f "$CODEX_REAUTH_DST" ] && [ ! -L "$CODEX_REAUTH_DST" ] && \
+            mv "$CODEX_REAUTH_DST" "$CODEX_REAUTH_DST.pre-repo.bak" 2>/dev/null || true
+        ln -sf "$CODEX_REAUTH_SRC" "$CODEX_REAUTH_DST"
+        chmod +x "$CODEX_REAUTH_SRC"
+        info "Codex re-auth token-copy helper linked: $CODEX_REAUTH_DST"
+    fi
+
     # Write systemd user service
     mkdir -p "$HOME/.config/systemd/user"
     cat > "$MGMT_SERVICE_FILE" << EOF
