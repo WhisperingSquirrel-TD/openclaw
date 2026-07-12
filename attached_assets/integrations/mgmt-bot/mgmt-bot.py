@@ -108,6 +108,10 @@ from pathlib import Path
 STATE_DIR   = Path.home() / ".openclaw"
 OFFSET_FILE = STATE_DIR / "mgmt-bot-offset.json"
 SOUL_PENDING_FLAG = Path("/tmp/oc-mgmt-soul-pending")
+# Written while a Codex re-auth is waiting for the user to sign in. If the bot
+# is restarted mid-wait (e.g. by an install), the waiting thread dies silently;
+# main() checks this marker on startup and tells the owner what happened.
+CODEX_REAUTH_MARKER = STATE_DIR / "integrations/mgmt-bot/codex-reauth-in-progress"
 
 TELEGRAM_API    = "https://api.telegram.org/bot{token}/{method}"
 TELEGRAM_FILE   = "https://api.telegram.org/file/bot{token}/{file_path}"
@@ -2071,7 +2075,7 @@ def cmd_codex_reauth(token: str, chat_id: str) -> None:
          "Starting device auth on the Pi… I’ll send you the URL and one-time code next.\n"
          "_You can complete this from your phone, remotely — no home network needed._")
 
-    def _run() -> None:
+    def _run_impl() -> None:
         import re as _re
 
         try:
@@ -2135,12 +2139,24 @@ def cmd_codex_reauth(token: str, chat_id: str) -> None:
                  f"❌ Could not parse Codex device-auth URL/code from CLI output.\n\n```{tail}```")
             return
 
-        # continue consuming output silently until completion
-        remaining = proc.stdout.read() or ""
+        # Wait (bounded) for the user to finish sign-in — the codex CLI exits
+        # once auth completes. The old unbounded stdout.read() could block this
+        # thread FOREVER if the CLI hung, with no message ever sent.
+        try:
+            remaining = proc.communicate(timeout=1200)[0] or ""
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            send(token, chat_id,
+                 "⌛ Codex device auth was not completed within 20 minutes, so I stopped waiting.\n"
+                 "Run /codex_reauth again when you're ready to sign in.")
+            return
         if remaining:
             lines.extend(remaining.splitlines())
 
-        rc = proc.wait(timeout=1200)
+        rc = proc.returncode
         if rc != 0:
             tail = "\n".join(lines[-30:])
             send(token, chat_id,
@@ -2225,6 +2241,32 @@ def cmd_codex_reauth(token: str, chat_id: str) -> None:
         send(token, chat_id,
              f"✅ *OpenAI Codex re-auth complete*\n\n"
              f"Tokens copied into OpenClaw, gateway restarted, and auth verification passed.\n\n```{verify_out[-1200:]}```")
+
+    def _run() -> None:
+        # Crash guard + interruption marker: any uncaught exception previously
+        # killed this thread SILENTLY, and a bot restart mid-wait lost the flow
+        # with no trace. The marker lets main() report an interrupted re-auth
+        # on the next startup.
+        try:
+            CODEX_REAUTH_MARKER.parent.mkdir(parents=True, exist_ok=True)
+            CODEX_REAUTH_MARKER.write_text(time.strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            pass
+        try:
+            _run_impl()
+        except Exception as e:
+            print(f"[mgmt-bot] codex reauth error: {e}", file=sys.stderr)
+            try:
+                send(token, chat_id,
+                     f"❌ Codex re-auth failed unexpectedly: `{e}`\n"
+                     "Run /codex_reauth to try again.")
+            except Exception:
+                pass
+        finally:
+            try:
+                CODEX_REAUTH_MARKER.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -3134,6 +3176,23 @@ def main() -> None:
 
     print(f"[mgmt-bot] Starting. Listening on chat_id={allowed_id}…")
     _register_commands(token)
+
+    # If a Codex re-auth was still waiting for sign-in when this bot was
+    # restarted (e.g. at the end of an install), its waiting thread died
+    # silently — tell the owner instead of leaving them hanging.
+    try:
+        if CODEX_REAUTH_MARKER.exists():
+            started = CODEX_REAUTH_MARKER.read_text().strip()
+            CODEX_REAUTH_MARKER.unlink()
+            send(token, allowed_id,
+                 "⚠️ I was restarted while a Codex re-auth (started "
+                 f"{started or 'earlier'}) was still waiting for sign-in, so that "
+                 "attempt was interrupted and its result was lost.\n"
+                 "If you already completed the sign-in on your phone it may still "
+                 "have worked — but the safest move is to simply run /codex_reauth "
+                 "again and complete it once more.")
+    except Exception as e:
+        print(f"[mgmt-bot] reauth marker check error: {e}", file=sys.stderr)
 
     offset            = load_offset()
     last_trigger_check = 0.0
