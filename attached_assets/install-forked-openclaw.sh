@@ -464,13 +464,13 @@ if not isinstance(agents, dict):
     c['agents']['defaults'] = {}
     agents = c['agents']['defaults']
 agents.setdefault('approvalMode', 'totp')
-# totpWindowMinutes must always be 5 — migrate any other value
-if agents.get('totpWindowMinutes') != 5:
+# totpWindowMinutes must always be 10 — migrate any other value
+if agents.get('totpWindowMinutes') != 10:
     old = agents.get('totpWindowMinutes', 'unset')
-    agents['totpWindowMinutes'] = 5
-    print(f'totpWindowMinutes: {old} -> 5 (corrected)')
+    agents['totpWindowMinutes'] = 10
+    print(f'totpWindowMinutes: {old} -> 10 (corrected)')
 else:
-    agents['totpWindowMinutes'] = 5
+    agents['totpWindowMinutes'] = 10
 agents.setdefault('trustLevel', 1)
 # requireApproval: only exec.run is intercepted by the trust gate for TOTP.
 # message.send must NOT be in this list — it gates ALL outgoing messages including

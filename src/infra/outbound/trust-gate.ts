@@ -50,7 +50,7 @@ export function resolveApprovalMode(cfg: OpenClawConfig): "socket" | "totp" {
 }
 
 export function resolveTotpWindowMinutes(cfg: OpenClawConfig): number {
-  return cfg.agents?.defaults?.totpWindowMinutes ?? 5;
+  return cfg.agents?.defaults?.totpWindowMinutes ?? 10;
 }
 
 export function shouldInterceptAction(cfg: OpenClawConfig, action: string): boolean {

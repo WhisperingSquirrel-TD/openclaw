@@ -223,7 +223,8 @@ export const handleTotpPreGate: CommandHandler = async (params, allowTextCommand
     `[SYSTEM – TOTP GATE: No approval window is currently active. ` +
     `Your FIRST and ONLY response right now must be: "🔐 Please send your TOTP code to open the gate." ` +
     `Do NOT plan, draft, analyse, or call any tools first. ` +
-    `Once the user sends a code and you see ✅ Approved, proceed with the task below.]\n\n${original}`;
+    `When the code is verified you will receive a [SYSTEM – TOTP GATE: ✅ …] message — ` +
+    `at that point proceed with the task below without waiting for anything else.]\n\n${original}`;
 
   return null; // shouldContinue — L1 gets the message with the injected instruction
 };
@@ -281,19 +282,40 @@ export const handleTotpCodeInput: CommandHandler = async (params, allowTextComma
     };
   }
 
-  const windowMinutes = cfg.agents?.defaults?.totpWindowMinutes ?? 5;
+  const windowMinutes = cfg.agents?.defaults?.totpWindowMinutes ?? 10;
+  // Snapshot BEFORE opening the window: startApprovalWindow drains any resolvers
+  // already blocked at the gate, so this tells us whether a run was waiting.
+  const hadPendingApprovals = hasPendingApprovals();
   const { expiresAt } = startApprovalWindow({
     durationMinutes: windowMinutes,
     channel: params.command.channel,
   });
-
   const expiresAtStr = new Date(expiresAt).toLocaleTimeString();
-  return {
-    shouldContinue: false,
-    reply: {
-      text:
-        `✅ Approved. Window open for ${windowMinutes} minute${windowMinutes > 1 ? "s" : ""} (until ${expiresAtStr}).\n` +
-        `All gated actions will proceed without further codes until the window expires.`,
-    },
-  };
+
+  // A run was already blocked at the gate — opening the window just resumed it,
+  // so it will produce its own output. Continuing this message into the agent
+  // as well would double-trigger the task; reply deterministically instead.
+  if (hadPendingApprovals) {
+    return {
+      shouldContinue: false,
+      reply: {
+        text:
+          `✅ Approved. Window open for ${windowMinutes} minute${windowMinutes > 1 ? "s" : ""} (until ${expiresAtStr}).\n` +
+          `The action that was waiting at the gate is resuming now.`,
+      },
+    };
+  }
+
+  // Nothing was blocked at the gate (typical pre-gate flow: L1 asked for the
+  // code and ended its turn). Continue this message into the agent so L1 sees
+  // the gate opened and resumes the pending task on its own — the user should
+  // not have to say "the gate is open, continue". The raw 6-digit code is
+  // replaced with a system note so it never reaches the model.
+  params.ctx.BodyForAgent =
+    `[SYSTEM – TOTP GATE: ✅ Code verified. Approval window is now OPEN for ` +
+    `${windowMinutes} minute${windowMinutes > 1 ? "s" : ""} (until ${expiresAtStr}). ` +
+    `Start your reply by confirming the gate is open, then IMMEDIATELY continue the task ` +
+    `that was waiting for this approval — do NOT ask for the code again and do NOT wait ` +
+    `for further user input. If no task was waiting, just confirm the gate is open.]`;
+  return { shouldContinue: true };
 };

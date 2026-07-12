@@ -10,8 +10,9 @@ When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator 
 1. Agent attempts a gated action (`message.send` or `exec.run` at `trustLevel >= 1`)
 2. Trust gate checks for an active approval window — if open, action proceeds immediately
 3. If no window: owner is prompted to send their 6-digit code on Telegram
-4. Owner sends code → window opens for `totpWindowMinutes` (default 5) → all queued and future gated actions proceed
-5. Window expires → new code required
+4. Owner sends code → window opens for `totpWindowMinutes` (default 10) → all queued and future gated actions proceed
+5. The code message then **continues into L1** with an injected `[SYSTEM – TOTP GATE: ✅ …]` note (the raw code is replaced, never shown to the model), so L1 confirms the gate is open and resumes the pending task on its own — the owner does not need to say "the gate is open, continue"
+6. Window expires → new code required
 
 ## Gated actions
 
@@ -20,7 +21,7 @@ When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator 
 
 ## Setup
 
-1. Set config: `agents.defaults.approvalMode: "totp"`, optionally `totpWindowMinutes: 5`
+1. Set config: `agents.defaults.approvalMode: "totp"`, optionally `totpWindowMinutes: 10`
 2. Send `/totp-setup` on Telegram → get `otpauth://` URI to scan in Google Authenticator/Authy
 3. When prompted, send 6-digit code to approve
 
@@ -34,7 +35,7 @@ When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator 
 ## Config
 
 - `agents.defaults.approvalMode: "socket" | "totp"` (default: `"socket"`)
-- `agents.defaults.totpWindowMinutes: 1–60` (always `2` on Pi — enforced by the [install script](./pi-deployment.md))
+- `agents.defaults.totpWindowMinutes: 1–60` (always `10` on Pi — enforced by the [install script](./pi-deployment.md); raised from 5 on 2026-07-12)
 
 ## Secret storage
 
@@ -54,6 +55,7 @@ Each TOTP code can only be used once. A monotonic counter is persisted at `<stat
 
 ## Runtime behaviour (operational notes)
 
-- The TOTP wait window is **2 minutes** from when the code is requested. Once a valid code is accepted, the approval window is **5 minutes** by default. L1's SOUL.md should reflect this so it doesn't misinform the user about timing.
+- The TOTP wait window is **2 minutes** from when the code is requested. Once a valid code is accepted, the approval window is **10 minutes** (raised from 5 on 2026-07-12). L1's SOUL.md should reflect this so it doesn't misinform the user about timing.
+- On a valid code the behaviour depends on whether a run was already blocked at the gate: if an action was **queued waiting** (`hasPendingApprovals`), the bot replies "✅ Approved … resuming now" deterministically and the blocked run continues (no agent continuation — avoids double-triggering). If **nothing was queued** (typical pre-gate flow where L1 asked for the code and ended its turn), the code message continues into L1 with the system gate-open note, and L1's own reply confirms the gate and resumes the task.
 - Invalid codes immediately cancel any pending approval request (`rejectPendingApprovals`) — but only if there is an active pending request. If there is none (e.g., a replayed old Telegram message at startup), the rejection is a no-op so L1 is not affected.
 - Email polling is **never** a TOTP-gated action. If L1 tries to use `exec.run` to refresh email feeds, that is wrong — the pollers run as systemd services and self-recover. SOUL.md should make this explicit. See [Pi deployment: background services](./pi-deployment.md#background-services-pi).
