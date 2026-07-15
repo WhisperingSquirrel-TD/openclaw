@@ -1,7 +1,5 @@
 import { loadConfig } from "../../config/config.js";
 import { logVerbose } from "../../globals.js";
-import { loadTotpSecret, setupTotp, isTotpConfigured } from "../../infra/totp/totp-setup.js";
-import { verifyTotpCode } from "../../infra/totp/totp.js";
 import {
   startApprovalWindow,
   getWindowStatus,
@@ -10,6 +8,8 @@ import {
   hasPendingApprovals,
   isApprovalWindowActive,
 } from "../../infra/totp/totp-session.js";
+import { loadTotpSecret, setupTotp, isTotpConfigured } from "../../infra/totp/totp-setup.js";
+import { verifyTotpCode } from "../../infra/totp/totp.js";
 import type { CommandHandler } from "./commands-types.js";
 
 /**
@@ -93,7 +93,9 @@ export const handleTotpStatusCommand: CommandHandler = async (params, allowTextC
   if (!status) {
     return {
       shouldContinue: false,
-      reply: { text: "🔐 TOTP configured. No active approval window. Send a 6-digit code to open one." },
+      reply: {
+        text: "🔐 TOTP configured. No active approval window. Send a 6-digit code to open one.",
+      },
     };
   }
 
@@ -130,24 +132,30 @@ export const handleTotpLockCommand: CommandHandler = async (params, allowTextCom
 };
 
 /**
- * Pre-gate handler — fires as the very first step on any plain message from an
- * authorised sender when approvalMode is "totp" and no approval window is active.
+ * TOTP message handler.
  *
- * Instead of blocking the message, it injects a system instruction into the
- * message body that L1 will read. L1 is instructed to ask for the TOTP code as
- * its very first reply — before planning, drafting, or using any tools. Once the
- * user sends the code and the window opens, L1 proceeds with the original task.
+ * This no longer proactively blocks or rewrites ordinary user requests when no
+ * approval window is active. Gating now happens at the actual protected action
+ * layer (for example `exec.run` / `message.send`) so the assistant can still
+ * plan, read, reason, update local files, and complete all ungated parts first.
  *
- * Slash commands and 6-digit codes are passed through untouched so their own
- * handlers can process them normally.
+ * The only message-level injection retained here is the positive PROCEED signal
+ * when a verified approval window is already active, plus pass-through for slash
+ * commands and 6-digit codes so their own handlers can process them normally.
  */
 export const handleTotpPreGate: CommandHandler = async (params, allowTextCommands) => {
-  if (!allowTextCommands) return null;
-  if (!params.command.isAuthorizedSender) return null;
+  if (!allowTextCommands) {
+    return null;
+  }
+  if (!params.command.isAuthorizedSender) {
+    return null;
+  }
 
   const cfg = loadConfig();
   const approvalMode = cfg.agents?.defaults?.approvalMode;
-  if (approvalMode !== "totp") return null;
+  if (approvalMode !== "totp") {
+    return null;
+  }
 
   // Window already open — inject a PROCEED signal so L1 doesn't ask for another code.
   if (isApprovalWindowActive()) {
@@ -161,7 +169,9 @@ export const handleTotpPreGate: CommandHandler = async (params, allowTextCommand
       /\b(check|read|show|list|look at|view)\b.*\b(email|inbox|mail|messages?|whatsapp)\b/,
     ];
     if (!READ_ONLY_FAST.some((re) => re.test(lower)) && status) {
-      const expiresAtStr = new Date(Date.now() + status.remainingSeconds * 1000).toLocaleTimeString();
+      const expiresAtStr = new Date(
+        Date.now() + status.remainingSeconds * 1000,
+      ).toLocaleTimeString();
       logVerbose("TOTP pre-gate: window active — injecting PROCEED signal");
       const ctxRecord = params.ctx as Record<string, unknown> & typeof params.ctx;
       const original =
@@ -181,78 +191,17 @@ export const handleTotpPreGate: CommandHandler = async (params, allowTextCommand
   }
 
   const normalized = params.command.commandBodyNormalized.trim();
-  const lower = normalized.toLowerCase();
 
   // Let TOTP codes and slash commands pass through to their own handlers.
-  if (/^\d{6}$/.test(normalized)) return null;
-  if (normalized.startsWith("/")) return null;
-
-  // Only inject the TOTP-first instruction when the message looks like it will
-  // need a gated action (exec.run or message.send). Conversational messages,
-  // questions, and read-only requests pass through clean.
-  //
-  // Two-step check:
-  //  1. If the message looks read-only, pass through immediately regardless of other keywords.
-  //  2. Otherwise check for write/send action keywords.
-  //
-  // Note: read-only exec commands (cat, ls, grep, etc.) are now exempt from TOTP
-  // in trust-gate.ts, so there's no need to pre-gate messages that only need reads.
-
-  const READ_ONLY_PATTERNS = [
-    /^(check|read|show|list|what|how many|do i have|any |have i|is there|look at|find|search|get|fetch|pull up|display|view)\b/,
-    /\b(check|read|show|list|look at|view)\b.*\b(email|inbox|mail|messages?|whatsapp)\b/,
-  ];
-  if (READ_ONLY_PATTERNS.some((re) => re.test(lower))) {
-    logVerbose("TOTP pre-gate: read-only request detected, passing through unmodified");
+  if (/^\d{6}$/.test(normalized)) {
+    return null;
+  }
+  if (normalized.startsWith("/")) {
     return null;
   }
 
-  const ACTION_PATTERNS = [
-    /\bsend\b/,            // send email / send message
-    /\breply\b/,           // reply to email / reply to WhatsApp
-    /\brespond\b/,         // respond to
-    /\bforward\b/,         // forward email
-    /\bdraft\b/,           // draft a message/email (likely to send)
-    /\bemail\s+\w/,        // "email John" / "email the team" (verb form, not noun)
-    /\bwhatsapp\s+\w/,     // "whatsapp someone" (verb form)
-    /\brun\b/,             // run a command / run this script
-    /\bexecute\b/,         // execute
-    /\bschedule\b/,        // schedule a meeting
-    /\badd to\b/,          // add to contacts / add to calendar
-    /\bcreate.*event\b/,   // create a calendar event
-    /\bwrite to\b/,        // write to file
-    /\bsave\b/,            // save this
-    /\bdelete\b/,          // delete something
-    /\bremove\b/,          // remove something
-    /\bupdate.*contact\b/, // update a contact
-  ];
-
-  const looksLikeAction = ACTION_PATTERNS.some((re) => re.test(lower));
-  if (!looksLikeAction) {
-    logVerbose("TOTP pre-gate: no action keywords detected, passing message through to L1 unmodified");
-    return null;
-  }
-
-  // Looks like an action — inject a TOTP-first instruction so L1 asks for the
-  // code immediately as its very first reply, before spending time planning or
-  // calling any tools. No resend needed: L1 already has the full task context.
-  logVerbose("TOTP pre-gate: action keywords detected, injecting TOTP-first instruction");
-  const ctxRecord = params.ctx as Record<string, unknown> & typeof params.ctx;
-  const original =
-    (typeof ctxRecord.BodyStripped === "string" ? ctxRecord.BodyStripped : undefined) ??
-    params.ctx.BodyForAgent ??
-    params.ctx.Body ??
-    normalized;
-  setAgentBody(
-    params.ctx,
-    `[SYSTEM – TOTP GATE: No approval window is currently active. ` +
-      `Your FIRST and ONLY response right now must be: "🔐 Please send your TOTP code to open the gate." ` +
-      `Do NOT plan, draft, analyse, or call any tools first. ` +
-      `When the code is verified you will receive a [SYSTEM – TOTP GATE: ✅ …] message — ` +
-      `at that point proceed with the task below without waiting for anything else.]\n\n${original}`,
-  );
-
-  return null; // shouldContinue — L1 gets the message with the injected instruction
+  logVerbose("TOTP pre-gate: no active window — do not pre-block or rewrite the message");
+  return null;
 };
 
 export const handleTotpCodeInput: CommandHandler = async (params, allowTextCommands) => {
@@ -301,9 +250,7 @@ export const handleTotpCodeInput: CommandHandler = async (params, allowTextComma
     return {
       shouldContinue: false,
       reply: {
-        text: hadPending
-          ? "❌ Invalid code — pending action cancelled."
-          : "❌ Invalid code.",
+        text: hadPending ? "❌ Invalid code — pending action cancelled." : "❌ Invalid code.",
       },
     };
   }
@@ -341,9 +288,9 @@ export const handleTotpCodeInput: CommandHandler = async (params, allowTextComma
     params.ctx,
     `[SYSTEM – TOTP GATE: ✅ Code verified. Approval window is now OPEN for ` +
       `${windowMinutes} minute${windowMinutes > 1 ? "s" : ""} (until ${expiresAtStr}). ` +
-      `Start your reply by confirming the gate is open, then IMMEDIATELY continue the task ` +
-      `that was waiting for this approval — do NOT ask for the code again and do NOT wait ` +
-      `for further user input. If no task was waiting, just confirm the gate is open.]`,
+      `Continue normal conversation as usual. If a protected action is pending, execute it now ` +
+      `without asking for the code again. Only stop at the exact gated tool/action boundary; ` +
+      `do not treat the open window as a need to halt or distort ordinary conversation.]`,
   );
   return { shouldContinue: true };
 };

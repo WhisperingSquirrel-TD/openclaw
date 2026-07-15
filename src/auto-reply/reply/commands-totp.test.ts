@@ -141,16 +141,15 @@ describe("handleTotpCodeInput", () => {
 });
 
 describe("handleTotpPreGate", () => {
-  it("injects the TOTP-first instruction into BOTH BodyForAgent and BodyStripped for action messages", async () => {
+  it("does not pre-block or rewrite action messages when no approval window is active", async () => {
     const params = buildParams("send an email to John about the meeting");
 
     const result = await handleTotpPreGate(params, true);
 
     expect(result).toBeNull();
     const ctx = params.ctx as Record<string, unknown>;
-    expect(ctx.BodyStripped).toContain("No approval window is currently active");
-    expect(ctx.BodyForAgent).toContain("No approval window is currently active");
-    expect(ctx.BodyStripped).toContain("send an email to John about the meeting");
+    expect(ctx.BodyStripped).toBe("send an email to John about the meeting");
+    expect(ctx.BodyForAgent).toBe("send an email to John about the meeting");
   });
 
   it("passes 6-digit codes through untouched so the code handler can verify them", async () => {
