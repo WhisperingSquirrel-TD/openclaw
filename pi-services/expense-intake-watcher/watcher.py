@@ -23,6 +23,8 @@ LOG_FILE = CANONICAL_STATE_DIR / 'watcher.log'
 LEGACY_LOG_FILE = LEGACY_STATE_DIR / 'watcher.log'
 EXPENSE_FILE = WORKSPACE / 'seer-expenses.md'
 MONITORED_FILE = WORKSPACE / 'memory' / 'monitored-items-state.json'
+MAX_STATE_FILE_BYTES = 8 * 1024 * 1024
+MAX_LIFECYCLE_HISTORY = 24
 MS_READER = ROOT / 'openclaw' / 'pi-services' / 'trusted-email-reader' / 'read_email.py'
 GMAIL_READER = ROOT / 'openclaw' / 'pi-services' / 'trusted-email-reader' / 'read_gmail.py'
 WHATSAPP_RECENT = WORKSPACE / 'WHATSAPP_RECENT.md'
@@ -387,18 +389,31 @@ def default_state() -> dict[str, Any]:
     }
 
 
+def normalise_state(raw: Any) -> dict[str, Any]:
+    """Keep only the watcher schema; never carry legacy router ledgers forward."""
+    state = default_state()
+    if not isinstance(raw, dict):
+        return state
+    scanned = raw.get('scanned_non_candidates', [])
+    item_states = raw.get('item_states', {})
+    state['scanned_non_candidates'] = scanned if isinstance(scanned, list) else []
+    state['item_states'] = item_states if isinstance(item_states, dict) else {}
+    state['last_run'] = raw.get('last_run')
+    state['last_summary'] = raw.get('last_summary') if isinstance(raw.get('last_summary'), dict) else {}
+    return state
+
+
 def load_state() -> dict[str, Any]:
     for candidate in [STATE_FILE, LEGACY_STATE_FILE]:
-        if candidate.exists():
-            state = load_json(candidate, default_state())
-            if isinstance(state, dict):
-                state.setdefault('runtime_name', CANONICAL_RUNTIME_NAME)
-                state.setdefault('legacy_runtime_name', LEGACY_RUNTIME_NAME)
-                state.setdefault('scanned_non_candidates', [])
-                state.setdefault('item_states', {})
-                state.setdefault('last_run', None)
-                state.setdefault('last_summary', {})
-                return state
+        if not candidate.exists():
+            continue
+        size = candidate.stat().st_size
+        if size > MAX_STATE_FILE_BYTES:
+            log(f'Skipping oversized legacy state ({size} bytes): {candidate}')
+            continue
+        state = load_json(candidate, default_state())
+        if isinstance(state, dict):
+            return normalise_state(state)
     return default_state()
 
 
@@ -1003,6 +1018,7 @@ def advance_item_lifecycle(state: dict[str, Any], key: str, route: str, stage: s
     history = list(current.get('history', []))
     now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     history.append({'stage': stage, 'detail': detail, 'at': now_iso})
+    history = history[-MAX_LIFECYCLE_HISTORY:]
     state['item_states'][key] = {
         'route': route,
         'status': stage,
