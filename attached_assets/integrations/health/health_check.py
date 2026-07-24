@@ -44,6 +44,7 @@ import os
 import re
 import subprocess
 import sys
+import shutil
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -62,13 +63,33 @@ WORKSPACE_REPO = WORKSPACE
 SP_BACKUP_STATE = OPENCLAW / "integrations/microsoft/sharepoint-backup-state.json"
 SP_BACKUP_LOG = WORKSPACE / "memory/sharepoint-backup-log.txt"
 SP_BACKUP_TIMER = "openclaw-sharepoint-backup.timer"
-EXPENSE_WATCHER_STATE = OPENCLAW / "runtime/inbound-watch-router/state.json"
-EXPENSE_WATCHER_LEGACY_STATE = OPENCLAW / "runtime/expense-intake-watcher/state.json"
-EXPENSE_WATCHER_LOG = OPENCLAW / "runtime/inbound-watch-router/watcher.log"
-EXPENSE_WATCHER_LEGACY_LOG = OPENCLAW / "runtime/expense-intake-watcher/watcher.log"
+# Canonical expense-intake execution evidence. The service writes this state and
+# the timer below invokes that service. The inbound-watch-router copy is a
+# mirrored/derived surface and must not be used to prove executor health.
+EXPENSE_WATCHER_STATE = OPENCLAW / "runtime/expense-intake-watcher/state.json"
 EXPENSE_WATCHER_TIMER = "expense-intake-watcher.timer"
+# Cron has a minimal environment, so neither the systemd user bus nor the
+# OpenClaw CLI path can be assumed to be inherited. Resolve both explicitly.
+USER_RUNTIME_DIR = Path(f"/run/user/{os.getuid()}")
+USER_BUS_ADDRESS = f"unix:path={USER_RUNTIME_DIR / 'bus'}"
+_SYSTEM_OPENCLAW_CLI = Path("/usr/local/bin/openclaw")
+OPENCLAW_CLI = os.environ.get(
+    "OPENCLAW_CLI",
+    shutil.which("openclaw")
+    or (str(_SYSTEM_OPENCLAW_CLI) if _SYSTEM_OPENCLAW_CLI.exists() else str(HOME / ".npm-packages/bin/openclaw")),
+)
 REPORT_POLLER_STATE = OPENCLAW / "integrations/stackstone/report-poller-state.json"
 ENQUIRY_POLLER_STATE = OPENCLAW / "integrations/stackstone/enquiry-poller-state.json"
+
+# Cron health is collected deterministically here rather than by the delivery
+# agent, whose tool response would otherwise include every job payload.
+CRITICAL_CRON_NAMES = {
+    "Morning standup — 06:30 daily",
+    "Afternoon standup — 13:45 daily",
+    "Inbox watch — every 3 hours",
+    "Bounce & unsub detection — every 3 hours",
+    "System health delivery — daily 15:05",
+}
 
 # ---------------------------------------------------------------------------
 # Monitored services
@@ -322,10 +343,10 @@ def check_expense_watcher_health() -> list[str]:
     except Exception as e:
         issues.append(f"Expense watcher: runtime state unreadable ({e})")
 
-    timer_rc, timer_out, timer_err = _run(["systemctl", "--user", "is-enabled", EXPENSE_WATCHER_TIMER])
+    timer_rc, timer_out, timer_err = _run_user_systemctl("is-enabled", EXPENSE_WATCHER_TIMER)
     timer_enabled = timer_rc == 0 and timer_out.strip() == "enabled"
 
-    active_rc, active_out, active_err = _run(["systemctl", "--user", "is-active", EXPENSE_WATCHER_TIMER])
+    active_rc, active_out, active_err = _run_user_systemctl("is-active", EXPENSE_WATCHER_TIMER)
     timer_active = active_rc == 0 and active_out.strip() == "active"
 
     if not timer_enabled:
@@ -360,12 +381,20 @@ def check_enquiry_pipeline() -> list[str]:
     return issues
 
 
-def _run(cmd: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
+def _run(cmd: list[str], cwd: Path | None = None, env: dict | None = None) -> tuple[int, str, str]:
     try:
-        p = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True, timeout=20)
+        p = subprocess.run(cmd, cwd=str(cwd) if cwd else None, env=env, capture_output=True, text=True, timeout=20)
         return p.returncode, p.stdout.strip(), p.stderr.strip()
     except Exception as e:
         return 1, "", str(e)
+
+
+def _run_user_systemctl(*args: str) -> tuple[int, str, str]:
+    """Run systemctl --user with the user bus available under cron too."""
+    env = os.environ.copy()
+    env.setdefault("XDG_RUNTIME_DIR", str(USER_RUNTIME_DIR))
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", USER_BUS_ADDRESS)
+    return _run(["systemctl", "--user", *args], env=env)
 
 
 def check_github_sync() -> tuple[list[str], list[str]]:
@@ -380,8 +409,11 @@ def check_github_sync() -> tuple[list[str], list[str]]:
             issues.append(f"{label}: git status failed ({err or out})")
             continue
         dirty = bool(out.strip())
+        # A dirty working tree is normal during active Pi development. Preserve
+        # it as diagnostic evidence, but do not turn it into a daily health
+        # alert unless Git itself is broken or commits are actually unpushed.
         if dirty:
-            issues.append(f"{label}: local changes present — GitHub may not reflect latest Pi state")
+            info.append(f"{label}: local working tree dirty (diagnostic only; no unpushed-commit failure proven)")
 
         rc, branch, err = _run(["git", "branch", "--show-current"], cwd=repo)
         branch = branch.strip() or "main"
@@ -465,7 +497,7 @@ def check_sharepoint_backup_health() -> tuple[list[str], list[str], dict]:
 
     details["recent_success"] = recent_success
 
-    rc, out, err = _run(["systemctl", "--user", "is-enabled", SP_BACKUP_TIMER])
+    rc, out, err = _run_user_systemctl("is-enabled", SP_BACKUP_TIMER)
     timer_enabled = rc == 0 and out.strip() == 'enabled'
     details["timer_enabled"] = timer_enabled
     if rc != 0 or out.strip() != 'enabled':
@@ -475,7 +507,7 @@ def check_sharepoint_backup_health() -> tuple[list[str], list[str], dict]:
             issues.append("SharePoint backup: timer not enabled")
             details["notes"].append("Timer is not enabled and there is no strong recent-success proof to offset that.")
 
-    rc, out, err = _run(["systemctl", "--user", "show", SP_BACKUP_TIMER, "--property=NextElapseUSecRealtime", "--property=LastTriggerUSec"], cwd=WORKSPACE)
+    rc, out, err = _run_user_systemctl("show", SP_BACKUP_TIMER, "--property=NextElapseUSecRealtime", "--property=LastTriggerUSec")
     timer_state_readable = rc == 0
     details["timer_state_readable"] = timer_state_readable
     if rc != 0:
@@ -516,6 +548,41 @@ def check_stackstone_report_poller_state() -> list[str]:
     return issues
 
 
+def check_critical_cron_health() -> list[str]:
+    """Check only the small named cron allowlist via the local Gateway CLI.
+
+    This keeps scheduler evidence deterministic and prevents the delivery agent
+    from loading every cron payload merely to inspect five jobs.
+    """
+    issues = []
+    rc, out, err = _run([OPENCLAW_CLI, "cron", "list", "--json", "--timeout", "15000"])
+    if rc != 0:
+        return [f"Critical cron health: scheduler list unavailable — {err or out or 'unknown error'}"]
+    try:
+        data = json.loads(out)
+        jobs = data.get("jobs", [])
+    except (json.JSONDecodeError, AttributeError):
+        return ["Critical cron health: scheduler returned unreadable job data"]
+
+    found = {job.get("name"): job for job in jobs if job.get("name") in CRITICAL_CRON_NAMES}
+    for name in sorted(CRITICAL_CRON_NAMES):
+        job = found.get(name)
+        if job is None:
+            issues.append(f"Critical cron: missing required job — {name}")
+            continue
+        if not job.get("enabled", False):
+            issues.append(f"Critical cron: disabled — {name}")
+            continue
+        state = job.get("state") or {}
+        if not state.get("nextRunAtMs"):
+            issues.append(f"Critical cron: next run missing — {name}")
+        errors = int(state.get("consecutiveErrors", 0) or 0)
+        if errors > 0:
+            detail = state.get("lastError") or state.get("lastRunStatus") or "unknown error"
+            issues.append(f"Critical cron: {name} has {errors} consecutive error(s) — {detail}")
+    return issues
+
+
 def check_reminder_failures() -> list[str]:
     """
     Check if any scheduled reminder or L1 task shows a recent failure.
@@ -536,7 +603,8 @@ def check_reminder_failures() -> list[str]:
 # ---------------------------------------------------------------------------
 
 def build_health_report(issues: list[str], info: list[str]) -> str:
-    if not issues and not info:
+    """Emit only actionable health degradation; diagnostics stay in the run log."""
+    if not issues:
         return ""
 
     lines = ["⚙️ SYSTEM HEALTH\n"]
@@ -597,6 +665,7 @@ def main() -> None:
     exp_issues  = check_expense_watcher_health()
     enq_issues  = check_enquiry_pipeline()
     report_issues = check_stackstone_report_poller_state()
+    cron_issues = check_critical_cron_health()
     rem_issues  = check_reminder_failures()
     git_issues, git_info  = check_github_sync()
     spb_issues, spb_info, sp_details  = check_sharepoint_backup_health()
@@ -606,6 +675,7 @@ def main() -> None:
     issues.extend(exp_issues)
     issues.extend(enq_issues)
     issues.extend(report_issues)
+    issues.extend(cron_issues)
     issues.extend(rem_issues)
     issues.extend(git_issues)
     issues.extend(spb_issues)
@@ -623,7 +693,7 @@ def main() -> None:
         for issue in issues:
             print(f"  • {issue}", flush=True)
     elif info:
-        print(f"[{ts}] [health-check] No active issues — wrote freshness summary to SYSTEM_HEALTH.md", flush=True)
+        print(f"[{ts}] [health-check] No active issues — SYSTEM_HEALTH.md cleared; diagnostics retained in run context", flush=True)
     else:
         print(f"[{ts}] [health-check] All systems OK — SYSTEM_HEALTH.md cleared", flush=True)
 
