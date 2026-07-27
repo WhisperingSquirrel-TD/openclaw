@@ -16,6 +16,7 @@ const TASK_SYSTEM_ACTIONS = [
   "summary",
   "capture",
   "capture_batch",
+  "brief_intake",
   "decompose",
   "commit",
   "self_check",
@@ -33,6 +34,10 @@ const TASK_SYSTEM_ACTIONS = [
   "operator_state_patch",
   "operator_signal",
   "operator_check",
+  "context_broker_list_sources",
+  "context_broker_register_sources",
+  "context_broker_register_binding",
+  "context_broker_load",
 ] as const;
 
 const TASK_ENTITY_KINDS = ["strategy", "objective", "task", "subtask"] as const;
@@ -198,7 +203,7 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
     name: "task_system",
     ownerOnly: true,
     description:
-      "Operate the Workspace Control Panel task system directly over its bearer-authenticated Pi gateway without shell exec. Supports fast capture/capture_batch, intake decompose/commit, entity context/timeline, CRUD, views, seed, and operator control actions.",
+      "Operate the Workspace Control Panel task system directly over its bearer-authenticated Pi gateway without shell exec. Supports fast capture/capture_batch, generic brief_intake, intake decompose/commit, entity context/timeline, CRUD, operator control, and bounded task-context-broker registry/binding/load actions. Broker retrieval accepts only stored task/subtask/entity/profile bindings and never accepts arbitrary paths, searches, URLs, or mailbox/thread selectors.",
     parameters: TaskSystemToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -246,6 +251,18 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
         const result = await callTaskSystem({
           method: "POST",
           path: "/task-intake/capture-batch",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "brief_intake") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-intake/brief",
           baseUrl,
           token: authToken,
           timeoutMs,
@@ -353,6 +370,56 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
         const result = await callTaskSystem({
           method: "POST",
           path: "/task-system/operator-check",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "context_broker_list_sources") {
+        const entityId = readStringParam(payload ?? {}, "entity_id", { trim: true });
+        const result = await callTaskSystem({
+          method: "GET",
+          path: entityId
+            ? `/task-system/context-broker/registry/entities/${encodeURIComponent(entityId)}/sources`
+            : "/task-system/context-broker/registry/sources",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "context_broker_register_sources") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-system/context-broker/registry/sources",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "context_broker_register_binding") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-system/context-broker/bindings/register",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "context_broker_load") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-system/context-broker/load",
           baseUrl,
           token: authToken,
           timeoutMs,
