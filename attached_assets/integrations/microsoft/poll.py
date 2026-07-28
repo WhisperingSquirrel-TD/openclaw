@@ -79,6 +79,16 @@ HIGH_SIGNAL_SUBJECT_MARKERS = ('invoice', 'legal', 'claim', 'payment', 'accepted
 def load_known_contacts() -> list[str]:
     if not CONTACTS_FILE.exists():
         return []
+    try:
+        # The trusted-contact registry is read-only evidence. If it becomes
+        # writable or is replaced by a symlink, fail closed rather than
+        # promoting its contents into the trusted body-visible mirror.
+        if CONTACTS_FILE.is_symlink() or (CONTACTS_FILE.stat().st_mode & 0o222):
+            log(f"BLOCKED: trusted-contact registry is writable or symlinked: {CONTACTS_FILE}")
+            return []
+    except OSError as exc:
+        log(f"BLOCKED: cannot verify trusted-contact registry safety: {exc}")
+        return []
     lines = CONTACTS_FILE.read_text().splitlines()
     return [l.strip().lower() for l in lines if l.strip() and not l.strip().startswith("#")]
 
@@ -293,9 +303,11 @@ def format_trusted_entry(msg: dict, prefix: str = "") -> str:
     )
 
 
-def format_sent_entry(msg: dict) -> str:
-    """Format a sent item — shows To: recipients, full body preview.
-    No known-contacts filter: outbound emails are safe to show in full."""
+def format_sent_entry(msg: dict, known_contacts: list[str]) -> str:
+    """Format a sent item without leaking quoted external content.
+    Sent metadata is always safe; body previews require every recipient to be
+    on the protected trusted-contact list because replies may quote inbound text.
+    """
     sent_at   = msg.get("sentDateTime", msg.get("receivedDateTime", ""))
     subject   = msg.get("subject", "(no subject)")
     recipients = msg.get("toRecipients", [])
@@ -304,7 +316,12 @@ def format_sent_entry(msg: dict) -> str:
         for r in recipients
     ]
     to_str    = ", ".join(to_parts) if to_parts else "(unknown)"
-    preview   = msg.get("bodyPreview", "").replace("\r\n", " ").replace("\n", " ")[:300]
+    recipient_addresses = [r.get("emailAddress", {}).get("address", "").lower() for r in recipients]
+    body_allowed = bool(recipient_addresses) and all(a in known_contacts for a in recipient_addresses)
+    if body_allowed:
+        preview = msg.get("bodyPreview", "").replace("\r\n", " ").replace("\n", " ")[:300]
+    else:
+        preview = "[Body withheld — sent item includes an untrusted recipient or quoted external content]"
     ts_fmt    = sent_at[:16].replace("T", " ") if sent_at else "unknown"
     msg_id    = msg.get("id", "")
     conv_id   = msg.get("conversationId", "")
@@ -503,7 +520,7 @@ def main():
                 all_sent = []
                 for m in sent_emails:
                     try:
-                        all_sent.append(format_sent_entry(m))
+                        all_sent.append(format_sent_entry(m, known_contacts))
                     except Exception as e:
                         msg_id = m.get("id", "<unknown>") if isinstance(m, dict) else "<unknown>"
                         log(f"WARNING: Skipping malformed SENT message id={msg_id}: {e}")
