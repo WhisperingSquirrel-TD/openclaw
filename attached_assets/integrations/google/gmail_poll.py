@@ -154,7 +154,14 @@ def get_service():
 # ---------------------------------------------------------------------------
 
 def load_known_contacts() -> list[str]:
-    if not CONTACTS_FILE.exists():
+    if not CONTACTS_FILE.exists() or CONTACTS_FILE.is_symlink():
+        return []
+    try:
+        if CONTACTS_FILE.stat().st_mode & 0o222:
+            log(f"BLOCKED: trusted-contact registry is writable: {CONTACTS_FILE}")
+            return []
+    except OSError as exc:
+        log(f"BLOCKED: cannot verify trusted-contact registry: {exc}")
         return []
     lines = CONTACTS_FILE.read_text().splitlines()
     return [l.strip().lower() for l in lines if l.strip() and not l.strip().startswith("#")]
@@ -397,7 +404,7 @@ def main():
             trusted_inbox, external_inbox, known_alert = process_messages(
                 inbox_msgs, last_seen, known_contacts, "INBOX"
             )
-            # Sent items: show ALL (no known-contacts filter — outbound is safe)
+            # Sent metadata is retained, but bodies are withheld for any untrusted recipient.
             all_sent = [
                 format_sent_entry(m.get("payload", {}).get("headers", []), m.get("_snippet", ""))
                 for m in sent_msgs

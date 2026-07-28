@@ -516,7 +516,7 @@ def main():
                 sent_emails  = fetch_emails(access_token, folder="sentitems", top=50)
 
                 trusted_inbox, external_inbox, _ = process_emails(inbox_emails, last_seen, known_contacts, "INBOX")
-                # Sent items: show ALL (no known-contacts filter — outbound is safe)
+                # Sent metadata is retained, but bodies are withheld for any untrusted recipient.
                 all_sent = []
                 for m in sent_emails:
                     try:

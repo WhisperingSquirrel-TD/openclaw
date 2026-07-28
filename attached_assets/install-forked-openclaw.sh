@@ -1464,8 +1464,9 @@ else
     warn "WhatsApp recent script not found at $WA_RECENT_SRC — skipping"
 fi
 
-# Create shared known-contacts.txt (read by ALL email pollers — Microsoft, Gmail, etc.)
-# This is the single source of truth for trusted senders across all email channels.
+# Bootstrap the single shared trusted-contact registry (read by ALL email pollers).
+# This is the single source of truth; it must be read-only/immutable after bootstrap.
+# Future changes use the TOTP-gated manage_trusted_contacts.py operator tool only.
 KNOWN_CONTACTS_FILE="$HOME/.openclaw/integrations/known-contacts.txt"
 if [ ! -f "$KNOWN_CONTACTS_FILE" ]; then
     mkdir -p "$(dirname "$KNOWN_CONTACTS_FILE")"
@@ -1483,7 +1484,8 @@ johnjamesmarsh@hotmail.com
 andy.barrett@sjpp.co.uk
 olivia.collington@collingtonwinter.co.uk
 EOF
-    info "Created shared known-contacts.txt"
+    chmod 0444 "$KNOWN_CONTACTS_FILE"
+    info "Created and locked shared known-contacts.txt; use manage_trusted_contacts.py for changes"
 else
     info "known-contacts.txt already exists — not overwritten"
 fi
