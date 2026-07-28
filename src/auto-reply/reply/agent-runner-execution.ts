@@ -13,6 +13,7 @@ import {
   sanitizeUserFacingText,
 } from "../../agents/pi-embedded-helpers.js";
 import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
+import { resolveCompactionReserveTokensFloor } from "../../agents/pi-settings.js";
 import {
   resolveGroupSessionKey,
   resolveSessionTranscriptPath,
@@ -71,6 +72,11 @@ export type AgentRunLoopResult =
       directlySentBlockKeys?: Set<string>;
     }
   | { kind: "final"; payload: ReplyPayload };
+
+function buildCompactionOverflowGuidance(cfg: FollowupRun["run"]["config"]): string {
+  const configuredFloor = resolveCompactionReserveTokensFloor(cfg);
+  return `If this keeps happening, increase \`agents.defaults.compaction.reserveTokensFloor\` in your config. Current configured value: ${configuredFloor}.`;
+}
 
 export async function runAgentTurnWithFallback(params: {
   commandBody: string;
@@ -134,6 +140,7 @@ export async function runAgentTurnWithFallback(params: {
     });
   }
   let runResult: Awaited<ReturnType<typeof runEmbeddedPiAgent>>;
+  const compactionOverflowGuidance = buildCompactionOverflowGuidance(params.followupRun.run.config);
   let fallbackProvider = params.followupRun.run.provider;
   let fallbackModel = params.followupRun.run.model;
   let fallbackAttempts: RuntimeFallbackAttempt[] = [];
@@ -494,7 +501,7 @@ export async function runAgentTurnWithFallback(params: {
         return {
           kind: "final",
           payload: {
-            text: "⚠️ Context limit exceeded. I've reset our conversation to start fresh - please try again.\n\nTo prevent this, increase your compaction buffer by setting `agents.defaults.compaction.reserveTokensFloor` to 20000 or higher in your config.",
+            text: `⚠️ Context limit exceeded. I've reset our conversation to start fresh - please try again.\n\n${compactionOverflowGuidance}`,
           },
         };
       }
@@ -528,7 +535,7 @@ export async function runAgentTurnWithFallback(params: {
         return {
           kind: "final",
           payload: {
-            text: "⚠️ Context limit exceeded during compaction. I've reset our conversation to start fresh - please try again.\n\nTo prevent this, increase your compaction buffer by setting `agents.defaults.compaction.reserveTokensFloor` to 20000 or higher in your config.",
+            text: `⚠️ Context limit exceeded during compaction. I've reset our conversation to start fresh - please try again.\n\n${compactionOverflowGuidance}`,
           },
         };
       }

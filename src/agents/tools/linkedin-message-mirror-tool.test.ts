@@ -28,7 +28,9 @@ describe("linkedin_message_mirror tool", () => {
       values.add(value);
     }
 
-    expect(values).toEqual(new Set(["status", "capture", "route", "capture_and_route"]));
+    expect(values).toEqual(
+      new Set(["status", "capture", "route", "capture_and_route", "posts_status", "capture_posts"]),
+    );
     expect(parameters.additionalProperties).toBe(false);
   });
 
@@ -45,5 +47,14 @@ describe("linkedin_message_mirror tool", () => {
       capture: true,
       route: true,
     });
+  });
+
+  it("exposes a bounded authored-post status action", async () => {
+    const tool = createLinkedInMessageMirrorTool();
+    const result = await tool.execute?.("test-posts-status", { action: "posts_status" });
+    const details = detailsOf(result);
+    expect(details.ok).toBe(true);
+    expect(details.arbitraryExec).toBe(false);
+    expect(details.script).toBe(true);
   });
 });

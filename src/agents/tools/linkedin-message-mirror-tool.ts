@@ -18,6 +18,7 @@ const WORKSPACE = "/home/tomdean88/.openclaw/workspace";
 const PROJECT_DIR = path.join(WORKSPACE, "projects/linkedin-message-mirror");
 const CAPTURE_SCRIPT = path.join(PROJECT_DIR, "scripts/capture_linkedin_messages.py");
 const ROUTE_SCRIPT = path.join(PROJECT_DIR, "scripts/route_linkedin_messages.py");
+const POSTS_SCRIPT = path.join(PROJECT_DIR, "scripts/capture_linkedin_posts.py");
 const PYTHON = path.join(PROJECT_DIR, ".venv/bin/python");
 
 const SNAPSHOT_PATH = path.join(WORKSPACE, "memory/linkedin-messages.json");
@@ -27,8 +28,19 @@ const PROPOSALS_PATH = path.join(WORKSPACE, "memory/linkedin-crm-proposals.json"
 const PROPOSALS_MD_PATH = path.join(WORKSPACE, "LINKEDIN_CRM_PROPOSALS.md");
 const MIRROR_STATE_PATH = path.join(WORKSPACE, "memory/linkedin-mirror-state.json");
 const CAPTURE_STATE_PATH = path.join(WORKSPACE, "memory/linkedin-capture-state.json");
+const POSTS_RAW_PATH = path.join(WORKSPACE, "memory/linkedin-posts-raw.json");
+const POSTS_STATE_PATH = path.join(WORKSPACE, "memory/linkedin-posts-capture-state.json");
+const POSTS_SUMMARY_PATH = path.join(WORKSPACE, "LINKEDIN_POSTS.md");
+const POSTS_TRACKER_PATH = path.join(WORKSPACE, "stackstone/linkedin-posts.md");
 
-const ACTIONS = ["status", "capture", "route", "capture_and_route"] as const;
+const ACTIONS = [
+  "status",
+  "capture",
+  "route",
+  "capture_and_route",
+  "posts_status",
+  "capture_posts",
+] as const;
 const ROUTE_MODES = ["baseline", "only_new", "assess_all"] as const;
 
 const LinkedInMessageMirrorToolSchema = Type.Object(
@@ -156,6 +168,40 @@ async function runCapture(params: {
   };
 }
 
+async function runPostsCapture(params: { headed: boolean; timeoutMs: number }) {
+  const result = await runFixedScript({
+    script: POSTS_SCRIPT,
+    args: ["--write", "--reconcile", ...(params.headed ? ["--headed"] : [])],
+    timeoutMs: params.timeoutMs,
+  });
+  return {
+    command: "capture_linkedin_posts.py",
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    snapshot: await readJsonIfExists(POSTS_RAW_PATH),
+    state: await readJsonIfExists(POSTS_STATE_PATH),
+    summaryPreview: await readTextPreview(POSTS_SUMMARY_PATH),
+    trackerPath: POSTS_TRACKER_PATH,
+  };
+}
+
+async function postsStatusPayload() {
+  return {
+    ok: true,
+    script: await scriptExists(POSTS_SCRIPT),
+    arbitraryExec: false,
+    outputs: {
+      raw: POSTS_RAW_PATH,
+      state: POSTS_STATE_PATH,
+      summary: POSTS_SUMMARY_PATH,
+      tracker: POSTS_TRACKER_PATH,
+    },
+    snapshot: await readJsonIfExists(POSTS_RAW_PATH),
+    state: await readJsonIfExists(POSTS_STATE_PATH),
+    summaryPreview: await readTextPreview(POSTS_SUMMARY_PATH),
+  };
+}
+
 async function runRoute(params: { routeMode: string; timeoutMs: number }) {
   const args = ["--write"];
   if (params.routeMode === "baseline") {
@@ -209,7 +255,7 @@ export function createLinkedInMessageMirrorTool(): AnyAgentTool {
     name: "linkedin_message_mirror",
     ownerOnly: true,
     description:
-      "Operate the local read-only LinkedIn message mirror without shell exec. Supports status, capture, route, and capture_and_route with bounded allowlisted actions only; never sends LinkedIn messages or writes CRM/SharePoint directly.",
+      "Operate the local read-only LinkedIn mirror without shell exec. Supports bounded message actions plus posts_status and capture_posts for Tom-authored posts only; never sends LinkedIn messages, posts, reactions, comments, or CRM/SharePoint writes.",
     parameters: LinkedInMessageMirrorToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as JsonRecord;
@@ -225,6 +271,16 @@ export function createLinkedInMessageMirrorTool(): AnyAgentTool {
 
       if (action === "status") {
         return jsonResult(await statusPayload());
+      }
+      if (action === "posts_status") {
+        return jsonResult(await postsStatusPayload());
+      }
+      if (action === "capture_posts") {
+        return jsonResult({
+          ok: true,
+          action,
+          result: await runPostsCapture({ headed, timeoutMs }),
+        });
       }
       if (action === "capture") {
         return jsonResult({

@@ -197,13 +197,13 @@ def load_token(token_file: Path) -> dict:
     return data
 
 
-def refresh_access_token(token_data: dict, token_file: Path) -> str:
+def refresh_access_token(token_data: dict, token_file: Path, scope: str = "Mail.Send offline_access") -> str:
     tenant = token_data.get("tenant_id", "common")
     post_data: dict = {
         "client_id":     token_data["client_id"],
         "refresh_token": token_data["refresh_token"],
         "grant_type":    "refresh_token",
-        "scope":         "Mail.Send offline_access",
+        "scope":         scope,
     }
     # Only include client_secret for confidential clients
     secret = token_data.get("client_secret", "")

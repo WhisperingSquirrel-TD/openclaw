@@ -31,6 +31,21 @@ The context window is a public good. Skills share the context window with everyt
 
 Prefer concise examples over verbose explanations.
 
+### Description Budget (Always-In-Context)
+
+The frontmatter `description` is injected into the model-facing skill catalogue on every run. The full `SKILL.md` body is loaded only after the skill is selected. Treat the description as routing metadata, not a mini-manual.
+
+Use this house standard:
+
+- **Target:** 120–240 characters.
+- **Hard ceiling:** 300 characters unless a materially complex trigger cannot be expressed below it.
+- State **what the skill does** and **when to use it**.
+- Put trigger words and important scope boundaries first.
+- Omit workflow steps, examples, rationale, implementation detail, and repeated policy text.
+- Keep one compact sentence where possible; use a second only for a necessary boundary.
+
+If a description needs more space, move the detail into the body or a reference file. Before finishing, measure the description length and review the complete catalogue impact.
+
 ### Set Appropriate Degrees of Freedom
 
 Match the level of specificity to the task's fragility and variability:
@@ -114,9 +129,9 @@ The skill should only contain the information needed for an AI agent to do the j
 
 Skills use a three-level loading system to manage context efficiently:
 
-1. **Metadata (name + description)** - Always in context (~100 words)
-2. **SKILL.md body** - When skill triggers (<5k words)
-3. **Bundled resources** - As needed by Codex (Unlimited because scripts can be executed without reading into context window)
+1. **Metadata (name + description)** - Always in context; keep the description within the budget above.
+2. **SKILL.md body** - When the skill triggers; keep it focused and under 500 lines.
+3. **Bundled resources** - Load only as needed; scripts can often execute without being read into context.
 
 #### Progressive Disclosure Patterns
 
@@ -340,6 +355,17 @@ Do not include any other fields in YAML frontmatter.
 ##### Body
 
 Write instructions for using the skill and its bundled resources.
+
+Use this order unless the workflow is unusually fragile:
+
+1. **Purpose and scope** — what the skill owns and does not own.
+2. **Inputs and triggers** — what must be available and what activates the skill.
+3. **Guardrails and gates** — safety, approval, ambiguity, and fail-closed rules.
+4. **Workflow** — numbered, imperative steps in execution order.
+5. **Output and proof** — required artifacts, state changes, and verification checks.
+6. **References** — link to detailed material that should be loaded only when needed.
+
+Keep the body operational rather than explanatory. Put the highest-risk rules before optional detail. Do not repeat the frontmatter description as a body section; the description is for routing and the body is for execution.
 
 ### Step 5: Packaging a Skill
 

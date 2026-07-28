@@ -1,6 +1,6 @@
 ---
 name: google-auth
-description: Re-authorize Google integrations on the Pi, especially Google Calendar and Gmail pollers. Use when Google Calendar or Gmail feeds are stale, token refresh fails, `token.json` / `gmail-token.json` is missing or revoked, or Tom says to run the Google auth skill. Default to the phone-first route when Tom is remote and not on the same network as the Pi.
+description: Re-authorize Google Calendar and Gmail integrations when tokens are missing, revoked, stale, or failing to refresh; use the phone-first route when Tom is remote.
 ---
 
 # Google Auth

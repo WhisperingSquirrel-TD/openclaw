@@ -3,8 +3,9 @@
 OpenClaw System Health Check
 =============================
 
-Runs before the morning briefing (cron: 06:55 daily).
+Runs from the configured system-health route.
 Writes ~/.openclaw/workspace/SYSTEM_HEALTH.md with any issues found.
+The scheduler/delivery cadence is verified separately from the live cron list.
 L1 reads this file at the start of its morning briefing turn and prepends
 a ⚙️ SYSTEM HEALTH section only when the file is non-empty.
 
@@ -58,6 +59,17 @@ WORKSPACE  = OPENCLAW / "workspace"
 MEMORY     = WORKSPACE / "memory"
 OUTPUT_MD  = WORKSPACE / "SYSTEM_HEALTH.md"
 BACKUP_HEALTH_MD = WORKSPACE / "memory/sharepoint-backup-health.md"
+CONFIG_PATH = OPENCLAW / "openclaw.json"
+BOOTSTRAP_FILES = [
+    WORKSPACE / "AGENTS.md",
+    WORKSPACE / "MEMORY.md",
+    WORKSPACE / "HEARTBEAT.md",
+    WORKSPACE / "SYSTEM_MAP.md",
+    WORKSPACE / "USER.md",
+    WORKSPACE / "SOUL.md",
+    WORKSPACE / "IDENTITY.md",
+    WORKSPACE / "TOOLS.md",
+]
 CODE_REPO  = HOME / "openclaw"
 WORKSPACE_REPO = WORKSPACE
 SP_BACKUP_STATE = OPENCLAW / "integrations/microsoft/sharepoint-backup-state.json"
@@ -529,6 +541,46 @@ def check_sharepoint_backup_health() -> tuple[list[str], list[str], dict]:
     return issues, info, details
 
 
+def check_bootstrap_pressure() -> list[str]:
+    """Fail closed when an always-loaded bootstrap file exceeds its configured budget.
+
+    This is deliberately deterministic and bounded: it does not try to infer the
+    runtime's full context size, but it catches the concrete file-level overflow
+    that can make injection/truncation predictable and visible.
+    """
+    issues = []
+    config = _load_json_file(CONFIG_PATH)
+    if not isinstance(config, dict):
+        return ["Bootstrap health: openclaw.json unreadable — bootstrap budget unverified"]
+
+    try:
+        budget = int(
+            config.get("agents", {})
+                  .get("defaults", {})
+                  .get("bootstrapMaxChars")
+        )
+    except (AttributeError, TypeError, ValueError):
+        return ["Bootstrap health: bootstrapMaxChars missing/invalid — budget unverified"]
+
+    if budget <= 0:
+        return ["Bootstrap health: bootstrapMaxChars is non-positive — budget invalid"]
+
+    for path in BOOTSTRAP_FILES:
+        if not path.exists():
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            issues.append(f"Bootstrap health: could not measure {path.name}")
+            continue
+        if size > budget:
+            issues.append(
+                f"Bootstrap health: {path.name} is {size} bytes, above "
+                f"bootstrapMaxChars={budget}"
+            )
+    return issues
+
+
 def check_stackstone_report_poller_state() -> list[str]:
     issues = []
     state = _load_json_file(REPORT_POLLER_STATE)
@@ -660,6 +712,7 @@ def main() -> None:
     issues: list[str] = []
     info: list[str] = []
 
+    bootstrap_issues = check_bootstrap_pressure()
     log_issues  = check_log_health()
     feed_issues = check_feed_freshness()
     exp_issues  = check_expense_watcher_health()
@@ -670,6 +723,7 @@ def main() -> None:
     git_issues, git_info  = check_github_sync()
     spb_issues, spb_info, sp_details  = check_sharepoint_backup_health()
 
+    issues.extend(bootstrap_issues)
     issues.extend(log_issues)
     issues.extend(feed_issues)
     issues.extend(exp_issues)

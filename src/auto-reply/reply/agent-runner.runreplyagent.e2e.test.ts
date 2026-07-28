@@ -1147,6 +1147,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
         sessionStore,
         sessionKey: "main",
         storePath,
+        runOverrides: {
+          config: {
+            agents: { defaults: { compaction: { reserveTokensFloor: 40_000 } } },
+          },
+        },
       });
       const res = await run();
 
@@ -1158,6 +1163,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
       if (!payload) {
         throw new Error("expected payload");
       }
+      expect(payload.text).toContain("Current configured value: 40000");
       expect(payload.text?.toLowerCase()).toContain("reset");
       expect(sessionStore.main.sessionId).not.toBe(sessionId);
       expect(sessionStore.main.fallbackNoticeSelectedModel).toBeUndefined();
