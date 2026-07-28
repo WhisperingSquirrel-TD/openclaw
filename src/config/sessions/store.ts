@@ -99,6 +99,25 @@ function normalizeSessionEntryDelivery(entry: SessionEntry): SessionEntry {
   };
 }
 
+/**
+ * Skill prompts are runtime-derived and can be rebuilt from the workspace.
+ * Keep them available to the current in-memory run, but never persist the
+ * full catalogue in the session registry.
+ */
+function stripPersistedSkillSnapshots(
+  store: Record<string, SessionEntry>,
+): Record<string, SessionEntry> {
+  return Object.fromEntries(
+    Object.entries(store).map(([key, entry]) => {
+      if (!Object.hasOwn(entry, "skillsSnapshot")) {
+        return [key, entry];
+      }
+      const { skillsSnapshot: _skillsSnapshot, ...persistedEntry } = entry;
+      return [key, persistedEntry];
+    }),
+  );
+}
+
 function removeThreadFromDeliveryContext(context?: DeliveryContext): DeliveryContext | undefined {
   if (!context || context.threadId == null) {
     return context;
@@ -455,9 +474,10 @@ async function saveSessionStoreUnlocked(
   }
 
   await fs.promises.mkdir(path.dirname(storePath), { recursive: true });
-  const json = JSON.stringify(store, null, 2);
+  const persistedStore = stripPersistedSkillSnapshots(store);
+  const json = JSON.stringify(persistedStore, null, 2);
   if (getSerializedSessionStore(storePath) === json) {
-    updateSessionStoreWriteCaches({ storePath, store, serialized: json });
+    updateSessionStoreWriteCaches({ storePath, store: persistedStore, serialized: json });
     return;
   }
 
@@ -465,7 +485,7 @@ async function saveSessionStoreUnlocked(
   if (process.platform === "win32") {
     for (let i = 0; i < 5; i++) {
       try {
-        await writeSessionStoreAtomic({ storePath, store, serialized: json });
+        await writeSessionStoreAtomic({ storePath, store: persistedStore, serialized: json });
         return;
       } catch (err) {
         const code = getErrorCode(err);
@@ -485,7 +505,7 @@ async function saveSessionStoreUnlocked(
   }
 
   try {
-    await writeSessionStoreAtomic({ storePath, store, serialized: json });
+    await writeSessionStoreAtomic({ storePath, store: persistedStore, serialized: json });
   } catch (err) {
     const code = getErrorCode(err);
 
@@ -493,7 +513,7 @@ async function saveSessionStoreUnlocked(
       // In tests the temp session-store directory may be deleted while writes are in-flight.
       // Best-effort: try a direct write (recreating the parent dir), otherwise ignore.
       try {
-        await writeSessionStoreAtomic({ storePath, store, serialized: json });
+        await writeSessionStoreAtomic({ storePath, store: persistedStore, serialized: json });
       } catch (err2) {
         const code2 = getErrorCode(err2);
         if (code2 === "ENOENT") {

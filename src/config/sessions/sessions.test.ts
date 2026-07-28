@@ -219,6 +219,32 @@ describe("session store lock (Promise chain mutex)", () => {
     writeSpy.mockRestore();
   });
 
+  it("does not persist runtime-derived skill snapshots", async () => {
+    const key = "agent:main:no-skill-snapshot";
+    const { storePath } = await makeTmpStore({
+      [key]: { sessionId: "s-snapshot", updatedAt: 100 },
+    });
+
+    await updateSessionStore(
+      storePath,
+      async (store) => {
+        store[key] = {
+          ...store[key],
+          skillsSnapshot: {
+            prompt: "large runtime prompt",
+            skills: [{ name: "example" }],
+            version: 42,
+          },
+        } as SessionEntry;
+      },
+      { skipMaintenance: true },
+    );
+
+    const persisted = loadSessionStore(storePath);
+    expect(persisted[key]?.skillsSnapshot).toBeUndefined();
+    expect(JSON.stringify(persisted)).not.toContain("large runtime prompt");
+  });
+
   it("multiple consecutive errors do not permanently poison the queue", async () => {
     const key = "agent:main:multi-err";
     const { storePath } = await makeTmpStore({
