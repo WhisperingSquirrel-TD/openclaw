@@ -395,19 +395,22 @@ The packaging script will:
 
 If validation fails, the script will report the errors and exit without creating a package. Fix any validation errors and run the packaging command again.
 
-### Routing / discoverability rule (MANDATORY)
+### Routing / discoverability rule (MANDATORY — applies to the whole skill estate)
 
-When creating or updating a skill that should be reusable in future sessions:
+When creating, updating, moving, splitting, or reviewing any reusable skill:
 
 1. Check whether agents will need to discover it through `SYSTEM_MAP.md`
 2. If yes, add or update the corresponding `SYSTEM_MAP.md` entry before calling the work done
 3. If the skill introduces a new workflow cluster, add a clear routing line, not just a buried mention
-4. Do not treat "skill file created" as complete if the routing/discoverability layer is still stale
-5. Treat `SYSTEM_MAP.md` as the primary findability/discoverability layer for local skills. If a skill is in the right canonical location and correctly routed in `SYSTEM_MAP.md`, describe it as findable through the system even if the current runtime-provided skill list has not been refreshed yet
-6. For any claim about whether a skill can be "found", verify against both:
+4. If the skill depends on references, scripts, assets, schemas, or other skills, link those dependencies directly from `SKILL.md` and ensure the owning area is findable from the routing layer
+5. Do not treat "skill file created/updated" as complete if the routing/discoverability layer is stale, ambiguous, or only reachable by filesystem luck
+6. This is an estate-wide conformance rule: existing skills must be brought into compliance when touched, and estate audits must identify older skills whose canonical home or dependencies are not findable
+7. Treat `SYSTEM_MAP.md` as the primary findability/discoverability layer for local skills. If a skill is in the right canonical location and correctly routed in `SYSTEM_MAP.md`, describe it as findable through the system even if the current runtime-provided skill list has not been refreshed yet
+8. For any claim about whether a skill can be "found", verify against both:
    - the canonical on-disk skill path
    - the `SYSTEM_MAP.md` routing entry
      Do not over-weight the current session's injected skill list when answering that question
+9. Record unresolved discoverability gaps as incomplete rather than silently assuming future agents will locate them
 
 ### Durable-document creation rule
 
