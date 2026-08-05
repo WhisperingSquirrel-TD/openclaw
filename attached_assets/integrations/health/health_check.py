@@ -75,6 +75,9 @@ WORKSPACE_REPO = WORKSPACE
 SP_BACKUP_STATE = OPENCLAW / "integrations/microsoft/sharepoint-backup-state.json"
 SP_BACKUP_LOG = WORKSPACE / "memory/sharepoint-backup-log.txt"
 SP_BACKUP_TIMER = "openclaw-sharepoint-backup.timer"
+GITHUB_BACKUP_LOG = MEMORY / "github-backup.log"
+GITHUB_BACKUP_SCRIPT = OPENCLAW / "scripts/github_backup.sh"
+GITHUB_BACKUP_MAX_AGE_MINUTES = 26 * 60
 # Canonical expense-intake execution evidence. The service writes this state and
 # the timer below invokes that service. The inbound-watch-router copy is a
 # mirrored/derived surface and must not be used to prove executor health.
@@ -461,6 +464,46 @@ def check_github_sync() -> tuple[list[str], list[str]]:
     return issues, info
 
 
+def check_github_backup_health() -> tuple[list[str], list[str]]:
+    """Verify the live GitHub backup schedule and recent successful run."""
+    issues: list[str] = []
+    info: list[str] = []
+
+    if not GITHUB_BACKUP_SCRIPT.exists():
+        issues.append("GitHub backup: backup script missing")
+        return issues, info
+
+    rc, crontab, err = _run(["crontab", "-l"])
+    if rc != 0:
+        issues.append("GitHub backup: could not read live crontab")
+    else:
+        schedule_lines = [line.strip() for line in crontab.splitlines()
+                          if "github_backup.sh" in line and not line.lstrip().startswith("#")]
+        if not any(line.startswith("45 3 ") for line in schedule_lines):
+            issues.append("GitHub backup: overnight 03:45 schedule missing")
+        if not any(line.startswith("20 14 ") for line in schedule_lines):
+            issues.append("GitHub backup: daytime 14:20 schedule missing")
+
+    age = _mtime_age_minutes(GITHUB_BACKUP_LOG)
+    latest_success = False
+    if age is None:
+        issues.append("GitHub backup: success log missing")
+    else:
+        try:
+            lines = GITHUB_BACKUP_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+            latest_success = any("GitHub backup run finished" in line for line in lines[-200:])
+        except Exception:
+            issues.append("GitHub backup: success log unreadable")
+        if age > GITHUB_BACKUP_MAX_AGE_MINUTES:
+            issues.append(f"GitHub backup: stale ({_format_age_minutes(age)} since last log update)")
+        elif latest_success:
+            info.append(f"GitHub backup: last recorded run {_format_age_minutes(age)} ago")
+        else:
+            issues.append("GitHub backup: recent log has no completed-run marker")
+
+    return issues, info
+
+
 def check_sharepoint_backup_health() -> tuple[list[str], list[str], dict]:
     issues = []
     info = []
@@ -721,6 +764,7 @@ def main() -> None:
     cron_issues = check_critical_cron_health()
     rem_issues  = check_reminder_failures()
     git_issues, git_info  = check_github_sync()
+    ghb_issues, ghb_info = check_github_backup_health()
     spb_issues, spb_info, sp_details  = check_sharepoint_backup_health()
 
     issues.extend(bootstrap_issues)
@@ -732,8 +776,10 @@ def main() -> None:
     issues.extend(cron_issues)
     issues.extend(rem_issues)
     issues.extend(git_issues)
+    issues.extend(ghb_issues)
     issues.extend(spb_issues)
     info.extend(git_info)
+    info.extend(ghb_info)
     if sp_details.get("result_shape") != "healthy":
         info.extend(spb_info)
 
