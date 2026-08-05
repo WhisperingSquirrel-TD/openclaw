@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Read one exact, trusted Microsoft Graph conversation without mailbox search."""
+"""Read one exact external Microsoft Graph conversation through a dedicated read-only account.
+
+This helper deliberately has no mailbox search, sender promotion, link following,
+write, draft, or send capability. The account slug is intentionally separate from
+the trusted reader account and must be provisioned independently.
+"""
 import argparse
 import json
 import sys
@@ -9,34 +14,24 @@ import requests
 
 GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
 STATE_DIR = Path.home() / '.openclaw'
-CONTACTS_FILE = STATE_DIR / 'integrations/known-contacts.txt'
-SELF_ADDRESSES = {'tom@stackstoneconsulting.co.uk', 'tomdean1988@gmail.com', 'assistant@stackstoneconsulting.co.uk'}
 MAX_MESSAGES = 20
-# Keep the exact-thread reader aligned with the task-context broker's
-# 64 KiB bounded packet contract. Full coverage is still fail-closed above
-# this limit; no truncation or fallback search is permitted.
-MAX_BYTES = 64 * 1024
-
-
-def contacts():
-    if not CONTACTS_FILE.exists():
-        return set()
-    return {line.strip().lower() for line in CONTACTS_FILE.read_text().splitlines() if line.strip() and not line.startswith('#')} | SELF_ADDRESSES
+MAX_BYTES = 48 * 1024
+ACCOUNT = 'external-microsoft-read'
 
 
 def token(account):
     p = STATE_DIR / f'integrations/microsoft/token-{account}.json'
     if not p.exists():
-        raise RuntimeError('Microsoft token file unavailable')
+        raise RuntimeError('Dedicated external Microsoft read token is unavailable')
     data = json.loads(p.read_text())
     if 'AccessToken' in data:
         values = list(data['AccessToken'].values())
         if not values:
-            raise RuntimeError('Microsoft access token unavailable')
+            raise RuntimeError('Dedicated external Microsoft read token is unavailable')
         return values[0]['secret']
     value = data.get('access_token')
     if not value:
-        raise RuntimeError('Microsoft access token unavailable')
+        raise RuntimeError('Dedicated external Microsoft read token is unavailable')
     return value
 
 
@@ -47,12 +42,11 @@ def graph_get(url, access, params=None):
 
 
 def normalise_message(message):
-    sender = (message.get('from', {}).get('emailAddress', {}).get('address') or '').lower()
     return {
         'message_id': message.get('id'),
         'conversation_id': message.get('conversationId'),
         'subject': message.get('subject', ''),
-        'sender': sender,
+        'sender': (message.get('from', {}).get('emailAddress', {}).get('address') or '').lower(),
         'received': message.get('receivedDateTime', ''),
         'body': message.get('body', {}).get('content', ''),
         'body_type': message.get('body', {}).get('contentType', 'text'),
@@ -62,26 +56,26 @@ def normalise_message(message):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('message_id')
-    parser.add_argument('--account', default='microsoft')
+    parser.add_argument('--account', default=ACCOUNT)
     args = parser.parse_args()
+    if args.account != ACCOUNT:
+        raise RuntimeError('External reader account is fixed to the dedicated read-only account')
     if not args.message_id or len(args.message_id) > 512:
-        raise RuntimeError('message id is invalid')
+        raise RuntimeError('Message id is invalid')
 
     access = token(args.account)
     anchor = graph_get(f'{GRAPH_BASE}/me/messages/{quote(args.message_id, safe="")}', access)
     anchor_message = normalise_message(anchor)
-    approved = contacts()
-    if not anchor_message['sender'] or anchor_message['sender'] not in approved:
-        print(json.dumps({'error': 'Sender not approved', 'sender': anchor_message['sender']}), file=sys.stderr)
-        return 1
     conversation_id = anchor_message.get('conversation_id')
     if not conversation_id:
         raise RuntimeError('Exact message has no conversation id; complete thread coverage is unavailable')
 
-    # This is an exact conversation lookup anchored by the already-authorised
-    # message ID. It is not mailbox-wide search and never follows content links.
+    # The conversation ID is returned by Graph for the exact anchor; escape it
+    # before placing it in the bounded provider filter. Never accept a caller-
+    # supplied conversation selector.
+    filter_conversation_id = conversation_id.replace("'", "''")
     thread = graph_get(f'{GRAPH_BASE}/me/messages', access, params={
-        '$filter': f"conversationId eq '{conversation_id}'",
+        '$filter': f"conversationId eq '{filter_conversation_id}'",
         '$top': str(MAX_MESSAGES + 1),
     })
     raw_messages = thread.get('value') or []
@@ -93,15 +87,14 @@ def main():
     messages.sort(key=lambda message: message.get('received') or '')
     if len(messages) > MAX_MESSAGES:
         raise RuntimeError(f'Exact conversation exceeds the bounded {MAX_MESSAGES}-message limit')
-    unknown = sorted({message['sender'] for message in messages if message['sender'] not in approved})
-    if unknown:
-        raise RuntimeError(f'Conversation contains sender(s) outside the approved contact set: {", ".join(unknown)}')
+    if any(message.get('conversation_id') not in {None, conversation_id} for message in messages):
+        raise RuntimeError('Exact conversation response contained a message outside the anchor conversation')
+    if not messages or not all(message.get('message_id') and message.get('sender') for message in messages):
+        raise RuntimeError('Exact external conversation contains incomplete message identity')
 
     total_bytes = sum(len(json.dumps(message, ensure_ascii=False).encode('utf-8')) for message in messages)
     if total_bytes > MAX_BYTES:
         raise RuntimeError(f'Exact conversation exceeds the bounded {MAX_BYTES}-byte limit')
-    if not messages:
-        raise RuntimeError('Exact trusted email conversation returned no messages')
     print(json.dumps({'success': True, 'conversation_id': conversation_id, 'message_count': len(messages), 'messages': messages}, ensure_ascii=False))
     return 0
 

@@ -80,6 +80,10 @@ def parse_args() -> argparse.Namespace:
                    help="Include a Teams online meeting link (default: on)")
     p.add_argument("--no-teams",       action="store_true", default=False,
                    help="Do not add a Teams online meeting link")
+    p.add_argument("--annual",         action="store_true", default=False,
+                   help="Repeat annually with no end date")
+    p.add_argument("--all-day",        action="store_true", default=False,
+                   help="Create an all-day event")
     p.add_argument("--account",        default="assistant",
                    metavar="SLUG",
                    help="Account slug used to locate the OAuth token file (default: assistant)")
@@ -220,26 +224,52 @@ def create_event(
     attendees: list[str],
     tz: str,
     teams: bool,
+    annual: bool = False,
+    all_day: bool = False,
 ) -> dict:
-    payload: dict = {
-        "subject": title,
-        "start":   {"dateTime": start_dt, "timeZone": tz},
-        "end":     {"dateTime": end_dt,   "timeZone": tz},
-        "attendees": [
-            {
-                "emailAddress": {"address": email},
-                "type": "required",
-            }
-            for email in attendees
-        ],
-    }
+    start_date = start_dt[:10]
+    if all_day:
+        payload: dict = {
+            "subject": title,
+            "isAllDay": True,
+            "start": {"dateTime": f"{start_date}T00:00:00", "timeZone": "UTC"},
+            "end": {"dateTime": f"{end_dt[:10]}T00:00:00", "timeZone": "UTC"},
+            "attendees": [
+                {"emailAddress": {"address": email}, "type": "required"}
+                for email in attendees
+            ],
+        }
+    else:
+        payload = {
+            "subject": title,
+            "start": {"dateTime": start_dt, "timeZone": tz},
+            "end": {"dateTime": end_dt, "timeZone": tz},
+            "attendees": [
+                {"emailAddress": {"address": email}, "type": "required"}
+                for email in attendees
+            ],
+        }
+    if annual:
+        start_obj = datetime.strptime(start_date, "%Y-%m-%d")
+        payload["recurrence"] = {
+            "pattern": {
+                "type": "absoluteYearly",
+                "interval": 1,
+                "month": start_obj.month,
+                "dayOfMonth": start_obj.day,
+            },
+            "range": {
+                "type": "noEnd",
+                "startDate": start_date,
+            },
+        }
     if teams:
         payload["isOnlineMeeting"] = True
         payload["onlineMeetingProvider"] = "teamsForBusiness"
 
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "Content-Type":  "application/json",
+        "Content-Type": "application/json",
     }
     resp = requests.post(
         f"{GRAPH_BASE}/me/events",
@@ -293,8 +323,11 @@ def main() -> None:
             sys.exit(3)
     else:
         start_obj = datetime.strptime(start_dt, "%Y-%m-%dT%H:%M:%S")
-        end_obj   = start_obj + timedelta(minutes=args.duration)
-        end_dt    = end_obj.strftime("%Y-%m-%dT%H:%M:%S")
+        if args.all_day:
+            end_dt = (start_obj + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        else:
+            end_obj = start_obj + timedelta(minutes=args.duration)
+            end_dt = end_obj.strftime("%Y-%m-%dT%H:%M:%S")
 
     teams = args.teams and not args.no_teams
 
@@ -309,7 +342,10 @@ def main() -> None:
     access_token = refresh_access_token(token_data, token_file)
 
     # Create
-    event = create_event(access_token, title, start_dt, end_dt, attendees, args.timezone, teams)
+    event = create_event(
+        access_token, title, start_dt, end_dt, attendees, args.timezone, teams,
+        annual=args.annual, all_day=args.all_day,
+    )
 
     join_url = ""
     if teams:

@@ -38,6 +38,7 @@ const TASK_SYSTEM_ACTIONS = [
   "context_broker_register_sources",
   "context_broker_register_binding",
   "context_broker_load",
+  "email_draft_create",
 ] as const;
 
 const TASK_ENTITY_KINDS = ["strategy", "objective", "task", "subtask"] as const;
@@ -203,7 +204,7 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
     name: "task_system",
     ownerOnly: true,
     description:
-      "Operate the Workspace Control Panel task system directly over its bearer-authenticated Pi gateway without shell exec. Supports fast capture/capture_batch, generic brief_intake, intake decompose/commit, entity context/timeline, CRUD, operator control, and bounded task-context-broker registry/binding/load actions. Broker retrieval accepts only stored task/subtask/entity/profile bindings and never accepts arbitrary paths, searches, URLs, or mailbox/thread selectors.",
+      "Operate the Workspace Control Panel task system directly over its bearer-authenticated Pi gateway without shell exec. Supports fast capture/capture_batch, generic brief_intake, intake decompose/commit, entity context/timeline, CRUD, operator control, bounded task-context-broker registry/binding/load actions, and a task-bound Outlook reply-draft writer that never sends and does not use shell exec. Broker retrieval accepts only stored task/subtask/entity/profile bindings and never accepts arbitrary paths, searches, URLs, or mailbox/thread selectors.",
     parameters: TaskSystemToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -420,6 +421,18 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
         const result = await callTaskSystem({
           method: "POST",
           path: "/task-system/context-broker/load",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "email_draft_create") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-system/email-draft/reply",
           baseUrl,
           token: authToken,
           timeoutMs,
