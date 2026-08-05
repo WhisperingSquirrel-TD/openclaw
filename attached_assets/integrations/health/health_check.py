@@ -77,7 +77,9 @@ SP_BACKUP_LOG = WORKSPACE / "memory/sharepoint-backup-log.txt"
 SP_BACKUP_TIMER = "openclaw-sharepoint-backup.timer"
 GITHUB_BACKUP_LOG = MEMORY / "github-backup.log"
 GITHUB_BACKUP_SCRIPT = OPENCLAW / "scripts/github_backup.sh"
-GITHUB_BACKUP_MAX_AGE_MINUTES = 26 * 60
+# Two daily runs (03:45 and 14:20); 14h catches either missed run at the
+# next health pass while allowing normal scheduling/host jitter.
+GITHUB_BACKUP_MAX_AGE_MINUTES = 14 * 60
 # Canonical expense-intake execution evidence. The service writes this state and
 # the timer below invokes that service. The inbound-watch-router copy is a
 # mirrored/derived surface and must not be used to prove executor health.
