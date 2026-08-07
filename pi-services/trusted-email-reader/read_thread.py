@@ -46,6 +46,19 @@ def graph_get(url, access, params=None):
     return response.json()
 
 
+def authored_body(content):
+    """Keep the authored portion; Outlook repeats quoted history in every body."""
+    text = str(content or '')
+    cut_markers = (
+        '<div id="divRplyFwdMsg"',
+        '<div id="ms-outlook-mobile-body-separator-line"',
+    )
+    cuts = [text.find(marker) for marker in cut_markers if text.find(marker) >= 0]
+    if cuts:
+        text = text[:min(cuts)]
+    return text.strip()
+
+
 def normalise_message(message):
     sender = (message.get('from', {}).get('emailAddress', {}).get('address') or '').lower()
     return {
@@ -54,7 +67,7 @@ def normalise_message(message):
         'subject': message.get('subject', ''),
         'sender': sender,
         'received': message.get('receivedDateTime', ''),
-        'body': message.get('body', {}).get('content', ''),
+        'body': authored_body(message.get('body', {}).get('content', '')),
         'body_type': message.get('body', {}).get('contentType', 'text'),
     }
 
