@@ -627,6 +627,11 @@ def extract_amounts(text: str) -> tuple[str | None, str | None]:
 
 
 def extract_refs(subject: str, text: str) -> dict[str, str | None]:
+    """Extract only stable, identifier-shaped receipt/invoice references.
+
+    Never accept prose such as ``Your`` after the word "invoice": doing so
+    turns common words into dedupe keys and can silently close a new cost.
+    """
     receipt = None
     invoice = None
     m = re.search(r'#([0-9]{4}-[0-9]{4}-[0-9]{4})', subject)
@@ -636,13 +641,20 @@ def extract_refs(subject: str, text: str) -> dict[str, str | None]:
         m = re.search(r'Receipt(?: number)?\s*#?\s*([0-9]{4}-[0-9]{4}-[0-9]{4})', text, re.I)
         if m:
             receipt = m.group(1)
-    m = re.search(r'Invoice(?: number)?\s*#?\s*([A-Z0-9-]+)', text, re.I)
-    if m:
-        invoice = m.group(1)
-    else:
-        m = re.search(r'OpenAI API Invoice\s*([A-Z0-9-]+)', subject, re.I)
-        if m:
+
+    # Invoice IDs must contain a digit and be at least six characters. This
+    # accepts Microsoft references such as G175174660 and real invoice IDs,
+    # while rejecting prose in phrases like "invoice Your statement".
+    invoice_patterns = [
+        r'Your Microsoft invoice\s+([A-Z][A-Z0-9-]*[0-9][A-Z0-9-]*)\b',
+        r'Invoice(?: number| no\.?)?\s*[:#]?\s*([A-Z][A-Z0-9-]*[0-9][A-Z0-9-]*)\b',
+        r'OpenAI API Invoice\s*([A-Z][A-Z0-9-]*[0-9][A-Z0-9-]*)\b',
+    ]
+    for pattern in invoice_patterns:
+        m = re.search(pattern, f'{subject}\n{text}', re.I)
+        if m and len(m.group(1)) >= 6:
             invoice = m.group(1)
+            break
     return {'receipt': receipt, 'invoice': invoice}
 
 
