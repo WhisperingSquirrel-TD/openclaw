@@ -45,5 +45,24 @@ class MicrosoftInvoiceReferenceTests(unittest.TestCase):
         )
 
 
+class RuntimeStatePruningTests(unittest.TestCase):
+    def test_prunes_stale_runtime_keys_and_bounds_history(self) -> None:
+        state = {
+            "scanned_non_candidates": ["live", "stale"],
+            "item_states": {
+                "live": {
+                    "route": "email",
+                    "status": "classified",
+                    "history": [{"stage": str(i)} for i in range(12)],
+                },
+                "stale": {"route": "email", "status": "not_needed", "history": [{"stage": "old"}]},
+            },
+        }
+        WATCHER.prune_runtime_state(state, {"live"})
+        self.assertEqual(state["scanned_non_candidates"], ["live"])
+        self.assertEqual(set(state["item_states"]), {"live"})
+        self.assertEqual(len(state["item_states"]["live"]["history"]), WATCHER.MAX_LIFECYCLE_HISTORY)
+
+
 if __name__ == "__main__":
     unittest.main()

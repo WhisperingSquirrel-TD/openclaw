@@ -24,7 +24,8 @@ LEGACY_LOG_FILE = LEGACY_STATE_DIR / 'watcher.log'
 EXPENSE_FILE = WORKSPACE / 'seer-expenses.md'
 MONITORED_FILE = WORKSPACE / 'memory' / 'monitored-items-state.json'
 MAX_STATE_FILE_BYTES = 8 * 1024 * 1024
-MAX_LIFECYCLE_HISTORY = 24
+MAX_LIFECYCLE_HISTORY = 6
+MAX_SCANNED_NON_CANDIDATES = 1_000
 MS_READER = ROOT / 'openclaw' / 'pi-services' / 'trusted-email-reader' / 'read_email.py'
 GMAIL_READER = ROOT / 'openclaw' / 'pi-services' / 'trusted-email-reader' / 'read_gmail.py'
 WHATSAPP_RECENT = WORKSPACE / 'WHATSAPP_RECENT.md'
@@ -415,6 +416,26 @@ def load_state() -> dict[str, Any]:
         if isinstance(state, dict):
             return normalise_state(state)
     return default_state()
+
+
+def prune_runtime_state(state: dict[str, Any], live_keys: set[str]) -> None:
+    """Bound watcher-only state to entries still visible in the rolling feeds.
+
+    Durable outcome proof remains in the canonical expense ledger and monitored
+    item ledger; this runtime cache only needs current mirror keys and a short
+    diagnostic history.
+    """
+    item_states = state.setdefault('item_states', {})
+    state['item_states'] = {
+        key: {
+            **value,
+            'history': list(value.get('history', []))[-MAX_LIFECYCLE_HISTORY:],
+        }
+        for key, value in item_states.items()
+        if key in live_keys and isinstance(value, dict)
+    }
+    scanned = [key for key in state.get('scanned_non_candidates', []) if key in live_keys]
+    state['scanned_non_candidates'] = sorted(set(scanned))[-MAX_SCANNED_NON_CANDIDATES:]
 
 
 def save_state(state: dict[str, Any]) -> None:
@@ -1351,11 +1372,18 @@ def main() -> None:
         '_seen_material_keys': [],
     }
 
-    for account, path in EMAIL_SOURCES:
-        for entry in parse_mail_sections(account, path):
-            process_email_entry(state, entry, summary)
-
+    email_entries = [
+        entry
+        for account, path in EMAIL_SOURCES
+        for entry in parse_mail_sections(account, path)
+    ]
     whatsapp_entries = infer_direct_whatsapp_threads(parse_whatsapp_recent())
+    live_keys = {mail_key(entry) for entry in email_entries} | {entry.key for entry in whatsapp_entries}
+    prune_runtime_state(state, live_keys)
+
+    for entry in email_entries:
+        process_email_entry(state, entry, summary)
+
     prune_whatsapp_artifacts(whatsapp_entries)
     for entry in whatsapp_entries:
         process_whatsapp_entry(state, entry, summary)
