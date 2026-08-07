@@ -37,6 +37,7 @@ const TASK_SYSTEM_ACTIONS = [
   "context_broker_list_sources",
   "context_broker_register_sources",
   "context_broker_register_binding",
+  "context_broker_recovery_admit",
   "context_broker_load",
   "email_draft_create",
 ] as const;
@@ -409,6 +410,18 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
         const result = await callTaskSystem({
           method: "POST",
           path: "/task-system/context-broker/bindings/register",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "context_broker_recovery_admit") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-system/context-broker/recovery/admit",
           baseUrl,
           token: authToken,
           timeoutMs,
