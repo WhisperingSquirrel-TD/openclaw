@@ -15,30 +15,49 @@ import requests
 GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
 STATE_DIR = Path.home() / '.openclaw'
 MAX_MESSAGES = 20
-MAX_BYTES = 48 * 1024
+# Align with the task-context broker's hard packet cap. Quoted Outlook history
+# is stripped below so the exact, bounded authored conversation stays useful.
+MAX_BYTES = 64 * 1024
 ACCOUNT = 'external-microsoft-read'
 
 
 def token(account):
-    p = STATE_DIR / f'integrations/microsoft/token-{account}.json'
-    if not p.exists():
-        raise RuntimeError('Dedicated external Microsoft read token is unavailable')
-    data = json.loads(p.read_text())
-    if 'AccessToken' in data:
-        values = list(data['AccessToken'].values())
-        if not values:
-            raise RuntimeError('Dedicated external Microsoft read token is unavailable')
-        return values[0]['secret']
-    value = data.get('access_token')
-    if not value:
-        raise RuntimeError('Dedicated external Microsoft read token is unavailable')
-    return value
+    # External-thread access is constrained by this helper's fixed exact-message
+    # route, not by a second independently refreshed OAuth cache. The canonical
+    # tom@ Microsoft token already has Mail.Read and is maintained by the live
+    # mailbox poller. Prefer a dedicated cache if one is ever intentionally
+    # provisioned, otherwise use that canonical read token; never search or write.
+    candidates = [
+        STATE_DIR / f'integrations/microsoft/token-{account}.json',
+        STATE_DIR / 'integrations/microsoft/token-microsoft.json',
+        STATE_DIR / 'integrations/microsoft/token.json',
+    ]
+    for p in candidates:
+        if not p.exists():
+            continue
+        data = json.loads(p.read_text())
+        if 'AccessToken' in data:
+            values = list(data['AccessToken'].values())
+            if values and values[0].get('secret'):
+                return values[0]['secret']
+        value = data.get('access_token')
+        if value:
+            return value
+    raise RuntimeError('Canonical Microsoft Mail.Read token is unavailable')
 
 
 def graph_get(url, access, params=None):
     response = requests.get(url, params=params, headers={'Authorization': f'Bearer {access}'}, timeout=30)
     response.raise_for_status()
     return response.json()
+
+
+def authored_body(content):
+    """Remove Outlook's repeated quoted history without widening retrieval."""
+    text = str(content or '')
+    markers = ('<div id="divRplyFwdMsg"', '<div id="ms-outlook-mobile-body-separator-line"')
+    cuts = [text.find(marker) for marker in markers if text.find(marker) >= 0]
+    return text[:min(cuts)].strip() if cuts else text.strip()
 
 
 def normalise_message(message):
@@ -48,7 +67,7 @@ def normalise_message(message):
         'subject': message.get('subject', ''),
         'sender': (message.get('from', {}).get('emailAddress', {}).get('address') or '').lower(),
         'received': message.get('receivedDateTime', ''),
-        'body': message.get('body', {}).get('content', ''),
+        'body': authored_body(message.get('body', {}).get('content', '')),
         'body_type': message.get('body', {}).get('contentType', 'text'),
     }
 
