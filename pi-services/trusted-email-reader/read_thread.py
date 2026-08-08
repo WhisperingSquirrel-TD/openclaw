@@ -67,6 +67,9 @@ def normalise_message(message):
         'subject': message.get('subject', ''),
         'sender': sender,
         'received': message.get('receivedDateTime', ''),
+        # Preserve Graph draft state so downstream duplicate detection never
+        # mistakes a saved draft for sent correspondence.
+        'is_draft': message.get('isDraft') is True,
         'body': authored_body(message.get('body', {}).get('content', '')),
         'body_type': message.get('body', {}).get('contentType', 'text'),
     }

@@ -17,6 +17,7 @@ const TASK_SYSTEM_ACTIONS = [
   "capture",
   "capture_batch",
   "brief_intake",
+  "execute",
   "decompose",
   "commit",
   "self_check",
@@ -273,6 +274,18 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
         return jsonResult({ ok: true, result });
       }
 
+      if (action === "execute") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-intake/execute",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
       if (action === "decompose") {
         const result = await callTaskSystem({
           method: "POST",
@@ -492,6 +505,9 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
       }
 
       const id = readStringOrNumberParam(params, "id", { required: true });
+      if (id === undefined) {
+        throw new ToolInputError("id required");
+      }
 
       if (action === "subtask_start") {
         if (kind !== "subtask") {

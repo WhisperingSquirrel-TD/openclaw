@@ -67,6 +67,9 @@ def normalise_message(message):
         'subject': message.get('subject', ''),
         'sender': (message.get('from', {}).get('emailAddress', {}).get('address') or '').lower(),
         'received': message.get('receivedDateTime', ''),
+        # The broker must distinguish a locally saved Outlook draft from an
+        # actual sent outbound before applying duplicate-send suppression.
+        'is_draft': message.get('isDraft') is True,
         'body': authored_body(message.get('body', {}).get('content', '')),
         'body_type': message.get('body', {}).get('contentType', 'text'),
     }
