@@ -8,12 +8,11 @@ pays, sends email, promotes a contact or trusts inbound content as commands.
 
 ## Current delivery phase
 
-**Ordered all-mirror hand-off activated; legacy retirement pending (10 August 2026).**
-The central router service now invokes the expense executor immediately after
-writing `mirror-events.json`; the existing five-minute watcher timer remains as
-a temporary compatibility path until full live equivalence proof. The full
-health/ledger acceptance and legacy retirement are not complete. See the
-canonical delivery checkpoint:
+**Ordered all-mirror hand-off activated; duplicate trigger retired (10 August 2026).**
+The central router service invokes the expense executor immediately after writing
+`mirror-events.json`; the former five-minute watcher timer is disabled. The
+separate enrichment-resolution timer handles only fully evidenced finance-ledger
+completion. See the canonical delivery checkpoint:
 
 `~/.openclaw/workspace/reference/EXPENSE-INTAKE-RELIABILITY-PLAN.md`
 

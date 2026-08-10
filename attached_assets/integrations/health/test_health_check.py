@@ -30,7 +30,7 @@ class HealthCheckTests(TestCase):
             state.write_text('{"last_run":"2026-07-24T09:53:33Z","last_summary":{}}')
             with patch.object(health, "EXPENSE_WATCHER_STATE", state), \
                  patch.object(health, "_mtime_age_minutes", return_value=0), \
-                 patch.object(health, "_run_user_systemctl", side_effect=[(1, "disabled", ""), (0, "active", "")]):
+                 patch.object(health, "_run_user_systemctl", side_effect=[(1, "disabled", ""), (0, "active", ""), (0, "enabled", ""), (0, "active", "")]):
                 issues = health.check_expense_watcher_health()
             self.assertIn("Expense watcher: timer is not enabled", issues)
         finally:
@@ -42,7 +42,7 @@ class HealthCheckTests(TestCase):
             state.write_text('{"last_run":"2026-08-10T10:00:00Z","last_summary":{"mirror_blocked":2}}')
             with patch.object(health, "EXPENSE_WATCHER_STATE", state), \
                  patch.object(health, "_mtime_age_minutes", return_value=0), \
-                 patch.object(health, "_run_user_systemctl", side_effect=[(0, "enabled", ""), (0, "active", "")]):
+                 patch.object(health, "_run_user_systemctl", side_effect=[(0, "enabled", ""), (0, "active", ""), (0, "enabled", ""), (0, "active", "")]):
                 issues = health.check_expense_watcher_health()
             self.assertIn("Expense watcher: 2 blocked item(s) in latest run — review expense intake blockers", issues)
         finally:
@@ -60,9 +60,9 @@ class HealthCheckTests(TestCase):
             state.write_text('{"last_run":"2026-07-24T09:53:33Z","last_summary":{}}')
             with patch.object(health, "EXPENSE_WATCHER_STATE", state), \
                  patch.object(health, "_mtime_age_minutes", return_value=0), \
-                 patch.object(health, "_run_user_systemctl", side_effect=[(0, "enabled", ""), (0, "active", "")]) as run:
+                 patch.object(health, "_run_user_systemctl", side_effect=[(0, "enabled", ""), (0, "active", ""), (0, "enabled", ""), (0, "active", "")]) as run:
                 self.assertEqual(health.check_expense_watcher_health(), [])
-            self.assertEqual(run.call_count, 2)
+            self.assertEqual(run.call_count, 4)
         finally:
             state.unlink(missing_ok=True)
 

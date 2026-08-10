@@ -80,11 +80,13 @@ GITHUB_BACKUP_SCRIPT = OPENCLAW / "scripts/github_backup.sh"
 # Two daily runs (03:45 and 14:20); 14h catches either missed run at the
 # next health pass while allowing normal scheduling/host jitter.
 GITHUB_BACKUP_MAX_AGE_MINUTES = 14 * 60
-# Canonical expense-intake execution evidence. The service writes this state and
-# the timer below invokes that service. The inbound-watch-router copy is a
-# mirrored/derived surface and must not be used to prove executor health.
-EXPENSE_WATCHER_STATE = OPENCLAW / "runtime/expense-intake-watcher/state.json"
-EXPENSE_WATCHER_TIMER = "expense-intake-watcher.timer"
+# Canonical expense-intake execution evidence. The central mirror router is the
+# ordered trigger and invokes the expense executor immediately after writing
+# normalised all-surface events. The compatibility watcher timer is not health
+# proof and is retired after equivalence acceptance.
+EXPENSE_WATCHER_STATE = OPENCLAW / "runtime/inbound-watch-router/state.json"
+EXPENSE_WATCHER_TIMER = "openclaw-mirror-router.timer"
+EXPENSE_RESOLUTION_TIMER = "expense-enrichment-resolution.timer"
 # Cron has a minimal environment, so neither the systemd user bus nor the
 # OpenClaw CLI path can be assumed to be inherited. Resolve both explicitly.
 USER_RUNTIME_DIR = Path(f"/run/user/{os.getuid()}")
@@ -371,6 +373,13 @@ def check_expense_watcher_health() -> list[str]:
         issues.append("Expense watcher: timer is not enabled")
     elif not timer_active:
         issues.append("Expense watcher: timer is enabled but not active")
+
+    resolution_rc, resolution_out, _ = _run_user_systemctl("is-enabled", EXPENSE_RESOLUTION_TIMER)
+    resolution_active_rc, resolution_active_out, _ = _run_user_systemctl("is-active", EXPENSE_RESOLUTION_TIMER)
+    if resolution_rc != 0 or resolution_out.strip() != "enabled":
+        issues.append("Expense enrichment resolution: timer is not enabled")
+    elif resolution_active_rc != 0 or resolution_active_out.strip() != "active":
+        issues.append("Expense enrichment resolution: timer is enabled but not active")
 
     return issues
 
