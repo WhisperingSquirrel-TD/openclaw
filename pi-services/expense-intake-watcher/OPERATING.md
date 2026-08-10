@@ -26,7 +26,9 @@ trusted/external email + sent views + WhatsApp + Teams
   -> expense-intake-watcher (five-minute deterministic capture)
   -> seer-expenses.md (canonical expense outcome)
   -> monitored-items-state.json (source-level proof)
-  -> finance ledger/evidence queue + health surface (pending completion work)
+  -> expense-enrichment-queue.json (explicit missing financial facts)
+  -> expense-enrichment-resolution.timer (validated ledger resolution)
+  -> finance ledger + health surface
 ```
 
 Trusted inbox and WhatsApp inputs also retain the watcher’s established direct
