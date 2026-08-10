@@ -1324,32 +1324,7 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
     advance_item_lifecycle(state, key, 'email', 'routed', 'Expense workflow selected')
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
 
-    expense_md = load_expense_text()
-    if row_exists(expense_md, refs, entry.subject):
-        summary['duplicates'] += 1
-        advance_item_lifecycle(state, key, 'email', 'processed', 'Already present in seer-expenses.md')
-        advance_item_lifecycle(state, key, 'email', 'closed', 'Already present in seer-expenses.md')
-        upsert_monitored(key, lifecycle_payload(base_payload, 'closed'))
-        return
-
-    reader = run_reader(entry)
-    if reader:
-        row = build_logged_row(entry, reader)
-        if insert_expense_row(row):
-            summary['logged'] += 1
-            processed_payload = email_monitored_payload(entry, 'processed', None, extract_refs(entry.subject, text_from_reader(reader)), flags=flags)
-            advance_item_lifecycle(state, key, 'email', 'processed', 'Reader extraction succeeded')
-            upsert_monitored(key, lifecycle_payload(processed_payload, 'processed'))
-            log(f'Logged expense from {entry.account}/{entry.section}: {entry.subject}')
-            return
-        summary['duplicates'] += 1
-        advance_item_lifecycle(state, key, 'email', 'processed', 'Built row already existed or could not be inserted uniquely')
-        advance_item_lifecycle(state, key, 'email', 'closed', 'Built row already existed or could not be inserted uniquely')
-        upsert_monitored(key, lifecycle_payload(base_payload, 'closed'))
-        return
-
-    blocker = 'Trusted reader could not extract full body/attachments from this mirrored email yet'
-    ensure_pending_email_row(entry, blocker, refs)
+    blocker = 'Captured in SQLite; explicit review/enrichment is required before finance posting'
     advance_item_lifecycle(state, key, 'email', 'blocked', blocker)
     upsert_monitored(key, lifecycle_payload(base_payload, 'blocked', blocker))
     summary['pending'] += 1
@@ -1403,16 +1378,7 @@ def process_whatsapp_entry(state: dict[str, Any], entry: WhatsAppEntry, summary:
     advance_item_lifecycle(state, key, 'whatsapp', 'routed', 'Expense workflow selected')
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
 
-    expense_md = load_expense_text()
-    if entry.text in expense_md:
-        summary['duplicates'] += 1
-        advance_item_lifecycle(state, key, 'whatsapp', 'processed', 'Already represented in seer-expenses.md')
-        advance_item_lifecycle(state, key, 'whatsapp', 'closed', 'Already represented in seer-expenses.md')
-        upsert_monitored(key, lifecycle_payload(base_payload, 'closed'))
-        return
-
-    blocker = 'WhatsApp expense signal needs business relevance / payment-source confirmation or richer evidence before full logging'
-    ensure_pending_whatsapp_row(entry, blocker)
+    blocker = 'Captured in SQLite; WhatsApp expense signal needs explicit business/payment/evidence review before finance posting'
     advance_item_lifecycle(state, key, 'whatsapp', 'blocked', blocker)
     upsert_monitored(key, lifecycle_payload(base_payload, 'blocked', blocker))
     summary['pending'] += 1
@@ -1502,7 +1468,7 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             advance_item_lifecycle(state, key, 'mirror_expense', 'not_needed', reason)
             summary['mirror_not_needed'] = summary.get('mirror_not_needed', 0) + 1
             continue
-        canonical_ref = f'seer-expenses.md#pending:{source_id}'
+        canonical_ref = f'sqlite:pending:{source_id}'
         capture_sqlite_candidate(source_surface=surface, source_ref=source_id, source_timestamp=safe_source_timestamp,
                                  supplier=subject, evidence_ref=source_ref)
         blocker = 'mirror evidence requires expense enrichment before ledger/evidence completion'
@@ -1516,31 +1482,6 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             blocker=blocker,
             candidate_reason='; '.join(str(x) for x in reasons[:3]) or 'central router expense classification',
         )
-        # Preserve the candidate in the independent queue *before* attempting
-        # the human-readable canonical row. A malformed/unwritable expense file
-        # must raise a visible persistence failure, never make the source vanish.
-        enqueue(
-            ENRICHMENT_QUEUE_FILE,
-            source_id=source_id,
-            source_surface=surface,
-            canonical_ref=canonical_ref,
-            blocker=blocker,
-            observed_at=safe_source_timestamp,
-            raw_source_timestamp=raw_source_timestamp,
-            source_timestamp_status=timestamp_status,
-        )
-        text = load_expense_text()
-        if canonical_ref not in text:
-            row = (
-                f"| {pretty_date(extract_date(safe_source_timestamp))} | {subject[:120]} | "
-                f"Mirror intake | TBC | Pending expense signal. Source ID: `{source_id}`. "
-                f"Surface: {surface}. Evidence: {source_ref}. Blocker: {blocker}. "
-                f"Timestamp status: {timestamp_status}; raw source timestamp retained: `{raw_source_timestamp or ''}` |"
-            )
-            inserted = insert_expense_row(row)
-            if not inserted and source_id not in load_expense_text():
-                log(f'failed to persist canonical pending row for {key}')
-                continue
         now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         payload = {
             'id': key,
@@ -1560,7 +1501,7 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             'ledger_state': outcome.ledger_state,
             'evidence_state': outcome.evidence_state,
             'blocker': outcome.blocker,
-            'evidence_refs': [source_ref, 'seer-expenses.md'],
+            'evidence_refs': [source_ref, canonical_ref],
             'resolved_at': None,
             'processed_at': None,
             'closed_at': None,

@@ -7,6 +7,7 @@ import sys
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).with_name("watcher.py")
@@ -71,16 +72,18 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
             try:
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
                 state, summary = WATCHER.default_state(), {}
-                WATCHER.process_mirror_expense_events(state, summary)
-                WATCHER.process_mirror_expense_events(state, summary)  # replay must be idempotent
+                with patch.object(WATCHER, 'capture_sqlite_candidate') as capture:
+                    WATCHER.process_mirror_expense_events(state, summary)
+                    WATCHER.process_mirror_expense_events(state, summary)  # replay must be idempotent
                 self.assertEqual(summary["mirror_blocked"], 1)
-                self.assertIn("obcn-42", expenses.read_text(encoding="utf-8"))
+                capture.assert_called_once()
+                self.assertEqual(expenses.read_text(encoding="utf-8"), "# Expenses\n\n## Domains\n")
+                self.assertFalse(queue.exists())
                 item = json.loads(monitored.read_text(encoding="utf-8"))["items"][0]
                 self.assertEqual(item["expense_outcome"], "blocked")
-                self.assertEqual(item["canonical_ref"], "seer-expenses.md#pending:obcn-42")
+                self.assertEqual(item["canonical_ref"], "sqlite:pending:obcn-42")
                 self.assertEqual(item["ledger_state"], "pending")
                 self.assertEqual(item["evidence_state"], "blocked")
-                self.assertEqual(json.loads(queue.read_text(encoding="utf-8"))["items"][0]["source_id"], "obcn-42")
             finally:
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old_events, old_expenses, old_monitored, old_queue
 
@@ -97,10 +100,11 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
             old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
             try:
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
-                WATCHER.process_mirror_expense_events(WATCHER.default_state(), {})
-                saved = json.loads(queue.read_text(encoding="utf-8"))["items"]
-                self.assertEqual(saved[0]["source_id"], "fail-1")
-                self.assertEqual(saved[0]["state"], "needs_enrichment")
+                with patch.object(WATCHER, 'capture_sqlite_candidate') as capture:
+                    WATCHER.process_mirror_expense_events(WATCHER.default_state(), {})
+                capture.assert_called_once()
+                self.assertFalse(queue.exists())
+                self.assertEqual(expenses.read_text(encoding="utf-8"), "# Expenses\n(no insertion marker)\n")
             finally:
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
 
