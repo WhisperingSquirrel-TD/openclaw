@@ -36,6 +36,18 @@ class HealthCheckTests(TestCase):
         finally:
             state.unlink(missing_ok=True)
 
+    def test_expense_health_surfaces_all_mirror_blockers(self):
+        state = Path(self.id().replace('.', '_') + '.json')
+        try:
+            state.write_text('{"last_run":"2026-08-10T10:00:00Z","last_summary":{"mirror_blocked":2}}')
+            with patch.object(health, "EXPENSE_WATCHER_STATE", state), \
+                 patch.object(health, "_mtime_age_minutes", return_value=0), \
+                 patch.object(health, "_run_user_systemctl", side_effect=[(0, "enabled", ""), (0, "active", "")]):
+                issues = health.check_expense_watcher_health()
+            self.assertIn("Expense watcher: 2 blocked item(s) in latest run — review expense intake blockers", issues)
+        finally:
+            state.unlink(missing_ok=True)
+
     def test_diagnostic_info_does_not_create_a_user_facing_health_alert(self):
         self.assertEqual(
             health.build_health_report([], ["workspace repo: local working tree dirty"]),

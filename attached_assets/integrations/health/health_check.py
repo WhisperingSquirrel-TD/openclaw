@@ -355,8 +355,9 @@ def check_expense_watcher_health() -> list[str]:
         if not last_run:
             issues.append("Expense watcher: runtime state has no last_run timestamp")
         summary = state.get('last_summary') or {}
-        if summary.get('blocked', 0) > 0:
-            issues.append(f"Expense watcher: {summary.get('blocked')} blocked item(s) in latest run — review expense intake blockers")
+        blocked = int(summary.get('blocked', 0) or 0) + int(summary.get('mirror_blocked', 0) or 0)
+        if blocked > 0:
+            issues.append(f"Expense watcher: {blocked} blocked item(s) in latest run — review expense intake blockers")
     except Exception as e:
         issues.append(f"Expense watcher: runtime state unreadable ({e})")
 
