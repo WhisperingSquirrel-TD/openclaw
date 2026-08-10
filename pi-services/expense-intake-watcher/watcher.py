@@ -11,6 +11,8 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
+from expense_outcomes import build_outcome
+
 ROOT = Path('/home/tomdean88')
 WORKSPACE = ROOT / '.openclaw' / 'workspace'
 CANONICAL_RUNTIME_NAME = 'inbound-watch-router'
@@ -23,6 +25,7 @@ LOG_FILE = CANONICAL_STATE_DIR / 'watcher.log'
 LEGACY_LOG_FILE = LEGACY_STATE_DIR / 'watcher.log'
 EXPENSE_FILE = WORKSPACE / 'seer-expenses.md'
 MONITORED_FILE = WORKSPACE / 'memory' / 'monitored-items-state.json'
+MIRROR_EVENTS_FILE = WORKSPACE / 'memory' / 'mirror-events.json'
 MAX_STATE_FILE_BYTES = 8 * 1024 * 1024
 MAX_LIFECYCLE_HISTORY = 6
 MAX_SCANNED_NON_CANDIDATES = 1_000
@@ -1359,6 +1362,97 @@ def process_whatsapp_entry(state: dict[str, Any], entry: WhatsAppEntry, summary:
     summary['pending'] += 1
 
 
+def mirror_expense_keys() -> set[str]:
+    raw = load_json(MIRROR_EVENTS_FILE, {})
+    events = raw.get('items', []) if isinstance(raw, dict) else []
+    if not isinstance(events, list):
+        return set()
+    return {
+        f"mirror-expense:{str(event.get('stable_item_key') or event.get('source_id'))}"
+        for event in events
+        if isinstance(event, dict)
+        and 'EXPENSE' in set(event.get('routing_flags') or [])
+        and (event.get('stable_item_key') or event.get('source_id'))
+    }
+
+
+def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]) -> None:
+    """Preserve new expense candidates emitted by the central all-surface router.
+
+    This is deliberately a blocker-first adapter.  Trusted inbox events still
+    use the existing full-body reader path; external, sent and Teams events are
+    never silently ignored merely because that reader is unavailable.  A later
+    enrichment/ledger worker must advance the explicit blocker rather than
+    reclassifying it from a loose text match.
+    """
+    raw = load_json(MIRROR_EVENTS_FILE, {})
+    events = raw.get('items', []) if isinstance(raw, dict) else []
+    if not isinstance(events, list):
+        return
+    for event in events:
+        if not isinstance(event, dict) or 'EXPENSE' not in set(event.get('routing_flags') or []):
+            continue
+        stable = str(event.get('stable_item_key') or event.get('source_id') or '')
+        surface = str(event.get('surface') or '')
+        if not stable or not surface:
+            continue
+        key = f'mirror-expense:{stable}'
+        existing = state.setdefault('item_states', {}).get(key, {})
+        if existing.get('status') in {'blocked', 'closed', 'not_needed'}:
+            continue
+        subject = str(event.get('subject_or_location') or 'Expense signal')
+        source_ref = str(event.get('raw_evidence_ref') or event.get('proof_source') or 'mirror-events.json')
+        source_id = str(event.get('source_id') or stable)
+        canonical_ref = f'seer-expenses.md#pending:{source_id}'
+        blocker = 'mirror evidence requires expense enrichment before ledger/evidence completion'
+        outcome = build_outcome(
+            source_id=source_id,
+            source_surface=surface,
+            expense_outcome='blocked',
+            canonical_ref=canonical_ref,
+            ledger_state='pending',
+            evidence_state='blocked',
+            blocker=blocker,
+            candidate_reason='; '.join(str(x) for x in (event.get('reasons') or [])[:3]) or 'central router expense classification',
+        )
+        text = load_expense_text()
+        if canonical_ref not in text:
+            row = (
+                f"| {pretty_date(extract_date(str(event.get('source_timestamp') or '')))} | {subject[:120]} | "
+                f"Mirror intake | TBC | Pending expense signal. Source ID: `{source_id}`. "
+                f"Surface: {surface}. Evidence: {source_ref}. Blocker: {blocker} |"
+            )
+            inserted = insert_expense_row(row)
+            if not inserted and source_id not in load_expense_text():
+                log(f'failed to persist canonical pending row for {key}')
+                continue
+        now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        payload = {
+            'id': key,
+            'surface': surface,
+            'entity': 'Mirror intake',
+            'thread_key': str(event.get('thread_key') or source_id),
+            'source_timestamp': event.get('source_timestamp'),
+            'seen_at': now_iso,
+            'management_relevance': 'needs_management',
+            'flags': ['EXPENSE'],
+            'mode': 'watch',
+            'closure_state': 'blocked',
+            'expense_outcome': outcome.expense_outcome,
+            'canonical_ref': outcome.canonical_ref,
+            'ledger_state': outcome.ledger_state,
+            'evidence_state': outcome.evidence_state,
+            'blocker': outcome.blocker,
+            'evidence_refs': [source_ref, 'seer-expenses.md'],
+            'resolved_at': None,
+            'processed_at': None,
+            'closed_at': None,
+        }
+        upsert_monitored(key, payload)
+        advance_item_lifecycle(state, key, 'mirror_expense', 'blocked', blocker)
+        summary['mirror_blocked'] = summary.get('mirror_blocked', 0) + 1
+
+
 def main() -> None:
     state = load_state()
     summary = {
@@ -1378,7 +1472,7 @@ def main() -> None:
         for entry in parse_mail_sections(account, path)
     ]
     whatsapp_entries = infer_direct_whatsapp_threads(parse_whatsapp_recent())
-    live_keys = {mail_key(entry) for entry in email_entries} | {entry.key for entry in whatsapp_entries}
+    live_keys = {mail_key(entry) for entry in email_entries} | {entry.key for entry in whatsapp_entries} | mirror_expense_keys()
     prune_runtime_state(state, live_keys)
 
     for entry in email_entries:
@@ -1388,6 +1482,7 @@ def main() -> None:
     for entry in whatsapp_entries:
         process_whatsapp_entry(state, entry, summary)
     process_whatsapp_threads(state, whatsapp_entries, summary)
+    process_mirror_expense_events(state, summary)
 
     state['last_run'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     public_summary = {k: v for k, v in summary.items() if not k.startswith('_')}
