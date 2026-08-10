@@ -84,6 +84,26 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
             finally:
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old_events, old_expenses, old_monitored, old_queue
 
+    def test_failed_canonical_row_write_keeps_external_candidate_in_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events, expenses, monitored, queue = (root / "events.json", root / "expenses.md", root / "monitored.json", root / "queue.json")
+            events.write_text(json.dumps({"items": [{
+                "stable_item_key": "teams:expense:fail-1", "source_id": "fail-1", "surface": "teams_recent",
+                "source_timestamp": "2026-08-10T10:00:00Z", "subject_or_location": "Expense evidence",
+                "raw_evidence_ref": "TEAMS_RECENT.md", "routing_flags": ["EXPENSE"], "reasons": ["cost evidence"],
+            }]}), encoding="utf-8")
+            expenses.write_text("# Expenses\n(no insertion marker)\n", encoding="utf-8")
+            old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
+            try:
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
+                WATCHER.process_mirror_expense_events(WATCHER.default_state(), {})
+                saved = json.loads(queue.read_text(encoding="utf-8"))["items"]
+                self.assertEqual(saved[0]["source_id"], "fail-1")
+                self.assertEqual(saved[0]["state"], "needs_enrichment")
+            finally:
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
+
 
 class RuntimeStatePruningTests(unittest.TestCase):
     def test_prunes_stale_runtime_keys_and_bounds_history(self) -> None:
