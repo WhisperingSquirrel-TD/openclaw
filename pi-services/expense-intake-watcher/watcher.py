@@ -17,13 +17,9 @@ from expense_outcomes import build_outcome
 ROOT = Path('/home/tomdean88')
 WORKSPACE = ROOT / '.openclaw' / 'workspace'
 CANONICAL_RUNTIME_NAME = 'inbound-watch-router'
-LEGACY_RUNTIME_NAME = 'expense-intake-watcher'
 CANONICAL_STATE_DIR = ROOT / '.openclaw' / 'runtime' / CANONICAL_RUNTIME_NAME
-LEGACY_STATE_DIR = ROOT / '.openclaw' / 'runtime' / LEGACY_RUNTIME_NAME
 STATE_FILE = CANONICAL_STATE_DIR / 'state.json'
-LEGACY_STATE_FILE = LEGACY_STATE_DIR / 'state.json'
 LOG_FILE = CANONICAL_STATE_DIR / 'watcher.log'
-LEGACY_LOG_FILE = LEGACY_STATE_DIR / 'watcher.log'
 EXPENSE_FILE = WORKSPACE / 'seer-expenses.md'
 MONITORED_FILE = WORKSPACE / 'memory' / 'monitored-items-state.json'
 MIRROR_EVENTS_FILE = WORKSPACE / 'memory' / 'mirror-events.json'
@@ -357,15 +353,14 @@ def canonical_contact_label(label: str | None) -> str | None:
 
 
 def runtime_dirs() -> list[Path]:
-    return [CANONICAL_STATE_DIR, LEGACY_STATE_DIR]
+    return [CANONICAL_STATE_DIR]
 
 
 def log(msg: str) -> None:
     ts = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-    for path in [LOG_FILE, LEGACY_LOG_FILE]:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open('a', encoding='utf-8') as f:
-            f.write(f'[{ts}] {msg}\n')
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_FILE.open('a', encoding='utf-8') as f:
+        f.write(f'[{ts}] {msg}\n')
 
 
 def load_json(path: Path, default: Any) -> Any:
@@ -387,7 +382,6 @@ def save_json(path: Path, payload: Any) -> None:
 def default_state() -> dict[str, Any]:
     return {
         'runtime_name': CANONICAL_RUNTIME_NAME,
-        'legacy_runtime_name': LEGACY_RUNTIME_NAME,
         'scanned_non_candidates': [],
         'item_states': {},
         'last_run': None,
@@ -410,17 +404,14 @@ def normalise_state(raw: Any) -> dict[str, Any]:
 
 
 def load_state() -> dict[str, Any]:
-    for candidate in [STATE_FILE, LEGACY_STATE_FILE]:
-        if not candidate.exists():
-            continue
-        size = candidate.stat().st_size
-        if size > MAX_STATE_FILE_BYTES:
-            log(f'Skipping oversized legacy state ({size} bytes): {candidate}')
-            continue
-        state = load_json(candidate, default_state())
-        if isinstance(state, dict):
-            return normalise_state(state)
-    return default_state()
+    if not STATE_FILE.exists():
+        return default_state()
+    size = STATE_FILE.stat().st_size
+    if size > MAX_STATE_FILE_BYTES:
+        log(f'Skipping oversized state ({size} bytes): {STATE_FILE}')
+        return default_state()
+    state = load_json(STATE_FILE, default_state())
+    return normalise_state(state) if isinstance(state, dict) else default_state()
 
 
 def prune_runtime_state(state: dict[str, Any], live_keys: set[str]) -> None:
@@ -445,9 +436,8 @@ def prune_runtime_state(state: dict[str, Any], live_keys: set[str]) -> None:
 
 def save_state(state: dict[str, Any]) -> None:
     state['runtime_name'] = CANONICAL_RUNTIME_NAME
-    state['legacy_runtime_name'] = LEGACY_RUNTIME_NAME
+    state.pop('legacy_runtime_name', None)
     save_json(STATE_FILE, state)
-    save_json(LEGACY_STATE_FILE, state)
 
 
 def parse_mail_sections(account: str, path: Path) -> list[MailEntry]:

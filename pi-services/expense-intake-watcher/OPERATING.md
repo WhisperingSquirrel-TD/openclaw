@@ -52,12 +52,11 @@ similar string appears in `seer-expenses.md`.
 
 ## Runtime paths
 
-- Active service: `~/.config/systemd/user/expense-intake-watcher.service`
-- Active timer: `~/.config/systemd/user/expense-intake-watcher.timer`
-- Central event producer: `openclaw-mirror-router.timer`
-- Canonical hot state (target): `~/.openclaw/runtime/inbound-watch-router/state.json`
-- Compatibility state (to retire after equivalence):
-  `~/.openclaw/runtime/expense-intake-watcher/state.json`
+- Active ordered trigger: `openclaw-mirror-router.timer` / `openclaw-mirror-router.service`
+- Expense executor: `watcher.py`, called as `ExecStartPost` by the central router service
+- Enrichment resolution: `expense-enrichment-resolution.timer`
+- Canonical runtime state: `~/.openclaw/runtime/inbound-watch-router/state.json`
+- Retired legacy units/state: archived under `pi-services/expense-intake-watcher/backups/`; no compatibility state writer remains.
 - Canonical expense outcome: `~/.openclaw/workspace/seer-expenses.md`
 - Source proof: `~/.openclaw/workspace/memory/monitored-items-state.json`
 - Finance ledger: `~/pi-services/seer-finance/transactions.json`
@@ -68,10 +67,10 @@ Run after an authorised change or incident:
 
 ```bash
 cd ~/openclaw/pi-services/expense-intake-watcher
-python3 -m unittest -v test_watcher.py test_expense_outcomes.py
+python3 -m unittest -v test_watcher.py test_expense_outcomes.py test_enrichment_queue.py test_finance_handoff.py test_enrichment_resolution.py
 python3 test_watcher_state.py
-systemctl --user start expense-intake-watcher.service
-systemctl --user show expense-intake-watcher.service -p Result -p ExecMainStatus
+systemctl --user start openclaw-mirror-router.service
+systemctl --user show openclaw-mirror-router.service -p Result -p ExecMainStatus
 ```
 
 Do not enable/disable timers, delete state, insert finance-ledger rows or remove
