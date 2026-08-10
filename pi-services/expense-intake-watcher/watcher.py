@@ -5,12 +5,18 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
+FINANCE_CODE_ROOT = Path('/home/tomdean88/pi-services/seer-finance')
+if str(FINANCE_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(FINANCE_CODE_ROOT))
+
+from seer_finance.ledger.expense_capture_adapter import capture_candidate
 from enrichment_queue import enqueue
 from expense_outcomes import build_outcome
 
@@ -618,6 +624,43 @@ def pretty_date(iso_date: str) -> str:
     return datetime.fromisoformat(iso_date).strftime('%-d %b %Y')
 
 
+def normalise_mirror_timestamp(raw: object, *, now: datetime | None = None) -> tuple[str, str | None, str]:
+    """Return a safe operational timestamp while retaining malformed source time.
+
+    Mirror timestamps are evidence, not trusted control data. A parse failure or
+    time more than five minutes in the future is recorded as raw evidence and
+    replaced by current observation time so it cannot poison queue ordering.
+    """
+    current = now or datetime.now(timezone.utc)
+    current = current.astimezone(timezone.utc)
+    fallback = current.isoformat().replace('+00:00', 'Z')
+    raw_text = str(raw or '').strip()
+    if not raw_text:
+        return fallback, None, 'missing'
+    try:
+        parsed = datetime.fromisoformat(raw_text.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.astimezone(timezone.utc)
+    except ValueError:
+        return fallback, raw_text, 'invalid'
+    if parsed > current + timedelta(minutes=5):
+        return fallback, raw_text, 'invalid_future'
+    return parsed.isoformat().replace('+00:00', 'Z'), raw_text, 'valid'
+
+
+def has_transactional_expense_evidence(surface: str, subject: str, reasons: object) -> bool:
+    """Reject bare expense-system prose while preserving plausible expense evidence."""
+    if surface != 'telegram_inbound':
+        return True
+    text = f"{subject}\n{' '.join(str(item) for item in (reasons or []))}".lower()
+    return bool(re.search(
+        r'[$£€]\s*\d|\b(receipt|invoice|order|charged|charge|payment|paid|purchase|purchased|'
+        r'renewal|renewed|subscription|refund|reimbursement|debit|credit card|card ending|bank statement)\b',
+        text,
+    ))
+
+
 def extract_amounts(text: str) -> tuple[str | None, str | None]:
     total = None
     subtotal = None
@@ -1032,6 +1075,23 @@ def whatsapp_monitored_payload(entry: WhatsAppEntry, closure_state: str, blocker
     }
 
 
+def capture_sqlite_candidate(*, source_surface: str, source_ref: str, source_timestamp: str | None = None,
+                             supplier: str | None = None, evidence_ref: str | None = None) -> None:
+    """Mirror every plausible candidate into SQLite without changing legacy truth yet."""
+    facts = {
+        'source_timestamp': source_timestamp,
+        'supplier': supplier,
+        'evidence_ref': evidence_ref,
+        'evidence_state': 'retained' if evidence_ref else 'source_visible',
+    }
+    try:
+        result = capture_candidate(source_surface=source_surface, source_ref=source_ref, facts=facts)
+        log(f'sqlite capture {result.outcome} source_ref={source_ref} expense_id={result.expense_id or ""} blocker={result.blocker or ""}')
+    except Exception as exc:
+        # Legacy capture still runs; the adapter itself normally preserves a replay item.
+        log(f'sqlite capture boundary failed source_ref={source_ref} error={type(exc).__name__}:{exc}')
+
+
 def mark_state(state: dict[str, Any], key: str, route: str, status: str, detail: str | None = None) -> None:
     state.setdefault('item_states', {})[key] = {
         'route': route,
@@ -1259,6 +1319,8 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
         return
 
     summary['expense_candidates'] += 1
+    capture_sqlite_candidate(source_surface=f'email:{entry.account}:{entry.section}', source_ref=key,
+                             source_timestamp=entry.date_str, supplier=entry.party, evidence_ref=f'{entry.mailbox_path}:{entry.message_id}')
     advance_item_lifecycle(state, key, 'email', 'routed', 'Expense workflow selected')
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
 
@@ -1336,6 +1398,8 @@ def process_whatsapp_entry(state: dict[str, Any], entry: WhatsAppEntry, summary:
         return
 
     summary['expense_candidates'] += 1
+    capture_sqlite_candidate(source_surface='whatsapp_recent', source_ref=key,
+                             source_timestamp=entry.timestamp, supplier=entry.contact, evidence_ref='WHATSAPP_RECENT.md')
     advance_item_lifecycle(state, key, 'whatsapp', 'routed', 'Expense workflow selected')
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
 
@@ -1395,7 +1459,52 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
         subject = str(event.get('subject_or_location') or 'Expense signal')
         source_ref = str(event.get('raw_evidence_ref') or event.get('proof_source') or 'mirror-events.json')
         source_id = str(event.get('source_id') or stable)
+        reasons = event.get('reasons') or []
+        safe_source_timestamp, raw_source_timestamp, timestamp_status = normalise_mirror_timestamp(
+            event.get('source_timestamp')
+        )
+        if not has_transactional_expense_evidence(surface, subject, reasons):
+            reason = 'central EXPENSE flag had no transactional evidence; retained as not-needed mirror evidence'
+            outcome = build_outcome(
+                source_id=source_id,
+                source_surface=surface,
+                expense_outcome='not_needed',
+                canonical_ref=None,
+                ledger_state='not_required',
+                evidence_state='not_required',
+                candidate_reason=reason,
+                observed_at=safe_source_timestamp,
+            )
+            upsert_monitored(key, {
+                'id': key,
+                'surface': surface,
+                'entity': 'Mirror intake',
+                'thread_key': str(event.get('thread_key') or source_id),
+                'source_timestamp': safe_source_timestamp,
+                'raw_source_timestamp': raw_source_timestamp,
+                'source_timestamp_status': timestamp_status,
+                'seen_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+                'management_relevance': 'not_needed',
+                'flags': ['EXPENSE'],
+                'mode': 'watch',
+                'closure_state': 'not_needed',
+                'expense_outcome': outcome.expense_outcome,
+                'canonical_ref': None,
+                'ledger_state': outcome.ledger_state,
+                'evidence_state': outcome.evidence_state,
+                'blocker': None,
+                'candidate_reason': reason,
+                'evidence_refs': [source_ref],
+                'resolved_at': safe_source_timestamp,
+                'processed_at': safe_source_timestamp,
+                'closed_at': safe_source_timestamp,
+            })
+            advance_item_lifecycle(state, key, 'mirror_expense', 'not_needed', reason)
+            summary['mirror_not_needed'] = summary.get('mirror_not_needed', 0) + 1
+            continue
         canonical_ref = f'seer-expenses.md#pending:{source_id}'
+        capture_sqlite_candidate(source_surface=surface, source_ref=source_id, source_timestamp=safe_source_timestamp,
+                                 supplier=subject, evidence_ref=source_ref)
         blocker = 'mirror evidence requires expense enrichment before ledger/evidence completion'
         outcome = build_outcome(
             source_id=source_id,
@@ -1405,7 +1514,7 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             ledger_state='pending',
             evidence_state='blocked',
             blocker=blocker,
-            candidate_reason='; '.join(str(x) for x in (event.get('reasons') or [])[:3]) or 'central router expense classification',
+            candidate_reason='; '.join(str(x) for x in reasons[:3]) or 'central router expense classification',
         )
         # Preserve the candidate in the independent queue *before* attempting
         # the human-readable canonical row. A malformed/unwritable expense file
@@ -1416,14 +1525,17 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             source_surface=surface,
             canonical_ref=canonical_ref,
             blocker=blocker,
-            observed_at=str(event.get('source_timestamp') or '') or None,
+            observed_at=safe_source_timestamp,
+            raw_source_timestamp=raw_source_timestamp,
+            source_timestamp_status=timestamp_status,
         )
         text = load_expense_text()
         if canonical_ref not in text:
             row = (
-                f"| {pretty_date(extract_date(str(event.get('source_timestamp') or '')))} | {subject[:120]} | "
+                f"| {pretty_date(extract_date(safe_source_timestamp))} | {subject[:120]} | "
                 f"Mirror intake | TBC | Pending expense signal. Source ID: `{source_id}`. "
-                f"Surface: {surface}. Evidence: {source_ref}. Blocker: {blocker} |"
+                f"Surface: {surface}. Evidence: {source_ref}. Blocker: {blocker}. "
+                f"Timestamp status: {timestamp_status}; raw source timestamp retained: `{raw_source_timestamp or ''}` |"
             )
             inserted = insert_expense_row(row)
             if not inserted and source_id not in load_expense_text():
@@ -1435,7 +1547,9 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             'surface': surface,
             'entity': 'Mirror intake',
             'thread_key': str(event.get('thread_key') or source_id),
-            'source_timestamp': event.get('source_timestamp'),
+            'source_timestamp': safe_source_timestamp,
+            'raw_source_timestamp': raw_source_timestamp,
+            'source_timestamp_status': timestamp_status,
             'seen_at': now_iso,
             'management_relevance': 'needs_management',
             'flags': ['EXPENSE'],

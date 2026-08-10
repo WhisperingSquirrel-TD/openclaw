@@ -20,6 +20,20 @@ class EnrichmentQueueTests(unittest.TestCase):
             self.assertEqual(item["state"], "needs_enrichment")
             self.assertEqual(item["required_facts"], ["amount_pence", "category", "payment_settlement", "evidence_state"])
 
+    def test_preserves_invalid_raw_timestamp_but_uses_safe_observation_time(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            queue = Path(tmp) / "queue.json"
+            self.assertTrue(enqueue(
+                queue, source_id="telegram:bad-time", source_surface="telegram_inbound",
+                canonical_ref="seer-expenses.md#pending:telegram:bad-time", blocker="invalid timestamp",
+                observed_at="2026-08-10T16:00:00Z", raw_source_timestamp="+058577-08-15T00:40:00.000Z",
+                source_timestamp_status="invalid_future",
+            ))
+            item = json.loads(queue.read_text(encoding="utf-8"))["items"][0]
+            self.assertEqual("2026-08-10T16:00:00Z", item["observed_at"])
+            self.assertEqual("+058577-08-15T00:40:00.000Z", item["raw_source_timestamp"])
+            self.assertEqual("invalid_future", item["source_timestamp_status"])
+
     def test_rejects_incomplete_identity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):

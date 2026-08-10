@@ -105,6 +105,42 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
 
 
+class MirrorTimestampAndTelegramGuardTests(unittest.TestCase):
+    def test_malformed_future_timestamp_is_retained_but_cannot_be_operational_time(self) -> None:
+        observed, raw, status = WATCHER.normalise_mirror_timestamp(
+            "+058577-08-15T00:40:00.000Z",
+            now=WATCHER.datetime(2026, 8, 10, 16, 0, tzinfo=WATCHER.timezone.utc),
+        )
+        self.assertEqual("2026-08-10T16:00:00Z", observed)
+        self.assertEqual("+058577-08-15T00:40:00.000Z", raw)
+        self.assertEqual("invalid", status)
+
+    def test_telegram_system_prose_is_not_queued_as_an_expense(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events, expenses, monitored, queue = (root / "events.json", root / "expenses.md", root / "monitored.json", root / "queue.json")
+            events.write_text(json.dumps({"items": [{
+                "stable_item_key": "telegram:30215", "source_id": "telegram:30215", "surface": "telegram_inbound",
+                "source_timestamp": "+058577-08-15T00:40:00.000Z",
+                "subject_or_location": "Are expense monitoring systems fully up and running?",
+                "raw_evidence_ref": "telegram:30215", "routing_flags": ["EXPENSE"],
+                "reasons": ["expense keyword"],
+            }]}), encoding="utf-8")
+            expenses.write_text("# Expenses\n\n## Domains\n", encoding="utf-8")
+            old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
+            try:
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
+                state, summary = WATCHER.default_state(), {}
+                WATCHER.process_mirror_expense_events(state, summary)
+                self.assertFalse(queue.exists())
+                item = json.loads(monitored.read_text(encoding="utf-8"))["items"][0]
+                self.assertEqual("not_needed", item["expense_outcome"])
+                self.assertEqual("invalid", item["source_timestamp_status"])
+                self.assertEqual("+058577-08-15T00:40:00.000Z", item["raw_source_timestamp"])
+            finally:
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
+
+
 class RuntimeStatePruningTests(unittest.TestCase):
     def test_prunes_stale_runtime_keys_and_bounds_history(self) -> None:
         state = {

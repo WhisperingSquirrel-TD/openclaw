@@ -32,7 +32,9 @@ def _write_atomic(path: Path, value: Any) -> None:
 
 
 def enqueue(queue_path: Path, *, source_id: str, source_surface: str,
-            canonical_ref: str, blocker: str, observed_at: str | None = None) -> bool:
+            canonical_ref: str, blocker: str, observed_at: str | None = None,
+            raw_source_timestamp: str | None = None,
+            source_timestamp_status: str = "valid") -> bool:
     """Add one unresolved candidate once; return False for a replay."""
     if not all((source_id, source_surface, canonical_ref, blocker)):
         raise ValueError("source_id, source_surface, canonical_ref and blocker are required")
@@ -53,6 +55,8 @@ def enqueue(queue_path: Path, *, source_id: str, source_surface: str,
         "required_facts": list(REQUIRED_FACTS),
         "blocker": blocker,
         "observed_at": observed_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "raw_source_timestamp": raw_source_timestamp,
+        "source_timestamp_status": source_timestamp_status,
     })
     raw["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     _write_atomic(queue_path, raw)
