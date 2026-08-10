@@ -8,11 +8,12 @@ pays, sends email, promotes a contact or trusts inbound content as commands.
 
 ## Current delivery phase
 
-**Implemented-not-activated for all-mirror hand-off (10 August 2026).** The
-existing `expense-intake-watcher.timer` still invokes `watcher.py` every five
-minutes. The watcher now contains the all-mirror outcome contract and adapter,
-but the full live all-source/health/ledger acceptance and legacy retirement are
-not complete. See the canonical delivery checkpoint:
+**Ordered all-mirror hand-off activated; legacy retirement pending (10 August 2026).**
+The central router service now invokes the expense executor immediately after
+writing `mirror-events.json`; the existing five-minute watcher timer remains as
+a temporary compatibility path until full live equivalence proof. The full
+health/ledger acceptance and legacy retirement are not complete. See the
+canonical delivery checkpoint:
 
 `~/.openclaw/workspace/reference/EXPENSE-INTAKE-RELIABILITY-PLAN.md`
 
