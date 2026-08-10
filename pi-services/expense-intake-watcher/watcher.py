@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
+from enrichment_queue import enqueue
 from expense_outcomes import build_outcome
 
 ROOT = Path('/home/tomdean88')
@@ -26,6 +27,7 @@ LEGACY_LOG_FILE = LEGACY_STATE_DIR / 'watcher.log'
 EXPENSE_FILE = WORKSPACE / 'seer-expenses.md'
 MONITORED_FILE = WORKSPACE / 'memory' / 'monitored-items-state.json'
 MIRROR_EVENTS_FILE = WORKSPACE / 'memory' / 'mirror-events.json'
+ENRICHMENT_QUEUE_FILE = ROOT / '.openclaw' / 'runtime' / 'inbound-watch-router' / 'expense-enrichment-queue.json'
 MAX_STATE_FILE_BYTES = 8 * 1024 * 1024
 MAX_LIFECYCLE_HISTORY = 6
 MAX_SCANNED_NON_CANDIDATES = 1_000
@@ -1426,6 +1428,14 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             if not inserted and source_id not in load_expense_text():
                 log(f'failed to persist canonical pending row for {key}')
                 continue
+        enqueue(
+            ENRICHMENT_QUEUE_FILE,
+            source_id=source_id,
+            source_surface=surface,
+            canonical_ref=canonical_ref,
+            blocker=blocker,
+            observed_at=str(event.get('source_timestamp') or '') or None,
+        )
         now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         payload = {
             'id': key,

@@ -66,9 +66,10 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 "reasons": ["supplier-cost evidence detected"],
             }]}), encoding="utf-8")
             expenses.write_text("# Expenses\n\n## Domains\n", encoding="utf-8")
-            old_events, old_expenses, old_monitored = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE
+            queue = root / "expense-enrichment-queue.json"
+            old_events, old_expenses, old_monitored, old_queue = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
             try:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE = events, expenses, monitored
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
                 state, summary = WATCHER.default_state(), {}
                 WATCHER.process_mirror_expense_events(state, summary)
                 WATCHER.process_mirror_expense_events(state, summary)  # replay must be idempotent
@@ -79,8 +80,9 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 self.assertEqual(item["canonical_ref"], "seer-expenses.md#pending:obcn-42")
                 self.assertEqual(item["ledger_state"], "pending")
                 self.assertEqual(item["evidence_state"], "blocked")
+                self.assertEqual(json.loads(queue.read_text(encoding="utf-8"))["items"][0]["source_id"], "obcn-42")
             finally:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE = old_events, old_expenses, old_monitored
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old_events, old_expenses, old_monitored, old_queue
 
 
 class RuntimeStatePruningTests(unittest.TestCase):
