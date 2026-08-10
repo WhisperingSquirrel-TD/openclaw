@@ -1417,6 +1417,17 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             blocker=blocker,
             candidate_reason='; '.join(str(x) for x in (event.get('reasons') or [])[:3]) or 'central router expense classification',
         )
+        # Preserve the candidate in the independent queue *before* attempting
+        # the human-readable canonical row. A malformed/unwritable expense file
+        # must raise a visible persistence failure, never make the source vanish.
+        enqueue(
+            ENRICHMENT_QUEUE_FILE,
+            source_id=source_id,
+            source_surface=surface,
+            canonical_ref=canonical_ref,
+            blocker=blocker,
+            observed_at=str(event.get('source_timestamp') or '') or None,
+        )
         text = load_expense_text()
         if canonical_ref not in text:
             row = (
@@ -1428,14 +1439,6 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             if not inserted and source_id not in load_expense_text():
                 log(f'failed to persist canonical pending row for {key}')
                 continue
-        enqueue(
-            ENRICHMENT_QUEUE_FILE,
-            source_id=source_id,
-            source_surface=surface,
-            canonical_ref=canonical_ref,
-            blocker=blocker,
-            observed_at=str(event.get('source_timestamp') or '') or None,
-        )
         now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         payload = {
             'id': key,
