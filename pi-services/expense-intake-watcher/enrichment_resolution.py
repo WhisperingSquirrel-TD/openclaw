@@ -49,6 +49,12 @@ def resolve_ready_items(queue_path: Path, database_path: Path) -> dict[str,int]:
         transaction=enrichment.get('transaction')
         if not isinstance(transaction,dict) or transaction.get('source_ref')!=item.get('source_id'):
           item['state']='blocked'; item['blocker']='transaction must be complete and source_ref must exactly match queued source_id'; result['blocked']+=1; continue
+        # An explicitly non-expense transaction is retained as accounting
+        # evidence in the source-linked queue, but must never create, advance
+        # or post an expense record. Its eventual finance-ledger treatment is
+        # a separate Tide-led accounting reconciliation decision.
+        if transaction.get('direction') != 'expense':
+          item['state']='accounting_only'; item['ledger_state']='not_expense'; item['blocker']=f"explicit transaction direction {transaction.get('direction')!r}; excluded from expense workflow"; result['waiting']+=1; continue
         try:
           if repository is None:
             repository=ExpenseRepository(database_path)
