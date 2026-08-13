@@ -68,14 +68,28 @@ ANTHROPIC_API_URL   = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_BATCH_URL = "https://api.anthropic.com/v1/messages/batches"
 ANTHROPIC_MODEL     = "claude-haiku-4-5"
 
-# SharePoint CRM root paths to search for entities
-CRM_ACCOUNTS_PREFIX      = "Stackstone CRM/Accounts"
-CRM_OPPORTUNITIES_PREFIX = "Stackstone CRM/Opportunities"
+# Approved SharePoint roots. Housekeeping may discover and organise only these
+# business roots. The meeting-output root is an intake surface, never a generic
+# entity folder: it must resolve to exactly one owner before a move is permitted.
+CRM_ACCOUNTS_PREFIX      = "Accounts"
+CRM_OPPORTUNITIES_PREFIX = "Opportunities"
+CRM_PARTNERSHIPS_PREFIX  = "Partnerships"
+CRM_PROSPECTS_PREFIX     = "Prospects"
+MEETING_OUTPUTS_PREFIX   = "Meeting Agent Outputs"
 
-# Protected SharePoint areas that housekeeping must never reorganise.
-# These are recovery/storage paths, not normal CRM content.
+ENTITY_ROOTS = {
+    CRM_ACCOUNTS_PREFIX: "account",
+    CRM_OPPORTUNITIES_PREFIX: "opportunity",
+    CRM_PARTNERSHIPS_PREFIX: "partnership",
+    CRM_PROSPECTS_PREFIX: "prospect",
+}
+APPROVED_HOUSEKEEPING_ROOTS = frozenset((*ENTITY_ROOTS, MEETING_OUTPUTS_PREFIX))
+
+# These names are never valid targets for this worker, even if a model emits a
+# superficially plausible path. This is a runtime invariant, not prompt advice.
 PROTECTED_PREFIXES = [
     "OpenClaw Backups",
+    "skills",
 ]
 
 # Batch expiry — drop batches older than this (Anthropic expires after 24h)
@@ -187,16 +201,30 @@ def _parse_entity_key(sp_path: str) -> tuple[str, str] | None:
         if p == protected or p.startswith(protected + "/"):
             return None
 
-    for prefix, etype in [
-        (CRM_ACCOUNTS_PREFIX,      "account"),
-        (CRM_OPPORTUNITIES_PREFIX, "opportunity"),
-    ]:
+    for prefix, etype in ENTITY_ROOTS.items():
         if p.startswith(prefix + "/"):
             remainder = p[len(prefix) + 1:]
             parts = remainder.split("/", 1)
             if parts[0]:
                 return etype, parts[0]
     return None
+
+
+def _normalise_sp_path(path: str) -> str:
+    return path.strip().lstrip("/")
+
+
+def _is_approved_housekeeping_path(path: str) -> bool:
+    """Guard the worker's write boundary independently of model output."""
+    clean = _normalise_sp_path(path)
+    if not clean or ".." in Path(clean).parts:
+        return False
+    root = clean.split("/", 1)[0]
+    return root in APPROVED_HOUSEKEEPING_ROOTS
+
+
+def _is_meeting_output_path(path: str) -> bool:
+    return _normalise_sp_path(path).startswith(MEETING_OUTPUTS_PREFIX + "/")
 
 
 def discover_entities(scope: str) -> list[dict]:
@@ -241,13 +269,20 @@ def discover_entities(scope: str) -> list[dict]:
             filtered.append({"name": ename, "type": etype, "files": sorted(files)})
         elif scope_lower == "opportunities" and etype == "opportunity":
             filtered.append({"name": ename, "type": etype, "files": sorted(files)})
+        elif scope_lower == "partnerships" and etype == "partnership":
+            filtered.append({"name": ename, "type": etype, "files": sorted(files)})
+        elif scope_lower == "prospects" and etype == "prospect":
+            filtered.append({"name": ename, "type": etype, "files": sorted(files)})
         elif scope_lower.startswith("entity:"):
             target = scope[7:].strip()
             if ename.lower() == target.lower():
                 filtered.append({"name": ename, "type": etype, "files": sorted(files)})
 
-    # Sort: accounts first, then opportunities, alphabetically within each group
-    filtered.sort(key=lambda e: (0 if e["type"] == "account" else 1, e["name"].lower()))
+    # Accounts first, then opportunities, partnerships and prospects. The
+    # landing-zone is deliberately excluded: it is handled by the protected
+    # meeting-output intake route, never treated as an entity to reorganise.
+    order = {"account": 0, "opportunity": 1, "partnership": 2, "prospect": 3}
+    filtered.sort(key=lambda e: (order.get(e["type"], 99), e["name"].lower()))
     log(f"Discovered {len(filtered)} entities (scope: {scope})")
     return filtered
 
@@ -428,11 +463,13 @@ def _load_system_prompt() -> str:
 def _build_entity_prompt(entity: dict, content: dict) -> str:
     name = entity["name"]
     etype = entity["type"]
-    entity_root = (
-        f"/Stackstone CRM/Accounts/{name}"
-        if etype == "account"
-        else f"/Stackstone CRM/Opportunities/{name}"
-    )
+    root_by_type = {
+        "account": CRM_ACCOUNTS_PREFIX,
+        "opportunity": CRM_OPPORTUNITIES_PREFIX,
+        "partnership": CRM_PARTNERSHIPS_PREFIX,
+        "prospect": CRM_PROSPECTS_PREFIX,
+    }
+    entity_root = f"/{root_by_type[etype]}/{name}"
 
     parts = [
         f"Entity: {name}",
@@ -676,6 +713,16 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
         path   = change.get("path", "")
         if not path:
             continue
+        if not _is_approved_housekeeping_path(path):
+            decision["blocked"].append({
+                "reason": f"Rejected non-approved housekeeping path: {path}"
+            })
+            continue
+        if _is_meeting_output_path(path):
+            decision["blocked"].append({
+                "reason": "Meeting Agent Outputs is intake-only; resolve one owning entity before filing."
+            })
+            continue
 
         if action == "recreate":
             # SharePoint has no rename/delete. We create the new canonical file.
@@ -730,6 +777,11 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
                 decision["ambiguous"].append({
                     "file": path,
                     "reason": "Move requested but no destination provided — skipped",
+                })
+                continue
+            if not _is_approved_housekeeping_path(destination) or _is_meeting_output_path(destination):
+                decision["blocked"].append({
+                    "reason": f"Rejected move destination outside canonical entity roots: {destination}"
                 })
                 continue
             entry_id = f"sp-hk-{entity['name'][:8].replace(' ', '')}-{len(queue)+1}-{int(time.time())}"
@@ -1130,7 +1182,7 @@ def main() -> None:
                    choices=["execute", "dry-run"],
                    help="execute: queue safe changes; dry-run: propose only (default: execute)")
     p.add_argument("--scope", default="all",
-                   help="all | accounts | opportunities | entity:<name>  (default: all)")
+                   help="all | accounts | opportunities | partnerships | prospects | entity:<name>  (default: all)")
     p.add_argument("--sync",  action="store_true",
                    help="Process immediately via sync API (no batch, instant results)")
     args = p.parse_args()

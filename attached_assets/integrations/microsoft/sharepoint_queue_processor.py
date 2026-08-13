@@ -71,6 +71,23 @@ MOVE_OPERATIONS          = {"move"}           # relocate/rename, no delete permi
 FOLDER_DELETE_OPERATIONS = {"delete_folder"}  # empty folders only — files never deleted
 READ_OPERATIONS          = {"read_binary"}    # on-demand binary extraction
 
+# OpenClaw skill assets are governed separately by the versioned skill-library
+# publisher. The generic SharePoint queue must never create, update, move or
+# delete them, even if an upstream worker is compromised or misconfigured.
+PROTECTED_ROOTS = frozenset({"skills"})
+
+
+def _queue_path_allowed(path: str) -> tuple[bool, str]:
+    clean = str(path or "").strip().lstrip("/")
+    if not clean:
+        return False, "Missing path"
+    parts = Path(clean).parts
+    if not parts or ".." in parts:
+        return False, "Unsafe SharePoint path"
+    if parts[0].lower() in PROTECTED_ROOTS:
+        return False, "Protected SharePoint root 'skills' is managed only by the versioned skill publisher"
+    return True, ""
+
 # Binary extractor — same directory as this script
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))
@@ -512,6 +529,21 @@ def main() -> None:
                 log(f"Processing [{op_id}] {op_name.upper()} {path}")
 
                 op_lower = op_name.lower()
+                allowed, rejection = _queue_path_allowed(path)
+                if op_lower == "move":
+                    dest_allowed, dest_rejection = _queue_path_allowed(op.get("destination", ""))
+                    if not dest_allowed:
+                        allowed, rejection = False, f"Unsafe move destination: {dest_rejection}"
+                if not allowed:
+                    log(f"  REJECTED: {rejection}")
+                    rejected.append(op_id)
+                    results.append({
+                        "id": op_id, "operation": op_name, "path": path,
+                        "success": False, "output": rejection,
+                        "requested_at": op.get("requested_at", ""),
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    continue
 
                 if op_lower in READ_OPERATIONS:
                     success, output = _run_read_binary_operation(op)
