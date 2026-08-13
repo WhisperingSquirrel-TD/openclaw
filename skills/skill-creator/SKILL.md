@@ -442,6 +442,19 @@ Minimum questions to answer while writing the skill:
 If the skill handles high-integrity operational outputs, the fail-closed mechanism must be explicit in the skill instructions.
 If the skill will encounter materially ambiguous routing/update decisions, the clarification trigger for asking Tom must also be explicit.
 
+## SharePoint shared-library sync gate (MANDATORY)
+
+Every new or materially updated OpenClaw skill must complete the `skill-update` sync workflow before it is called complete.
+
+1. Before applying the creation/restructure workflow, run `skills/skill-update`'s version-gated inbound SharePoint pull synchroniser. Resolve any conflict/error before using or changing a local skill.
+2. Apply the creation/restructure workflow above and validate the resulting skill.
+3. Use `skill-update` to compare against the schema-2 canonical SharePoint release manifest, fail closed on concurrent change, equal-version mismatch or version regression, overwrite that existing folder in place, increment only that skill's manifest version by exactly one, and verify every changed file plus the release manifest by SHA-256.
+4. Update `SYSTEM_MAP.md` routing where needed, then record the verified release/sync outcome.
+5. Rely on SharePoint native version history for rollback. Do not create timestamped snapshots, per-skill manifests, a `versions/` tree, or parallel skill folders.
+6. If the SharePoint publish, manifest release increment, or verification fails, say **created/updated locally; SharePoint sync incomplete**. Do not describe the skill as complete or distributable.
+
+This gate applies to all bundled files, not just `SKILL.md`. Do not publish secrets, credentials, environment files, or runtime tokens.
+
 ### Step 6: Iterate
 
 After testing the skill, users may request improvements. Often this happens right after using the skill, with fresh context of how the skill performed.
