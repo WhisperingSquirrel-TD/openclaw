@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mimetypes
 import re
 import subprocess
 import sys
@@ -17,7 +18,8 @@ FINANCE_CODE_ROOT = Path('/home/tomdean88/pi-services/seer-finance')
 if str(FINANCE_CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(FINANCE_CODE_ROOT))
 
-from seer_finance.ledger.expense_capture_adapter import capture_candidate
+from seer_finance.ledger.expense_capture_adapter import capture_candidate, DEFAULT_DATABASE, DEFAULT_REPLAY
+from seer_finance.ledger.expense_repository import ExpenseRepository
 from enrichment_queue import enqueue
 from expense_outcomes import build_outcome
 
@@ -31,6 +33,9 @@ EXPENSE_FILE = WORKSPACE / 'seer-expenses.md'
 MONITORED_FILE = WORKSPACE / 'memory' / 'monitored-items-state.json'
 MIRROR_EVENTS_FILE = WORKSPACE / 'memory' / 'mirror-events.json'
 ENRICHMENT_QUEUE_FILE = ROOT / '.openclaw' / 'runtime' / 'inbound-watch-router' / 'expense-enrichment-queue.json'
+SHAREPOINT_QUEUE_FILE = ROOT / '.openclaw' / 'sharepoint-queue.json'
+SHAREPOINT_RESULTS_FILE = ROOT / '.openclaw' / 'sharepoint-queue-results.json'
+RECEIPT_SHAREPOINT_ROOT = '/Stackstone Finance/Expenses/Receipts'
 MAX_STATE_FILE_BYTES = 8 * 1024 * 1024
 MAX_LIFECYCLE_HISTORY = 6
 MAX_SCANNED_NON_CANDIDATES = 1_000
@@ -1531,6 +1536,121 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
         summary['mirror_blocked'] = summary.get('mirror_blocked', 0) + 1
 
 
+def _receipt_file_from_facts(facts: dict[str, Any]) -> Path | None:
+    value = facts.get('receipt_path') or facts.get('receipt_local_path')
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = Path(value)
+    return path if path.is_file() else None
+
+
+def _receipt_upload_id(source_ref: str, sha256: str) -> str:
+    return 'receipt-upload-' + hashlib.sha256(f'{source_ref}|{sha256}'.encode()).hexdigest()[:32]
+
+
+def _read_sharepoint_delivery_results() -> dict[str, dict[str, Any]]:
+    raw = load_json(SHAREPOINT_RESULTS_FILE, [])
+    if not isinstance(raw, list):
+        return {}
+    return {str(item.get('id')): item for item in raw if isinstance(item, dict) and item.get('id')}
+
+
+def _enqueue_receipt_upload(*, upload_id: str, source_ref: str, local_path: Path,
+                            sha256: str, mime_type: str) -> str:
+    safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', local_path.name).strip('._') or 'receipt.bin'
+    sp_path = f'{RECEIPT_SHAREPOINT_ROOT}/{sha256}-{safe_name}'
+    queue = load_json(SHAREPOINT_QUEUE_FILE, [])
+    queue = queue if isinstance(queue, list) else []
+    if not any(isinstance(item, dict) and item.get('id') == upload_id for item in queue):
+        queue.append({
+            'id': upload_id, 'operation': 'upload_binary', 'path': sp_path,
+            'source_path': str(local_path), 'mime_type': mime_type,
+            'requested_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'delivery': {'kind': 'expense_receipt', 'source_ref': source_ref, 'sha256': sha256},
+        })
+        save_json(SHAREPOINT_QUEUE_FILE, queue)
+    return sp_path
+
+
+def process_expense_sqlite_replay(summary: dict[str, int], *, replay_path: Path = DEFAULT_REPLAY,
+                                  database: Path = DEFAULT_DATABASE) -> list[dict[str, Any]]:
+    """Advance durable SQLite replay records through capture and receipt proof.
+
+    It is intentionally queue-driven: no privileged tool/TOTP is invoked at
+    runtime.  A success is only returned after SQLite and immutable local plus
+    SharePoint evidence are present; every other state remains replayable.
+    """
+    manifest = load_json(replay_path, {'items': []})
+    items = manifest.get('items', []) if isinstance(manifest, dict) else []
+    if not isinstance(items, list):
+        log('expense replay manifest malformed; preserving it unchanged')
+        return [{'state': 'blocked', 'blocker': 'replay_manifest_malformed'}]
+    deliveries = _read_sharepoint_delivery_results()
+    remaining: list[dict[str, Any]] = []
+    states: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            remaining.append(item)
+            continue
+        source_ref = str(item.get('source_ref') or '').strip()
+        source_surface = str(item.get('source_surface') or '').strip()
+        facts = item.get('facts') if isinstance(item.get('facts'), dict) else {}
+        if not source_ref or not source_surface:
+            remaining.append(item)
+            states.append({'state': 'blocked', 'source_ref': source_ref or None, 'blocker': 'replay_item_missing_source'})
+            continue
+        captured = capture_candidate(source_surface=source_surface, source_ref=source_ref,
+                                     facts=facts, database=database, replay_path=replay_path)
+        if captured.outcome != 'captured':
+            remaining.append(item)
+            states.append({'state': 'blocked', 'source_ref': source_ref, 'blocker': captured.blocker})
+            continue
+        receipt = _receipt_file_from_facts(facts)
+        if receipt is None:
+            remaining.append(item)
+            states.append({'state': 'blocked', 'source_ref': source_ref, 'expense_id': captured.expense_id,
+                           'blocker': 'original_receipt_binary_unavailable'})
+            continue
+        digest = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        mime_type = str(facts.get('receipt_mime_type') or mimetypes.guess_type(receipt.name)[0] or 'application/octet-stream')
+        repository = ExpenseRepository(database)
+        try:
+            repository.record_receipt_evidence(source_ref=source_ref, evidence_kind='local_receipt_binary',
+                                               local_path=str(receipt), sha256=digest,
+                                               source_timestamp=str(facts.get('source_timestamp') or '') or None)
+            upload_id = _receipt_upload_id(source_ref, digest)
+            sp_path = _enqueue_receipt_upload(upload_id=upload_id, source_ref=source_ref,
+                                              local_path=receipt, sha256=digest, mime_type=mime_type)
+            delivery = deliveries.get(upload_id)
+            if not delivery or not delivery.get('success'):
+                remaining.append(item)
+                states.append({'state': 'blocked', 'source_ref': source_ref, 'expense_id': captured.expense_id,
+                               'blocker': 'sharepoint_upload_pending', 'queue_id': upload_id})
+                continue
+            try:
+                proof = json.loads(str(delivery.get('output') or ''))
+            except json.JSONDecodeError:
+                proof = {}
+            if not proof.get('url') or not proof.get('etag'):
+                remaining.append(item)
+                states.append({'state': 'blocked', 'source_ref': source_ref, 'expense_id': captured.expense_id,
+                               'blocker': 'sharepoint_upload_missing_proof', 'queue_id': upload_id})
+                continue
+            repository.record_receipt_evidence(source_ref=source_ref, evidence_kind='sharepoint_receipt_binary',
+                                               sha256=digest, sharepoint_path=sp_path,
+                                               sharepoint_url=str(proof['url']), sharepoint_etag=str(proof['etag']),
+                                               source_timestamp=str(facts.get('source_timestamp') or '') or None)
+            summary['replay_delivered'] = summary.get('replay_delivered', 0) + 1
+            states.append({'state': 'success', 'source_ref': source_ref, 'expense_id': captured.expense_id,
+                           'sharepoint_url': proof['url'], 'sharepoint_etag': proof['etag']})
+        finally:
+            repository.close()
+    manifest['items'] = remaining
+    manifest['updated_at'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    save_json(replay_path, manifest)
+    return states
+
+
 def main() -> None:
     state = load_state()
     summary = {
@@ -1561,6 +1681,8 @@ def main() -> None:
         process_whatsapp_entry(state, entry, summary)
     process_whatsapp_threads(state, whatsapp_entries, summary)
     process_mirror_expense_events(state, summary)
+    replay_states = process_expense_sqlite_replay(summary)
+    summary['replay_blocked'] = sum(1 for result in replay_states if result.get('state') == 'blocked')
 
     state['last_run'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     public_summary = {k: v for k, v in summary.items() if not k.startswith('_')}
