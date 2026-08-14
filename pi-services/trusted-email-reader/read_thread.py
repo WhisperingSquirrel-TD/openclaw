@@ -2,6 +2,8 @@
 """Read one exact, trusted Microsoft Graph conversation without mailbox search."""
 import argparse
 import json
+import re
+from html import unescape
 import sys
 from pathlib import Path
 from urllib.parse import quote
@@ -49,13 +51,26 @@ def graph_get(url, access, params=None):
 def authored_body(content):
     """Keep the authored portion; Outlook repeats quoted history in every body."""
     text = str(content or '')
-    cut_markers = (
-        '<div id="divRplyFwdMsg"',
-        '<div id="ms-outlook-mobile-body-separator-line"',
+    # Outlook/Graph can prefix HTML ids with x_ and vary attribute ordering, so
+    # the previous literal markers missed quoted history. The first reply
+    # separator is a deterministic message boundary; retain all authored HTML
+    # before it and never truncate silently.
+    patterns = (
+        r'<div\b[^>]*\bid=["\'](?:x_)?divRplyFwdMsg["\'][^>]*>',
+        r'<div\b[^>]*\bid=["\'](?:x_)?ms-outlook-mobile-body-separator-line["\'][^>]*>',
+        r'<hr\b[^>]*>',
     )
-    cuts = [text.find(marker) for marker in cut_markers if text.find(marker) >= 0]
+    cuts = [match.start() for pattern in patterns for match in [re.search(pattern, text, re.IGNORECASE)] if match]
     if cuts:
         text = text[:min(cuts)]
+    # Composition needs the authored facts, not Outlook's CSS/signature markup.
+    # Convert the bounded authored HTML to stable plain text before enforcing
+    # per-message byte limits downstream.
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</(?:div|p|tr|li|h[1-6])\s*>', '\n', text, flags=re.IGNORECASE)
+    text = unescape(re.sub(r'<[^>]+>', '', text))
+    text = re.sub(r'\n[ \t]*\n+', '\n\n', text)
+    text = re.sub(r'[ \t]+', ' ', text)
     return text.strip()
 
 
@@ -109,16 +124,20 @@ def main():
     messages.sort(key=lambda message: message.get('received') or '')
     if len(messages) > MAX_MESSAGES:
         raise RuntimeError(f'Exact conversation exceeds the bounded {MAX_MESSAGES}-message limit')
-    unknown = sorted({message['sender'] for message in messages if message['sender'] not in approved})
-    if unknown:
-        raise RuntimeError(f'Conversation contains sender(s) outside the approved contact set: {", ".join(unknown)}')
+    # The exact anchor must be from an approved sender, but a legitimate
+    # conversation may also include a vendor/support participant (for example
+    # a client replying in a thread with the vendor copied).  Do not reject the
+    # whole exact, bounded conversation for that reason: return the participant
+    # classification so downstream composition continues to treat it as
+    # untrusted source data, never as authority or an instruction.
+    external_participants = sorted({message['sender'] for message in messages if message['sender'] and message['sender'] not in approved})
 
     total_bytes = sum(len(json.dumps(message, ensure_ascii=False).encode('utf-8')) for message in messages)
     if total_bytes > MAX_BYTES:
         raise RuntimeError(f'Exact conversation exceeds the bounded {MAX_BYTES}-byte limit')
     if not messages:
         raise RuntimeError('Exact trusted email conversation returned no messages')
-    print(json.dumps({'success': True, 'conversation_id': conversation_id, 'message_count': len(messages), 'messages': messages}, ensure_ascii=False))
+    print(json.dumps({'success': True, 'conversation_id': conversation_id, 'message_count': len(messages), 'external_participants': external_participants, 'messages': messages}, ensure_ascii=False))
     return 0
 
 
