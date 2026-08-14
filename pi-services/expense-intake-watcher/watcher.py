@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -379,10 +380,15 @@ def load_json(path: Path, default: Any) -> Any:
 
 
 def save_json(path: Path, payload: Any) -> None:
+    """Atomically write shared state without a fixed-temp-file race between workers."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + '.tmp')
-    tmp.write_text(json.dumps(payload, indent=2), encoding='utf-8')
-    tmp.replace(path)
+    with tempfile.NamedTemporaryFile(
+        mode='w', encoding='utf-8', dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp', delete=False
+    ) as handle:
+        json.dump(payload, handle, indent=2)
+        handle.flush()
+        handle_name = handle.name
+    Path(handle_name).replace(path)
 
 
 def default_state() -> dict[str, Any]:
@@ -751,15 +757,13 @@ def row_exists(expense_md: str, refs: dict[str, str | None], subject: str) -> bo
 
 
 def insert_expense_row(row: str) -> bool:
-    text = load_expense_text()
-    if row in text:
-        return False
-    marker = '\n## Domains\n'
-    if marker not in text:
-        log('Could not find Domains marker in expense file')
-        return False
-    EXPENSE_FILE.write_text(text.replace(marker, row + '\n\n## Domains\n', 1), encoding='utf-8')
-    return True
+    """Legacy compatibility stub: the Markdown ledger is a read-only archive.
+
+    A live candidate must use SQLite capture or its durable replay fallback;
+    a Markdown write is never a valid capture outcome.
+    """
+    log('legacy seer-expenses.md write suppressed; SQLite capture is mandatory')
+    return False
 
 
 def ensure_pending_email_row(entry: MailEntry, blocker: str, refs: dict[str, str | None] | None = None) -> bool:
@@ -1076,20 +1080,22 @@ def whatsapp_monitored_payload(entry: WhatsAppEntry, closure_state: str, blocker
 
 
 def capture_sqlite_candidate(*, source_surface: str, source_ref: str, source_timestamp: str | None = None,
-                             supplier: str | None = None, evidence_ref: str | None = None) -> None:
-    """Mirror every plausible candidate into SQLite without changing legacy truth yet."""
+                             supplier: str | None = None, evidence_ref: str | None = None):
+    """Capture once and return the real SQLite-or-replay outcome to every caller.
+
+    Callers must never label a candidate as captured merely because this boundary
+    was invoked: `captured` requires an expense ID; `replayed` is a blocked,
+    durable fallback which the autonomous runtime must retry without TOTP.
+    """
     facts = {
         'source_timestamp': source_timestamp,
         'supplier': supplier,
         'evidence_ref': evidence_ref,
         'evidence_state': 'retained' if evidence_ref else 'source_visible',
     }
-    try:
-        result = capture_candidate(source_surface=source_surface, source_ref=source_ref, facts=facts)
-        log(f'sqlite capture {result.outcome} source_ref={source_ref} expense_id={result.expense_id or ""} blocker={result.blocker or ""}')
-    except Exception as exc:
-        # Legacy capture still runs; the adapter itself normally preserves a replay item.
-        log(f'sqlite capture boundary failed source_ref={source_ref} error={type(exc).__name__}:{exc}')
+    result = capture_candidate(source_surface=source_surface, source_ref=source_ref, facts=facts)
+    log(f'sqlite capture {result.outcome} source_ref={source_ref} expense_id={result.expense_id or ""} blocker={result.blocker or ""}')
+    return result
 
 
 def mark_state(state: dict[str, Any], key: str, route: str, status: str, detail: str | None = None) -> None:
@@ -1212,7 +1218,9 @@ def prune_whatsapp_artifacts(entries: list[WhatsAppEntry]) -> None:
             continue
         filtered_lines.append(line)
     if expense_changed:
-        EXPENSE_FILE.write_text('\n'.join(filtered_lines) + '\n', encoding='utf-8')
+        # seer-expenses.md is retained read-only evidence after SQLite cutover.
+        # Never fail the live watcher by attempting legacy archival cleanup.
+        log('legacy seer-expenses.md cleanup suppressed; archive is read-only')
 
 
 def process_whatsapp_threads(state: dict[str, Any], entries: list[WhatsAppEntry], summary: dict[str, int]) -> None:
@@ -1319,12 +1327,16 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
         return
 
     summary['expense_candidates'] += 1
-    capture_sqlite_candidate(source_surface=f'email:{entry.account}:{entry.section}', source_ref=key,
-                             source_timestamp=entry.date_str, supplier=entry.party, evidence_ref=f'{entry.mailbox_path}:{entry.message_id}')
-    advance_item_lifecycle(state, key, 'email', 'routed', 'Expense workflow selected')
+    capture = capture_sqlite_candidate(source_surface=f'email:{entry.account}:{entry.section}', source_ref=key,
+                                       source_timestamp=entry.date_str, supplier=entry.party, evidence_ref=f'{entry.mailbox_path}:{entry.message_id}')
+    if capture.outcome == 'captured':
+        routed_detail = f'Captured in SQLite expense_id={capture.expense_id}'
+        blocker = 'Captured in SQLite; explicit review/enrichment is required before finance posting'
+    else:
+        routed_detail = 'SQLite capture failed; durable replay preserved'
+        blocker = f'Durable SQLite replay pending autonomous retry: {capture.blocker}'
+    advance_item_lifecycle(state, key, 'email', 'routed', routed_detail)
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
-
-    blocker = 'Captured in SQLite; explicit review/enrichment is required before finance posting'
     advance_item_lifecycle(state, key, 'email', 'blocked', blocker)
     upsert_monitored(key, lifecycle_payload(base_payload, 'blocked', blocker))
     summary['pending'] += 1
@@ -1373,12 +1385,16 @@ def process_whatsapp_entry(state: dict[str, Any], entry: WhatsAppEntry, summary:
         return
 
     summary['expense_candidates'] += 1
-    capture_sqlite_candidate(source_surface='whatsapp_recent', source_ref=key,
-                             source_timestamp=entry.timestamp, supplier=entry.contact, evidence_ref='WHATSAPP_RECENT.md')
-    advance_item_lifecycle(state, key, 'whatsapp', 'routed', 'Expense workflow selected')
+    capture = capture_sqlite_candidate(source_surface='whatsapp_recent', source_ref=key,
+                                       source_timestamp=entry.timestamp, supplier=entry.contact, evidence_ref='WHATSAPP_RECENT.md')
+    if capture.outcome == 'captured':
+        routed_detail = f'Captured in SQLite expense_id={capture.expense_id}'
+        blocker = 'Captured in SQLite; WhatsApp expense signal needs explicit business/payment/evidence review before finance posting'
+    else:
+        routed_detail = 'SQLite capture failed; durable replay preserved'
+        blocker = f'Durable SQLite replay pending autonomous retry: {capture.blocker}'
+    advance_item_lifecycle(state, key, 'whatsapp', 'routed', routed_detail)
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
-
-    blocker = 'Captured in SQLite; WhatsApp expense signal needs explicit business/payment/evidence review before finance posting'
     advance_item_lifecycle(state, key, 'whatsapp', 'blocked', blocker)
     upsert_monitored(key, lifecycle_payload(base_payload, 'blocked', blocker))
     summary['pending'] += 1
@@ -1468,10 +1484,14 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             advance_item_lifecycle(state, key, 'mirror_expense', 'not_needed', reason)
             summary['mirror_not_needed'] = summary.get('mirror_not_needed', 0) + 1
             continue
-        canonical_ref = f'sqlite:pending:{source_id}'
-        capture_sqlite_candidate(source_surface=surface, source_ref=source_id, source_timestamp=safe_source_timestamp,
-                                 supplier=subject, evidence_ref=source_ref)
-        blocker = 'mirror evidence requires expense enrichment before ledger/evidence completion'
+        capture = capture_sqlite_candidate(source_surface=surface, source_ref=source_id, source_timestamp=safe_source_timestamp,
+                                           supplier=subject, evidence_ref=source_ref)
+        if capture.outcome == 'captured':
+            canonical_ref = f'sqlite:{capture.expense_id}'
+            blocker = 'SQLite capture requires expense enrichment before ledger/evidence completion'
+        else:
+            canonical_ref = f'sqlite-replay:{source_id}'
+            blocker = f'Durable SQLite replay pending autonomous retry: {capture.blocker}'
         outcome = build_outcome(
             source_id=source_id,
             source_surface=surface,
