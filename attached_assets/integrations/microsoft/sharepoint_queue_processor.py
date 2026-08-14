@@ -67,6 +67,7 @@ SP_SCRIPT   = STATE_DIR / "integrations/microsoft-l1/sharepoint.py"
 LOG_MAX     = 500
 
 WRITE_OPERATIONS         = {"create", "update", "append"}
+SKILL_RELEASE_OPERATIONS = {"publish_skill"}  # audited in-place canonical skill publisher
 MOVE_OPERATIONS          = {"move"}           # relocate/rename, no delete permission
 FOLDER_DELETE_OPERATIONS = {"delete_folder"}  # empty folders only — files never deleted
 READ_OPERATIONS          = {"read_binary"}    # on-demand binary extraction
@@ -75,6 +76,8 @@ READ_OPERATIONS          = {"read_binary"}    # on-demand binary extraction
 # publisher. The generic SharePoint queue must never create, update, move or
 # delete them, even if an upstream worker is compromised or misconfigured.
 PROTECTED_ROOTS = frozenset({"skills"})
+SKILL_PUBLISHER = WORKSPACE / "scripts/publish_skill_release_to_sharepoint.py"
+SKILL_ID_ALLOWLIST = frozenset({"workspace-skills", "openclaw-skills"})
 
 
 def _queue_path_allowed(path: str) -> tuple[bool, str]:
@@ -85,7 +88,7 @@ def _queue_path_allowed(path: str) -> tuple[bool, str]:
     if not parts or ".." in parts:
         return False, "Unsafe SharePoint path"
     if parts[0].lower() in PROTECTED_ROOTS:
-        return False, "Protected SharePoint root 'skills' is managed only by the versioned skill publisher"
+        return False, "Protected SharePoint root 'skills' is managed only by the guarded publish_skill operation"
     return True, ""
 
 # Binary extractor — same directory as this script
@@ -409,6 +412,38 @@ def _run_move_operation(op: dict) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
+# Execute a guarded canonical skill publish operation
+# ---------------------------------------------------------------------------
+
+def _run_skill_publish_operation(op: dict) -> tuple[bool, str]:
+    """Publish one existing canonical skill in place via the no-TOTP queue.
+
+    The publisher verifies the manifest/hash baseline before overwrite and
+    re-reads hashes/eTags afterwards. It never creates another skill folder.
+    """
+    skill_id = str(op.get("skill_id", "")).strip()
+    summary = str(op.get("summary", "")).strip()
+    source, sep, name = skill_id.partition(":")
+    if not sep or source not in SKILL_ID_ALLOWLIST or not name or "/" in name or ".." in name:
+        return False, "publish_skill requires allowlisted skill_id '<source>:<skill-name>'"
+    if not summary:
+        return False, "publish_skill requires a non-empty change summary"
+    if not SKILL_PUBLISHER.exists():
+        return False, f"Skill publisher not found at {SKILL_PUBLISHER}"
+    try:
+        result = subprocess.run(
+            ["python3", str(SKILL_PUBLISHER), skill_id, "--summary", summary],
+            capture_output=True, text=True, timeout=180,
+        )
+        output = (result.stdout + result.stderr).strip()
+        return result.returncode == 0, output
+    except subprocess.TimeoutExpired:
+        return False, "Timed out after 180 seconds"
+    except Exception as exc:
+        return False, str(exc)
+
+
+# ---------------------------------------------------------------------------
 # Execute a single SharePoint write operation
 # ---------------------------------------------------------------------------
 
@@ -529,7 +564,12 @@ def main() -> None:
                 log(f"Processing [{op_id}] {op_name.upper()} {path}")
 
                 op_lower = op_name.lower()
-                allowed, rejection = _queue_path_allowed(path)
+                # Skills remain protected from generic paths; only the guarded
+                # publish_skill operation can use the canonical skill publisher.
+                if op_lower in SKILL_RELEASE_OPERATIONS:
+                    allowed, rejection = True, ""
+                else:
+                    allowed, rejection = _queue_path_allowed(path)
                 if op_lower == "move":
                     dest_allowed, dest_rejection = _queue_path_allowed(op.get("destination", ""))
                     if not dest_allowed:
@@ -545,7 +585,9 @@ def main() -> None:
                     })
                     continue
 
-                if op_lower in READ_OPERATIONS:
+                if op_lower in SKILL_RELEASE_OPERATIONS:
+                    success, output = _run_skill_publish_operation(op)
+                elif op_lower in READ_OPERATIONS:
                     success, output = _run_read_binary_operation(op)
                 elif op_lower in WRITE_OPERATIONS:
                     success, output = _run_write_operation(op)
@@ -557,6 +599,7 @@ def main() -> None:
                     msg = (
                         f"Unknown operation '{op_name}'. "
                         f"Write operations: {', '.join(sorted(WRITE_OPERATIONS))}. "
+                        f"Skill publish: {', '.join(sorted(SKILL_RELEASE_OPERATIONS))}. "
                         f"Move operations: {', '.join(sorted(MOVE_OPERATIONS))}. "
                         f"Folder delete: {', '.join(sorted(FOLDER_DELETE_OPERATIONS))}. "
                         f"Read operations: {', '.join(sorted(READ_OPERATIONS))}. "
