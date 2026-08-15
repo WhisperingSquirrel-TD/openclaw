@@ -61,6 +61,7 @@ STATE_DIR   = Path.home() / ".openclaw"
 WORKSPACE   = STATE_DIR / "workspace"
 QUEUE_FILE  = STATE_DIR / "sharepoint-queue.json"
 RESULT_MD   = WORKSPACE / "SHAREPOINT_RESULT.md"
+RESULT_JSON = STATE_DIR / "sharepoint-queue-results.json"
 LOCK_FILE   = STATE_DIR / "integrations/microsoft/sp-queue.lock"
 LOG_FILE    = STATE_DIR / "integrations/microsoft/sp-queue-processor.log"
 SP_SCRIPT   = STATE_DIR / "integrations/microsoft-l1/sharepoint.py"
@@ -71,6 +72,7 @@ SKILL_RELEASE_OPERATIONS = {"publish_skill"}  # audited in-place canonical skill
 MOVE_OPERATIONS          = {"move"}           # relocate/rename, no delete permission
 FOLDER_DELETE_OPERATIONS = {"delete_folder"}  # empty folders only — files never deleted
 READ_OPERATIONS          = {"read_binary"}    # on-demand binary extraction
+BINARY_UPLOAD_OPERATIONS = {"upload_binary"}  # receipt originals, MIME preserved
 
 # OpenClaw skill assets are governed separately by the versioned skill-library
 # publisher. The generic SharePoint queue must never create, update, move or
@@ -444,6 +446,33 @@ def _run_skill_publish_operation(op: dict) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
+# Execute immutable binary uploads (used by the receipt evidence chain)
+# ---------------------------------------------------------------------------
+
+def _run_binary_upload_operation(op: dict) -> tuple[bool, str]:
+    sp_path = str(op.get("path", "")).strip()
+    source_path = Path(str(op.get("source_path", "")).strip())
+    mime_type = str(op.get("mime_type", "")).strip()
+    if not sp_path or not source_path or not mime_type:
+        return False, "upload_binary requires path, source_path and mime_type"
+    if not source_path.is_file():
+        return False, f"Original binary unavailable: {source_path}"
+    if not SP_SCRIPT.exists():
+        return False, f"sharepoint.py not found at {SP_SCRIPT}"
+    try:
+        result = subprocess.run(
+            ["python3", str(SP_SCRIPT), "upload", sp_path, "--content-file", str(source_path), "--mime-type", mime_type],
+            capture_output=True, text=True, timeout=90,
+        )
+        output = (result.stdout + result.stderr).strip()
+        return result.returncode == 0, output
+    except subprocess.TimeoutExpired:
+        return False, "Timed out after 90 seconds"
+    except Exception as exc:
+        return False, str(exc)
+
+
+# ---------------------------------------------------------------------------
 # Execute a single SharePoint write operation
 # ---------------------------------------------------------------------------
 
@@ -541,6 +570,24 @@ def _write_results(results: list[dict]) -> None:
     RESULT_MD.write_text("\n".join(lines))
 
 
+def _write_results_json(results: list[dict]) -> None:
+    """Persist bounded machine-readable delivery proof for asynchronous consumers."""
+    prior: list[dict] = []
+    try:
+        loaded = json.loads(RESULT_JSON.read_text())
+        prior = loaded if isinstance(loaded, list) else []
+    except (OSError, json.JSONDecodeError):
+        pass
+    # Last result per queue ID is sufficient for idempotent receipt replay.
+    merged = {str(item.get("id")): item for item in prior if isinstance(item, dict) and item.get("id")}
+    for item in results:
+        merged[str(item.get("id"))] = item
+    bounded = sorted(merged.values(), key=lambda item: str(item.get("processed_at", "")))[-1000:]
+    tmp = RESULT_JSON.with_suffix(".tmp")
+    tmp.write_text(json.dumps(bounded, indent=2, sort_keys=True))
+    tmp.replace(RESULT_JSON)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -589,6 +636,8 @@ def main() -> None:
                     success, output = _run_skill_publish_operation(op)
                 elif op_lower in READ_OPERATIONS:
                     success, output = _run_read_binary_operation(op)
+                elif op_lower in BINARY_UPLOAD_OPERATIONS:
+                    success, output = _run_binary_upload_operation(op)
                 elif op_lower in WRITE_OPERATIONS:
                     success, output = _run_write_operation(op)
                 elif op_lower in MOVE_OPERATIONS:
@@ -627,10 +676,16 @@ def main() -> None:
                     "output":       output,
                     "requested_at": op.get("requested_at", ""),
                     "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "delivery":     op.get("delivery"),
                 })
 
-            _clear_queue()
+            # Failed binary receipts stay durable in the queue; they are never
+            # silently dropped while a replay item still needs evidence proof.
+            retryable = [op for op in queue if op.get("operation", "").lower() in BINARY_UPLOAD_OPERATIONS
+                         and not any(r.get("id") == op.get("id") and r.get("success") for r in results)]
+            _write_queue(retryable)
             _write_results(results)
+            _write_results_json(results)
             ok_count   = sum(1 for r in results if r["success"])
             fail_count = len(results) - ok_count
             log(f"Done — {ok_count} succeeded, {fail_count} failed. Results in SHAREPOINT_RESULT.md")

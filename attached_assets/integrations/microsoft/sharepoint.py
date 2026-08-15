@@ -10,6 +10,7 @@ COMMANDS
   sharepoint.py create <sp-file-path> --content-file /tmp/oc-sp-content.txt
   sharepoint.py update <sp-file-path> --content-file /tmp/oc-sp-content.txt
   sharepoint.py append <sp-file-path> --content-file /tmp/oc-sp-content.txt
+  sharepoint.py upload <sp-file-path> --content-file /path/to/original-binary --mime-type image/jpeg
   sharepoint.py move          <sp-source-path> --destination <sp-destination-path>
   sharepoint.py delete_folder <sp-folder-path>   # only succeeds if folder is empty
 
@@ -122,7 +123,7 @@ def parse_args() -> argparse.Namespace:
         description="OpenClaw SharePoint document manager (assistant@ identity)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("command", choices=["list", "read", "create", "update", "append", "move", "delete_folder", "reauth"],
+    p.add_argument("command", choices=["list", "read", "create", "update", "append", "upload", "move", "delete_folder", "reauth"],
                    help="Operation to perform")
     p.add_argument("path", nargs="?", default="",
                    help="SharePoint path, e.g. /Stackstone CRM/Opportunities/Harken Health.md")
@@ -130,6 +131,8 @@ def parse_args() -> argparse.Namespace:
                    help="Path to temp file containing content (required for create/update/append)")
     p.add_argument("--allow-overwrite", action="store_true",
                    help="For create: overwrite if file already exists (default: fail)")
+    p.add_argument("--mime-type", default=None,
+                   help="For upload: original binary MIME type (required)")
     p.add_argument("--destination", default=None,
                    help="Destination SharePoint path (required for move)")
     p.add_argument("--account", default="assistant",
@@ -571,6 +574,44 @@ def cmd_create(access_token: str, sp_path: str, site_id: str, drive_id: str,
     print(f"  URL:     {item.get('webUrl', '(unavailable)')}")
 
 
+def cmd_upload(access_token: str, sp_path: str, site_id: str, drive_id: str,
+               content_file: str, mime_type: str) -> None:
+    """Upload an original receipt binary and emit machine-readable proof.
+
+    Existing content is never overwritten: callers derive a content-addressed
+    filename and a retry treats Graph's conflict as a harmless blocked state.
+    """
+    sp_path = _normalise_path(sp_path)
+    if not mime_type or "/" not in mime_type or "\n" in mime_type:
+        print("ERROR: --mime-type must be a valid MIME type", file=sys.stderr)
+        sys.exit(3)
+    content = _read_content_file(content_file)
+    existing = requests.get(_drive_item_url(site_id, drive_id, sp_path), headers=_headers(access_token), timeout=15)
+    if existing.status_code == 200:
+        item = existing.json()
+        print(json.dumps({"status": "exists", "path": sp_path, "url": item.get("webUrl"),
+                          "etag": item.get("eTag"), "size": item.get("size"),
+                          "mime_type": mime_type}, sort_keys=True), flush=True)
+        return
+    if existing.status_code not in (404,):
+        print(f"ERROR: Upload existence check failed ({existing.status_code}): {existing.text[:300]}", file=sys.stderr)
+        sys.exit(2)
+    response = requests.put(
+        _drive_item_url(site_id, drive_id, sp_path) + ":/content",
+        headers={**_headers(access_token), "Content-Type": mime_type},
+        data=content, timeout=60,
+    )
+    if not response.ok:
+        print(f"ERROR: Upload failed ({response.status_code}): {response.text[:300]}", file=sys.stderr)
+        sys.exit(2)
+    item = response.json()
+    print(json.dumps({
+        "status": "uploaded", "path": sp_path, "url": item.get("webUrl"),
+        "etag": item.get("eTag"), "size": item.get("size", len(content)),
+        "mime_type": mime_type,
+    }, sort_keys=True), flush=True)
+
+
 def cmd_update(access_token: str, sp_path: str, site_id: str, drive_id: str,
                content_file: str) -> None:
     sp_path = _normalise_path(sp_path)
@@ -789,12 +830,16 @@ def main() -> None:
         print("ERROR: A SharePoint path is required for this command.", file=sys.stderr)
         sys.exit(3)
 
-    if args.command in ("create", "update", "append") and not args.content_file:
+    if args.command in ("create", "update", "append", "upload") and not args.content_file:
         print(
             f"ERROR: --content-file is required for '{args.command}'.\n"
             "Write your content to /tmp/oc-sp-content.txt first, then pass --content-file /tmp/oc-sp-content.txt",
             file=sys.stderr,
         )
+        sys.exit(3)
+
+    if args.command == "upload" and not args.mime_type:
+        print("ERROR: --mime-type is required for 'upload'.", file=sys.stderr)
         sys.exit(3)
 
     if args.command == "move" and not args.destination:
@@ -816,6 +861,8 @@ def main() -> None:
     elif args.command == "create":
         cmd_create(access_token, sp_path, site_id, drive_id,
                    args.content_file, args.allow_overwrite)
+    elif args.command == "upload":
+        cmd_upload(access_token, sp_path, site_id, drive_id, args.content_file, args.mime_type)
     elif args.command == "update":
         cmd_update(access_token, sp_path, site_id, drive_id, args.content_file)
     elif args.command == "append":
