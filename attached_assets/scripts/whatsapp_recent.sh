@@ -3,6 +3,7 @@ set -euo pipefail
 
 WORKSPACE="$HOME/.openclaw/workspace"
 RECENT_MD="$WORKSPACE/WHATSAPP_RECENT.md"
+WINDOW_JSON="$WORKSPACE/memory/whatsapp-recent-window.json"
 RAW_JSONL="$HOME/.openclaw/credentials/whatsapp/watch-transcripts/whatsapp-watch-default.jsonl"
 CONTACTS_MD="$WORKSPACE/contacts.md"
 HOURS=72
@@ -28,6 +29,7 @@ from pathlib import Path
 
 workspace = Path.home() / '.openclaw' / 'workspace'
 raw_jsonl = Path.home() / '.openclaw' / 'credentials' / 'whatsapp' / 'watch-transcripts' / 'whatsapp-watch-default.jsonl'
+window_json = workspace / 'memory' / 'whatsapp-recent-window.json'
 contacts_md = workspace / 'contacts.md'
 hours = 72
 max_lines = 1200
@@ -149,49 +151,61 @@ for obj, dt in objs:
             sender = 'Me'
         elif not sender or sender == '---':
             sender = normalize_number(obj.get('senderNumber')) or 'Unknown'
-        rendered.append(f'[{ts_local}] [{group}] {sender}: {body}')
+        rendered.append((f'[{ts_local}] [{group}] {sender}: {body}', dt))
     elif chat_type == 'direct':
         peer = display_name_for_direct(obj, contact_map, inferred_names_by_number)
         if obj.get('isFromMe'):
-            rendered.append(f'[{ts_local}] Tom -> {peer}: {body}')
+            rendered.append((f'[{ts_local}] Tom -> {peer}: {body}', dt))
         else:
-            rendered.append(f'[{ts_local}] {peer}: {body}')
+            rendered.append((f'[{ts_local}] {peer}: {body}', dt))
 
-direct_lines_by_peer: dict[str, list[str]] = {}
-group_lines: list[str] = []
-other_lines: list[str] = []
+direct_lines_by_peer: dict[str, list[tuple[str, datetime]]] = {}
+group_lines: list[tuple[str, datetime]] = []
+other_lines: list[tuple[str, datetime]] = []
 
-for line in rendered:
+for line, dt in rendered:
+    entry = (line, dt)
     m = re.match(r'^\[(.*?)\] Tom -> (.*?): ', line)
     if m:
         peer = m.group(2).strip()
-        direct_lines_by_peer.setdefault(peer, []).append(line)
+        direct_lines_by_peer.setdefault(peer, []).append(entry)
         continue
     m = re.match(r'^\[(.*?)\] (.*?): ', line)
     if m and not line.startswith('[' + m.group(1) + '] ['):
         peer = m.group(2).strip()
-        direct_lines_by_peer.setdefault(peer, []).append(line)
+        direct_lines_by_peer.setdefault(peer, []).append(entry)
         continue
     if re.match(r'^\[.*?\] \[.*?\] ', line):
-        group_lines.append(line)
+        group_lines.append(entry)
     else:
-        other_lines.append(line)
+        other_lines.append(entry)
 
-selected_direct: list[str] = []
+selected_direct: list[tuple[str, datetime]] = []
 for peer_lines in direct_lines_by_peer.values():
     selected_direct.extend(peer_lines[-direct_thread_recent_lines:])
 
 selected_direct_set = set(selected_direct)
 selected_groups = group_lines[-group_max_lines:]
-selected_others = [line for line in other_lines if line not in selected_direct_set]
-merged = selected_others + selected_groups + selected_direct
-merged = merged[-max_lines:]
+selected_others = [entry for entry in other_lines if entry not in selected_direct_set]
+merged = (selected_others + selected_groups + selected_direct)[-max_lines:]
 
-def line_ts(line: str):
-    m = re.match(r'^\[(.*?)\]', line)
-    return m.group(1) if m else ''
-
-lines = sorted(dict.fromkeys(merged), key=line_ts)
+# A compact sidecar makes the retained source window explicit. Monitoring may
+# only advance a clean event cursor when its prior cursor falls inside this window.
+unique: dict[str, datetime] = {}
+for line, dt in merged:
+    unique.setdefault(line, dt)
+retained = sorted(unique.items(), key=lambda pair: pair[1])
+lines = [line for line, _ in retained]
+window_json.parent.mkdir(parents=True, exist_ok=True)
+window_json.write_text(json.dumps({
+    'schema_version': 1,
+    'generated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+    'earliest_retained_source_timestamp': retained[0][1].astimezone(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z') if retained else None,
+    'latest_retained_source_timestamp': retained[-1][1].astimezone(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z') if retained else None,
+    'retained_message_count': len(retained),
+    'source_message_count': len(objs),
+    'truncated': len(retained) < len(rendered),
+}, indent=2) + '\n')
 updated = datetime.now().strftime('%Y-%m-%d %H:%M')
 print(f'# WhatsApp Recent (last {hours}h)')
 print(f'_Updated: {updated} — showing last {hours} hours (max {max_lines} lines, with direct-thread preservation). Source: structured WhatsApp transcript stream; legacy full log: WHATSAPP_LOG.md_')
