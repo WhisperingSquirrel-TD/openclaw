@@ -57,7 +57,7 @@ similar string appears in `seer-expenses.md`.
 - Enrichment resolution: `expense-enrichment-resolution.timer`
 - Canonical runtime state: `~/.openclaw/runtime/inbound-watch-router/state.json`
 - Retired legacy units/state: archived under `pi-services/expense-intake-watcher/backups/`; no compatibility state writer remains.
-- Canonical expense outcome: `~/.openclaw/workspace/seer-expenses.md`
+- Canonical expense outcome: `/home/tomdean88/pi-services/seer-finance/data/expense-ledger.sqlite3`
 - Source proof: `~/.openclaw/workspace/memory/monitored-items-state.json`
 - Finance ledger: `~/pi-services/seer-finance/transactions.json`
 
