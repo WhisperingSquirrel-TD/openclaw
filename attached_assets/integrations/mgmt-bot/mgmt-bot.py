@@ -717,6 +717,75 @@ def cmd_reboot(token: str, chat_id: str) -> None:
     subprocess.run(["sudo", "reboot"])
 
 
+def _sync_git_checkout_to_upstream(
+    git_dir: Path, recovery_prefix: str
+) -> tuple[bool, str, str]:
+    """Make the current checkout match its upstream without losing local commits.
+
+    GitHub is authoritative for deployment checkouts. When history diverges,
+    preserve the local HEAD on a timestamped recovery branch before resetting
+    the current branch to its fetched upstream. This avoids conflict markers in
+    the symlinked management-bot source while keeping every local commit
+    recoverable.
+    """
+
+    def run_git(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(git_dir), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+    upstream_result = run_git(
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]
+    )
+    upstream = upstream_result.stdout.strip()
+    if upstream_result.returncode != 0 or "/" not in upstream:
+        output = (upstream_result.stdout + upstream_result.stderr).strip()
+        return False, output or "Current branch has no configured upstream.", ""
+
+    remote = upstream.split("/", 1)[0]
+    fetch = run_git(["fetch", "--prune", remote], timeout=180)
+    if fetch.returncode != 0:
+        return False, (fetch.stdout + fetch.stderr).strip(), ""
+
+    counts = run_git(["rev-list", "--left-right", "--count", f"HEAD...{upstream}"])
+    try:
+        ahead, behind = (int(part) for part in counts.stdout.split())
+    except (TypeError, ValueError):
+        output = (counts.stdout + counts.stderr).strip()
+        return False, output or "Could not determine Git branch divergence.", ""
+
+    if ahead == 0:
+        if behind == 0:
+            return True, f"Already up to date with {upstream}.", ""
+        ff = run_git(["merge", "--ff-only", upstream])
+        return (
+            ff.returncode == 0,
+            (ff.stdout + ff.stderr).strip(),
+            "",
+        )
+
+    short_head = run_git(["rev-parse", "--short", "HEAD"]).stdout.strip() or "unknown"
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    recovery_branch = f"recovery/{recovery_prefix}-{stamp}-{short_head}"
+    preserve = run_git(["branch", recovery_branch, "HEAD"])
+    if preserve.returncode != 0:
+        return False, (preserve.stdout + preserve.stderr).strip(), ""
+
+    reset = run_git(["reset", "--hard", upstream])
+    if reset.returncode != 0:
+        return False, (reset.stdout + reset.stderr).strip(), ""
+
+    note = (
+        f"⚠️ Local Git history had {ahead} commit(s) not on {upstream}. "
+        f"They were preserved on `{recovery_branch}` before syncing to GitHub.\n"
+    )
+    output = (fetch.stdout + fetch.stderr + reset.stdout + reset.stderr).strip()
+    return True, output or f"Synced checkout to {upstream}.", note
+
+
 def cmd_pull(token: str, chat_id: str) -> None:
     git_dir = Path(_cfg("OPENCLAW_GIT_DIR", str(Path.home() / "openclaw")))
     if not git_dir.exists():
@@ -750,14 +819,15 @@ def cmd_pull(token: str, chat_id: str) -> None:
         send(token, chat_id, f"❌ Pre-pull check failed: `{e}`")
         return
 
-    r = subprocess.run(
-        ["git", "-C", str(git_dir), "pull", "--ff-only"],
-        capture_output=True, text=True, timeout=120,
-    )
-    output = (r.stdout + r.stderr).strip()[-1500:]
-    if r.returncode == 0:
+    try:
+        ok, output, recovery_note = _sync_git_checkout_to_upstream(git_dir, "pull")
+    except (subprocess.TimeoutExpired, OSError) as e:
+        send(token, chat_id, f"❌ Pull failed while running Git: `{e}`")
+        return
+    output = output[-1500:]
+    if ok:
         send(token, chat_id,
-             f"✅ Pull complete:\n{stash_note}```{output}```\n\n"
+             f"✅ Pull complete:\n{stash_note}{recovery_note}```{output}```\n\n"
              f"_Send /install to deploy the updated files._")
     else:
         send(token, chat_id, f"❌ Pull failed:\n{stash_note}```{output}```")
@@ -987,17 +1057,58 @@ def cmd_install(token: str, chat_id: str) -> None:
         "    stash_note = ('⚠️ Local changes to tracked files on the Pi were auto-stashed before pulling '\n"
         "                  'as \u201c' + label + '\u201d (recover with `git stash list` / `git stash pop`).\\n')\n"
         "    log('auto-stashed local changes: ' + label)\n"
-        "pull = subprocess.run(['git', '-C', GIT_DIR, 'pull', '--ff-only'],\n"
-        "                      capture_output=True, text=True, timeout=300)\n"
-        "pull_out = (pull.stdout + pull.stderr).strip()\n"
-        "if pull.returncode != 0:\n"
-        "    msg = ('❌ Pull failed — install aborted.\\n' + stash_note + '\\n```'\n"
+        "def git_run(args, timeout=120):\n"
+        "    return subprocess.run(['git', '-C', GIT_DIR] + args,\n"
+        "                          capture_output=True, text=True, timeout=timeout)\n"
+        "\n"
+        "upstream_r = git_run(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'])\n"
+        "upstream = upstream_r.stdout.strip()\n"
+        "if upstream_r.returncode != 0 or '/' not in upstream:\n"
+        "    pull_out = (upstream_r.stdout + upstream_r.stderr).strip() or 'Current branch has no configured upstream.'\n"
+        "    log('upstream lookup failed before install')\n"
+        "    tg('❌ Pull failed — install aborted.\\n' + stash_note + '\\n```' + pull_out[-3000:] + '```')\n"
+        "    raise SystemExit(1)\n"
+        "remote = upstream.split('/', 1)[0]\n"
+        "fetch = git_run(['fetch', '--prune', remote], timeout=300)\n"
+        "if fetch.returncode != 0:\n"
+        "    pull_out = (fetch.stdout + fetch.stderr).strip() or 'git fetch failed without output'\n"
+        "    log('git fetch failed before install')\n"
+        "    tg('❌ Pull failed — install aborted.\\n' + stash_note + '\\n```' + pull_out[-3000:] + '```')\n"
+        "    raise SystemExit(1)\n"
+        "counts = git_run(['rev-list', '--left-right', '--count', 'HEAD...' + upstream])\n"
+        "try:\n"
+        "    ahead, behind = (int(part) for part in counts.stdout.split())\n"
+        "except (TypeError, ValueError):\n"
+        "    pull_out = (counts.stdout + counts.stderr).strip() or 'Could not determine Git branch divergence.'\n"
+        "    tg('❌ Pull failed — install aborted.\\n' + stash_note + '\\n```' + pull_out[-3000:] + '```')\n"
+        "    raise SystemExit(1)\n"
+        "recovery_note = ''\n"
+        "if ahead:\n"
+        "    short_head = git_run(['rev-parse', '--short', 'HEAD']).stdout.strip() or 'unknown'\n"
+        "    recovery_branch = ('recovery/install-' + time.strftime('%Y%m%d-%H%M%S')\n"
+        "                       + '-' + short_head)\n"
+        "    preserve = git_run(['branch', recovery_branch, 'HEAD'])\n"
+        "    if preserve.returncode != 0:\n"
+        "        pull_out = (preserve.stdout + preserve.stderr).strip() or 'Could not create recovery branch.'\n"
+        "        tg('❌ Pull failed — install aborted.\\n' + stash_note + '\\n```' + pull_out[-3000:] + '```')\n"
+        "        raise SystemExit(1)\n"
+        "    sync = git_run(['reset', '--hard', upstream])\n"
+        "    recovery_note = ('⚠️ Local Git history had ' + str(ahead) + ' commit(s) not on '\n"
+        "                     + upstream + '. They were preserved on `' + recovery_branch\n"
+        "                     + '` before syncing to GitHub.\\n')\n"
+        "elif behind:\n"
+        "    sync = git_run(['merge', '--ff-only', upstream])\n"
+        "else:\n"
+        "    sync = subprocess.CompletedProcess([], 0, 'Already up to date with ' + upstream + '.', '')\n"
+        "pull_out = (sync.stdout + sync.stderr).strip()\n"
+        "if sync.returncode != 0:\n"
+        "    msg = ('❌ Pull failed — install aborted.\\n' + stash_note + recovery_note + '\\n```'\n"
         "           + (pull_out or 'no output')[-3000:] + '```')\n"
-        "    log('git pull failed before install')\n"
+        "    log('git sync failed before install')\n"
         "    tg(msg)\n"
         "    raise SystemExit(1)\n"
         "\n"
-        "log('git pull complete; running install script')\n"
+        "log('git sync complete; running install script')\n"
         "\n"
         "def svc_active(name):\n"
         "    r = subprocess.run(['systemctl', '--user', 'is-active', name],\n"
@@ -1071,9 +1182,9 @@ def cmd_install(token: str, chat_id: str) -> None:
         "gw_tag = '✅ Gateway: running' if gw_ok else '⚠️ Gateway check inconclusive — verify with /status'\n"
         "\n"
         "if res.returncode == 0:\n"
-        "    head = f'✅ Install complete.\\n{gw_tag}\\n{stash_note}\\n'\n"
+        "    head = f'✅ Install complete.\\n{gw_tag}\\n{stash_note}{recovery_note}\\n'\n"
         "else:\n"
-        "    head = f'⚠️ Install finished with errors (rc={res.returncode}).\\n{gw_tag}\\n{stash_note}\\n'\n"
+        "    head = f'⚠️ Install finished with errors (rc={res.returncode}).\\n{gw_tag}\\n{stash_note}{recovery_note}\\n'\n"
         "# Telegram returns HTTP 400 for any message over 4096 chars. That's a\n"
         "# hard length limit, not a Markdown problem, so the plain-text fallback\n"
         "# can't rescue it — we MUST trim the embedded log tail so the whole\n"
