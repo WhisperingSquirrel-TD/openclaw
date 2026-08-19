@@ -1028,7 +1028,8 @@ if [ -f "$RESET_SRC" ]; then
     mkdir -p "$(dirname "$RESET_DST")"
     ln -sf "$RESET_SRC" "$RESET_DST"
     chmod +x "$RESET_DST"
-    RESET_CRON="0 4 * * * $PYTHON3_BIN $RESET_DST >> $RESET_LOG 2>&1"
+    RESET_PYTHON="$(command -v python3 2>/dev/null || echo /usr/bin/python3)"
+    RESET_CRON="0 4 * * * $RESET_PYTHON $RESET_DST >> $RESET_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "daily-reset.py"; echo "$RESET_CRON" ) | crontab -
     info "Daily provider reset cron installed: 04:00 daily → ${OPENCLAW_CODEX56_TERRA_MODEL:-openai-codex/gpt-5.6-terra}"
 else

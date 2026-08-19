@@ -9,10 +9,9 @@ The user can switch manually via /openai or /anthropic during the day.
 Cron entry (added by install script):
   0 4 * * * /usr/bin/python3 ~/.openclaw/integrations/provider-switch/daily-reset.py
 
-Restart strategy (tried in order):
-  1. ~/l1-stop.sh && ~/l1-start.sh  — Pi-native method, always correct
-  2. systemctl --user restart        — systemd user service (with DBUS env)
-  3. sudo systemctl restart          — system-level service fallback
+Restart strategy:
+  systemctl --user restart — keeps the gateway owned and monitored by the
+  confirmed openclaw-gateway.service user unit.
 """
 
 import json
@@ -114,38 +113,12 @@ def _get_current_model(config: dict) -> str:
 
 
 def _restart_gateway() -> bool:
-    """
-    Try three restart methods in order; return True if any succeeds.
-    Primary method is l1-stop/l1-start — the Pi-native way.
-    """
-    home = Path.home()
-
-    # Method 1: l1-stop.sh + l1-start.sh  (correct method for this Pi)
-    stop  = home / "l1-stop.sh"
-    start = home / "l1-start.sh"
-    if stop.exists() and start.exists():
-        log("Restarting via l1-stop.sh + l1-start.sh…")
-        try:
-            r1 = subprocess.run(["bash", str(stop)], capture_output=True, text=True, timeout=30)
-            try:
-                r2 = subprocess.run(["bash", str(start)], capture_output=True, text=True, timeout=120)
-                if r2.returncode == 0:
-                    log("Gateway restarted successfully via l1-stop/l1-start")
-                    return True
-                log(f"WARNING: l1-stop/l1-start failed — stop rc={r1.returncode}, "
-                    f"start rc={r2.returncode}: {r2.stderr.strip()}")
-            except subprocess.TimeoutExpired:
-                log("WARNING: l1-start.sh timed out after 120s — falling through to systemctl")
-        except subprocess.TimeoutExpired:
-            log("WARNING: l1-stop.sh timed out — falling through to systemctl")
-    else:
-        log(f"WARNING: l1-stop.sh or l1-start.sh not found at {home} — skipping")
-
-    # Method 2: systemctl --user (with explicit DBUS env for cron)
+    """Restart the gateway through its systemd user service."""
     uid = os.getuid()
     env = dict(os.environ)
     env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
     env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+    log(f"Restarting via systemctl --user restart {SERVICE_NAME}…")
     r = subprocess.run(
         ["systemctl", "--user", "restart", SERVICE_NAME],
         capture_output=True, text=True, env=env, timeout=30,
@@ -153,19 +126,9 @@ def _restart_gateway() -> bool:
     if r.returncode == 0:
         log("Gateway restarted successfully via systemctl --user")
         return True
-    log(f"WARNING: systemctl --user restart failed (rc={r.returncode}): {r.stderr.strip()}")
-
-    # Method 3: sudo systemctl (system-level service)
-    r2 = subprocess.run(
-        ["sudo", "systemctl", "restart", SERVICE_NAME],
-        capture_output=True, text=True, timeout=30,
-    )
-    if r2.returncode == 0:
-        log("Gateway restarted successfully via sudo systemctl")
-        return True
-    log(f"ERROR: All restart methods failed. sudo systemctl rc={r2.returncode}: "
-        f"{r2.stderr.strip()}")
-    log("Config IS written to Codex — gateway will use Codex on next manual restart.")
+    detail = (r.stderr or r.stdout).strip()
+    log(f"ERROR: systemctl --user restart failed (rc={r.returncode}): {detail}")
+    log("Config IS written to Terra — the gateway will use it after the next successful restart.")
     return False
 
 
@@ -195,7 +158,9 @@ def main() -> None:
         log(f"Config already shows {CODEX_MODEL} — skipping write, but restarting gateway anyway")
         log("(Gateway may be running a different model if a previous restart failed)")
         _chattr("+i", CONFIG_PATH)
-        _restart_gateway()
+        if not _restart_gateway():
+            sys.exit(1)
+        log("Daily reset complete")
         return
 
     config = _set_model(config, CODEX_MODEL)
@@ -214,7 +179,8 @@ def main() -> None:
 
     _chattr("+i", CONFIG_PATH)
 
-    _restart_gateway()
+    if not _restart_gateway():
+        sys.exit(1)
 
     log("Daily reset complete")
 
