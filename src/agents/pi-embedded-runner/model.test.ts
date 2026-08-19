@@ -462,22 +462,21 @@ describe("resolveModel", () => {
     });
   });
 
-  it("builds an openai-codex fallback for gpt-5.3-codex", () => {
+  it("builds an openai-codex fallback for gpt-5.6-terra", () => {
     mockOpenAICodexTemplateModel();
 
-    const result = resolveModel("openai-codex", "gpt-5.3-codex", "/tmp/agent");
+    const result = resolveModel("openai-codex", "gpt-5.6-terra", "/tmp/agent");
 
     expect(result.error).toBeUndefined();
-    expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation("gpt-5.3-codex"));
+    expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation("gpt-5.6-terra"));
   });
 
-  it("builds an openai-codex fallback for gpt-5.4", () => {
-    mockOpenAICodexTemplateModel();
-
-    const result = resolveModel("openai-codex", "gpt-5.4", "/tmp/agent");
-
-    expect(result.error).toBeUndefined();
-    expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation("gpt-5.4"));
+  it("rejects retired openai-codex models", () => {
+    for (const id of ["gpt-5.3-codex", "gpt-5.4", "gpt-5.4-mini", "gpt-5.5"]) {
+      const result = resolveModel("openai-codex", id, "/tmp/agent");
+      expect(result.model).toBeUndefined();
+      expect(result.error).toBe(`Unknown model: openai-codex/${id}`);
+    }
   });
 
   it("applies provider overrides to openai gpt-5.4 forward-compat models", () => {
@@ -518,33 +517,18 @@ describe("resolveModel", () => {
     });
   });
 
-  it("builds an anthropic forward-compat fallback for claude-opus-4-6", () => {
-    mockDiscoveredModel({
-      provider: "anthropic",
-      modelId: "claude-opus-4-5",
-      templateModel: buildForwardCompatTemplate({
-        id: "claude-opus-4-5",
-        name: "Claude Opus 4.5",
-        provider: "anthropic",
-        api: "anthropic-messages",
-        baseUrl: "https://api.anthropic.com",
-      }),
-    });
-
-    expectResolvedForwardCompatFallback({
-      provider: "anthropic",
-      id: "claude-opus-4-6",
-      expectedModel: {
-        provider: "anthropic",
-        id: "claude-opus-4-6",
-        api: "anthropic-messages",
-        baseUrl: "https://api.anthropic.com",
-        reasoning: true,
-      },
-    });
+  it("rejects retired anthropic models", () => {
+    for (const id of [
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-6",
+      "claude-opus-4-5",
+      "claude-opus-4-6",
+    ]) {
+      expectUnknownModelError("anthropic", id);
+    }
   });
 
-  it("builds an anthropic forward-compat fallback for claude-sonnet-4-6", () => {
+  it("builds an anthropic forward-compat fallback for claude-sonnet-5", () => {
     mockDiscoveredModel({
       provider: "anthropic",
       modelId: "claude-sonnet-4-5",
@@ -559,13 +543,16 @@ describe("resolveModel", () => {
 
     expectResolvedForwardCompatFallback({
       provider: "anthropic",
-      id: "claude-sonnet-4-6",
+      id: "claude-sonnet-5",
       expectedModel: {
         provider: "anthropic",
-        id: "claude-sonnet-4-6",
+        id: "claude-sonnet-5",
         api: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         reasoning: true,
+        cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+        contextWindow: 1_000_000,
+        maxTokens: 128_000,
       },
     });
   });
@@ -611,7 +598,7 @@ describe("resolveModel", () => {
     expectUnknownModelError("openai-codex", "gpt-4.1-mini");
   });
 
-  it("uses codex fallback even when openai-codex provider is configured", () => {
+  it("uses a retained codex fallback even when openai-codex provider is configured", () => {
     // This test verifies the ordering: codex fallback must fire BEFORE the generic providerCfg fallback.
     // If ordering is wrong, the generic fallback would use api: "openai-responses" (the default)
     // instead of "openai-codex-responses".
@@ -620,7 +607,7 @@ describe("resolveModel", () => {
         providers: {
           "openai-codex": {
             baseUrl: "https://custom.example.com",
-            // No models array, or models without gpt-5.3-codex
+            // No models array, or models without gpt-5.6-terra
           },
         },
       },
@@ -628,14 +615,31 @@ describe("resolveModel", () => {
 
     expectResolvedForwardCompatFallback({
       provider: "openai-codex",
-      id: "gpt-5.3-codex",
+      id: "gpt-5.6-terra",
       cfg,
       expectedModel: {
         api: "openai-codex-responses",
-        id: "gpt-5.3-codex",
+        id: "gpt-5.6-terra",
         provider: "openai-codex",
       },
     });
+  });
+
+  it("rejects a configured retired openai-codex model", () => {
+    const cfg = {
+      models: {
+        providers: {
+          "openai-codex": {
+            baseUrl: "https://custom.example.com",
+            models: [makeModel("gpt-5.4")],
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    const result = resolveModel("openai-codex", "gpt-5.4", "/tmp/agent", cfg);
+    expect(result.model).toBeUndefined();
+    expect(result.error).toBe("Unknown model: openai-codex/gpt-5.4");
   });
 
   it("includes auth hint for unknown ollama models (#17328)", () => {
@@ -686,7 +690,7 @@ describe("resolveModel", () => {
       },
     } as unknown as OpenClawConfig;
 
-    const result = resolveModel("anthropic", "claude-sonnet-4-5", "/tmp/agent", cfg);
+    const result = resolveModel("anthropic", "claude-sonnet-5", "/tmp/agent", cfg);
     expect(result.error).toBeUndefined();
     expect(result.model?.baseUrl).toBe("https://my-proxy.example.com");
   });
@@ -694,10 +698,10 @@ describe("resolveModel", () => {
   it("applies provider headers override to registry-found models", () => {
     mockDiscoveredModel({
       provider: "anthropic",
-      modelId: "claude-sonnet-4-5",
+      modelId: "claude-sonnet-5",
       templateModel: buildForwardCompatTemplate({
-        id: "claude-sonnet-4-5",
-        name: "Claude Sonnet 4.5",
+        id: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
         provider: "anthropic",
         api: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
@@ -714,7 +718,7 @@ describe("resolveModel", () => {
       },
     } as unknown as OpenClawConfig;
 
-    const result = resolveModel("anthropic", "claude-sonnet-4-5", "/tmp/agent", cfg);
+    const result = resolveModel("anthropic", "claude-sonnet-5", "/tmp/agent", cfg);
     expect(result.error).toBeUndefined();
     expect((result.model as unknown as { headers?: Record<string, string> }).headers).toEqual({
       "X-Custom-Auth": "token-123",
@@ -724,17 +728,17 @@ describe("resolveModel", () => {
   it("does not override when no provider config exists", () => {
     mockDiscoveredModel({
       provider: "anthropic",
-      modelId: "claude-sonnet-4-5",
+      modelId: "claude-sonnet-5",
       templateModel: buildForwardCompatTemplate({
-        id: "claude-sonnet-4-5",
-        name: "Claude Sonnet 4.5",
+        id: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
         provider: "anthropic",
         api: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
       }),
     });
 
-    const result = resolveModel("anthropic", "claude-sonnet-4-5", "/tmp/agent");
+    const result = resolveModel("anthropic", "claude-sonnet-5", "/tmp/agent");
     expect(result.error).toBeUndefined();
     expect(result.model?.baseUrl).toBe("https://api.anthropic.com");
   });

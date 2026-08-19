@@ -4,6 +4,10 @@ import type { OpenClawConfig } from "../../config/config.js";
 import type { ModelDefinitionConfig } from "../../config/types.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
+import {
+  isRetainedAnthropicModelId,
+  isRetainedOpenAICodexModelId,
+} from "../model-affordability-policy.js";
 import { buildModelAliasLines } from "../model-alias-lines.js";
 import { isSecretRefHeaderValueMarker } from "../model-auth-markers.js";
 import { normalizeModelCompat } from "../model-compat.js";
@@ -141,6 +145,13 @@ export function resolveModelWithRegistry(params: {
   cfg?: OpenClawConfig;
 }): Model<Api> | undefined {
   const { provider, modelId, modelRegistry, cfg } = params;
+  const normalizedProvider = normalizeProviderId(provider);
+  if (
+    (normalizedProvider === "anthropic" && !isRetainedAnthropicModelId(modelId)) ||
+    (normalizedProvider === "openai-codex" && !isRetainedOpenAICodexModelId(modelId))
+  ) {
+    return undefined;
+  }
   const providerConfig = resolveConfiguredProviderConfig(cfg, provider);
   const model = modelRegistry.find(provider, modelId) as Model<Api> | null;
 
@@ -156,7 +167,6 @@ export function resolveModelWithRegistry(params: {
 
   const providers = cfg?.models?.providers ?? {};
   const inlineModels = buildInlineProviderModels(providers);
-  const normalizedProvider = normalizeProviderId(provider);
   const inlineMatch = inlineModels.find(
     (entry) => normalizeProviderId(entry.provider) === normalizedProvider && entry.id === modelId,
   );

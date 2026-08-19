@@ -1,6 +1,7 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_CONTEXT_TOKENS } from "./defaults.js";
+import { isRetainedOpenAICodexModelId } from "./model-affordability-policy.js";
 import { normalizeModelCompat } from "./model-compat.js";
 import { normalizeProviderId } from "./model-selection.js";
 
@@ -15,22 +16,12 @@ const OPENAI_GPT_54_PRO_TEMPLATE_MODEL_IDS = ["gpt-5.2-pro", "gpt-5.2"] as const
 // same template path as gpt-5.4 so users don't get "Unknown model" errors.
 const OPENAI_GPT_55_MODEL_ID = "gpt-5.5";
 
-// gpt-5.6 family (July 2026): tiered naming — Sol (frontier), Terra (balanced),
-// Luna (fast). IDs: gpt-5.6-sol, gpt-5.6-sol-pro, gpt-5.6-terra, gpt-5.6-luna,
-// plus the bare "gpt-5.6" alias (OpenAI routes it to Sol). Prefix-match so all
-// tiers resolve without catalog updates.
+// Retained Codex harness tiers. Keep this exact: unlisted 5.6 variants may use
+// materially more of the user's shared ChatGPT/Codex credit pool.
 const OPENAI_GPT_56_MODEL_PREFIX = "gpt-5.6";
 const OPENAI_CODEX_GPT_56_TEMPLATE_MODEL_IDS = ["gpt-5.3-codex", "gpt-5.2-codex"] as const;
 
-const OPENAI_CODEX_GPT_55_MODEL_ID = "gpt-5.5";
-const OPENAI_CODEX_GPT_55_TEMPLATE_MODEL_IDS = ["gpt-5.3-codex", "gpt-5.2-codex"] as const;
-const OPENAI_CODEX_GPT_54_MODEL_ID = "gpt-5.4";
-const OPENAI_CODEX_GPT_54_TEMPLATE_MODEL_IDS = ["gpt-5.3-codex", "gpt-5.2-codex"] as const;
-// gpt-5.4-mini is the current fast/low-cost Codex model. pi-ai 0.55.3 only ships
-// gpt-5.1-codex-mini, so clone that as the template.
-const OPENAI_CODEX_GPT_54_MINI_MODEL_ID = "gpt-5.4-mini";
-const OPENAI_CODEX_GPT_54_MINI_TEMPLATE_MODEL_IDS = ["gpt-5.1-codex-mini"] as const;
-const OPENAI_CODEX_GPT_53_MODEL_ID = "gpt-5.3-codex";
+const GITHUB_COPILOT_GPT_53_MODEL_ID = "gpt-5.3-codex";
 const OPENAI_CODEX_TEMPLATE_MODEL_IDS = ["gpt-5.2-codex"] as const;
 
 const ANTHROPIC_OPUS_46_MODEL_ID = "claude-opus-4-6";
@@ -39,6 +30,13 @@ const ANTHROPIC_OPUS_TEMPLATE_MODEL_IDS = ["claude-opus-4-5", "claude-opus-4.5"]
 const ANTHROPIC_SONNET_46_MODEL_ID = "claude-sonnet-4-6";
 const ANTHROPIC_SONNET_46_DOT_MODEL_ID = "claude-sonnet-4.6";
 const ANTHROPIC_SONNET_TEMPLATE_MODEL_IDS = ["claude-sonnet-4-5", "claude-sonnet-4.5"] as const;
+const ANTHROPIC_SONNET_5_MODEL_ID = "claude-sonnet-5";
+const ANTHROPIC_SONNET_5_TEMPLATE_MODEL_IDS = [
+  "claude-sonnet-4-6",
+  ...ANTHROPIC_SONNET_TEMPLATE_MODEL_IDS,
+] as const;
+const ANTHROPIC_SONNET_5_CONTEXT_TOKENS = 1_000_000;
+const ANTHROPIC_SONNET_5_MAX_TOKENS = 128_000;
 
 const ZAI_GLM5_MODEL_ID = "glm-5";
 const ZAI_GLM5_TEMPLATE_MODEL_IDS = ["glm-4.7"] as const;
@@ -131,9 +129,6 @@ function cloneFirstTemplateModel(params: {
   return undefined;
 }
 
-const CODEX_GPT54_ELIGIBLE_PROVIDERS = new Set(["openai-codex"]);
-const CODEX_GPT53_ELIGIBLE_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
-
 function resolveOpenAICodexForwardCompatModel(
   provider: string,
   modelId: string,
@@ -144,30 +139,13 @@ function resolveOpenAICodexForwardCompatModel(
   const lower = trimmedModelId.toLowerCase();
 
   let templateIds: readonly string[];
-  let eligibleProviders: Set<string>;
-  if (
-    lower === OPENAI_GPT_56_MODEL_PREFIX ||
-    lower.startsWith(`${OPENAI_GPT_56_MODEL_PREFIX}-`)
-  ) {
+  if (normalizedProvider === "openai-codex" && isRetainedOpenAICodexModelId(lower)) {
     templateIds = OPENAI_CODEX_GPT_56_TEMPLATE_MODEL_IDS;
-    eligibleProviders = CODEX_GPT54_ELIGIBLE_PROVIDERS;
-  } else if (lower === OPENAI_CODEX_GPT_55_MODEL_ID) {
-    templateIds = OPENAI_CODEX_GPT_55_TEMPLATE_MODEL_IDS;
-    eligibleProviders = CODEX_GPT54_ELIGIBLE_PROVIDERS;
-  } else if (lower === OPENAI_CODEX_GPT_54_MODEL_ID) {
-    templateIds = OPENAI_CODEX_GPT_54_TEMPLATE_MODEL_IDS;
-    eligibleProviders = CODEX_GPT54_ELIGIBLE_PROVIDERS;
-  } else if (lower === OPENAI_CODEX_GPT_54_MINI_MODEL_ID) {
-    templateIds = OPENAI_CODEX_GPT_54_MINI_TEMPLATE_MODEL_IDS;
-    eligibleProviders = CODEX_GPT54_ELIGIBLE_PROVIDERS;
-  } else if (lower === OPENAI_CODEX_GPT_53_MODEL_ID) {
+  } else if (normalizedProvider === "github-copilot" && lower === GITHUB_COPILOT_GPT_53_MODEL_ID) {
+    // Preserve the unrelated GitHub Copilot route; the affordability policy
+    // applies specifically to the ChatGPT-signed-in openai-codex harness.
     templateIds = OPENAI_CODEX_TEMPLATE_MODEL_IDS;
-    eligibleProviders = CODEX_GPT53_ELIGIBLE_PROVIDERS;
   } else {
-    return undefined;
-  }
-
-  if (!eligibleProviders.has(normalizedProvider)) {
     return undefined;
   }
 
@@ -180,6 +158,9 @@ function resolveOpenAICodexForwardCompatModel(
       ...template,
       id: trimmedModelId,
       name: trimmedModelId,
+      // Model.cost represents API dollars. Codex harness usage consumes plan
+      // credits instead, so do not inherit an unrelated API template price.
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     } as Model<Api>);
   }
 
@@ -275,6 +256,38 @@ function resolveAnthropicSonnet46ForwardCompatModel(
   });
 }
 
+function resolveAnthropicSonnet5ForwardCompatModel(
+  provider: string,
+  modelId: string,
+  modelRegistry: ModelRegistry,
+): Model<Api> | undefined {
+  const normalizedProvider = normalizeProviderId(provider);
+  if (normalizedProvider !== "anthropic") {
+    return undefined;
+  }
+  const trimmedModelId = modelId.trim();
+  const lower = trimmedModelId.toLowerCase();
+  if (
+    lower !== ANTHROPIC_SONNET_5_MODEL_ID &&
+    !lower.startsWith(`${ANTHROPIC_SONNET_5_MODEL_ID}-`)
+  ) {
+    return undefined;
+  }
+
+  return cloneFirstTemplateModel({
+    normalizedProvider,
+    trimmedModelId,
+    templateIds: [...ANTHROPIC_SONNET_5_TEMPLATE_MODEL_IDS],
+    modelRegistry,
+    patch: {
+      reasoning: true,
+      cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+      contextWindow: ANTHROPIC_SONNET_5_CONTEXT_TOKENS,
+      maxTokens: ANTHROPIC_SONNET_5_MAX_TOKENS,
+    },
+  });
+}
+
 // gemini-3.1-pro-preview / gemini-3.1-flash-preview are not present in some pi-ai
 // Google catalogs yet. Clone the nearest gemini-3 template so users don't get
 // "Unknown model" errors when Google ships new minor-version models before pi-ai
@@ -360,6 +373,7 @@ export function resolveForwardCompatModel(
     resolveOpenAIGpt54ForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveOpenAICodexForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveAnthropicOpus46ForwardCompatModel(provider, modelId, modelRegistry) ??
+    resolveAnthropicSonnet5ForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveAnthropicSonnet46ForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveZaiGlm5ForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveGoogle31ForwardCompatModel(provider, modelId, modelRegistry)

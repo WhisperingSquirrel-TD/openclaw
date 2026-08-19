@@ -14,7 +14,6 @@ import {
   mockDiscoveredModel,
   mockGoogleGeminiCliFlashTemplateModel,
   mockGoogleGeminiCliProTemplateModel,
-  mockOpenAICodexMiniTemplateModel,
   mockOpenAICodexTemplateModel,
   resetMockDiscoverModels,
 } from "./model.test-harness.js";
@@ -43,42 +42,22 @@ describe("pi embedded model e2e smoke", () => {
     ]);
   });
 
-  it("builds an openai-codex forward-compat fallback for gpt-5.3-codex", () => {
+  it("builds an openai-codex forward-compat fallback for retained gpt-5.6 tiers", () => {
     mockOpenAICodexTemplateModel();
 
-    const result = resolveModel("openai-codex", "gpt-5.3-codex", "/tmp/agent");
-    expect(result.error).toBeUndefined();
-    expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation("gpt-5.3-codex"));
+    for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+      const result = resolveModel("openai-codex", id, "/tmp/agent");
+      expect(result.error).toBeUndefined();
+      expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation(id));
+    }
   });
 
-  it("builds an openai-codex forward-compat fallback for gpt-5.4", () => {
-    mockOpenAICodexTemplateModel();
-
-    const result = resolveModel("openai-codex", "gpt-5.4", "/tmp/agent");
-    expect(result.error).toBeUndefined();
-    expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation("gpt-5.4"));
-  });
-
-  it("builds an openai-codex forward-compat fallback for gpt-5.5", () => {
-    mockOpenAICodexTemplateModel();
-
-    const result = resolveModel("openai-codex", "gpt-5.5", "/tmp/agent");
-    expect(result.error).toBeUndefined();
-    expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation("gpt-5.5"));
-  });
-
-  it("builds an openai-codex forward-compat fallback for gpt-5.4-mini", () => {
-    mockOpenAICodexMiniTemplateModel();
-
-    const result = resolveModel("openai-codex", "gpt-5.4-mini", "/tmp/agent");
-    expect(result.error).toBeUndefined();
-    expect(result.model).toMatchObject({
-      provider: "openai-codex",
-      id: "gpt-5.4-mini",
-      api: "openai-codex-responses",
-      baseUrl: "https://chatgpt.com/backend-api",
-      reasoning: true,
-    });
+  it("keeps unknown-model errors for retired openai-codex models", () => {
+    for (const id of ["gpt-5.3-codex", "gpt-5.4", "gpt-5.4-mini", "gpt-5.5"]) {
+      const result = resolveModel("openai-codex", id, "/tmp/agent");
+      expect(result.model).toBeUndefined();
+      expect(result.error).toBe(`Unknown model: openai-codex/${id}`);
+    }
   });
 
   it("builds an openai forward-compat fallback for gpt-5.5", () => {

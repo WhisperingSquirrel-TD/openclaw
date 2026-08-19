@@ -671,16 +671,37 @@ else:
 # ---------------------------------------------------------------------------
 # Model migration — runs every install so pulling and re-running fixes it.
 # 1. Strips corrupted "export VAR=value" model strings (caused by old cmd_switch bug)
-# 2. Replaces deprecated Anthropic model IDs with the current one
+# 2. Replaces removed higher-cost model routes with the retained affordable ones
 # ---------------------------------------------------------------------------
 import re as _re
 
-DEPRECATED_MODELS = [
-    'claude-3-5-sonnet-20241022',
-    'claude-3-7-sonnet-20250219',
-    'claude-3-5-haiku-20241022',
-]
-CURRENT_ANTHROPIC_MODEL = 'anthropic/claude-sonnet-4-5'
+CURRENT_ANTHROPIC_MODEL = 'anthropic/claude-sonnet-5'
+CURRENT_CODEX_MODEL = 'openai-codex/gpt-5.6-terra'
+CURRENT_CODEX_FAST_MODEL = 'openai-codex/gpt-5.6-luna'
+MODEL_MIGRATIONS = {
+    'claude-3-5-sonnet-20241022': CURRENT_ANTHROPIC_MODEL,
+    'claude-3-7-sonnet-20250219': CURRENT_ANTHROPIC_MODEL,
+    'claude-3-5-haiku-20241022': CURRENT_ANTHROPIC_MODEL,
+    'claude-sonnet-4-5': CURRENT_ANTHROPIC_MODEL,
+    'claude-sonnet-4.5': CURRENT_ANTHROPIC_MODEL,
+    'anthropic/claude-sonnet-4-5': CURRENT_ANTHROPIC_MODEL,
+    'claude-sonnet-4-6': CURRENT_ANTHROPIC_MODEL,
+    'claude-sonnet-4.6': CURRENT_ANTHROPIC_MODEL,
+    'anthropic/claude-sonnet-4-6': CURRENT_ANTHROPIC_MODEL,
+    'claude-opus-4-6': CURRENT_ANTHROPIC_MODEL,
+    'claude-opus-4.6': CURRENT_ANTHROPIC_MODEL,
+    'anthropic/claude-opus-4-6': CURRENT_ANTHROPIC_MODEL,
+    'openai-codex/gpt-5.1-codex': CURRENT_CODEX_MODEL,
+    'openai-codex/gpt-5.1-codex-max': CURRENT_CODEX_MODEL,
+    'openai-codex/gpt-5.2': CURRENT_CODEX_MODEL,
+    'openai-codex/gpt-5.2-codex': CURRENT_CODEX_MODEL,
+    'openai-codex/gpt-5.3-codex': CURRENT_CODEX_MODEL,
+    'openai-codex/gpt-5.4': CURRENT_CODEX_MODEL,
+    'openai-codex/gpt-5.5': CURRENT_CODEX_MODEL,
+    'openai-codex/gpt-5.1-codex-mini': CURRENT_CODEX_FAST_MODEL,
+    'openai-codex/gpt-5.3-codex-spark': CURRENT_CODEX_FAST_MODEL,
+    'openai-codex/gpt-5.4-mini': CURRENT_CODEX_FAST_MODEL,
+}
 
 def _clean_model_string(s):
     """Strip shell export prefix and trailing punctuation from a model string."""
@@ -696,12 +717,24 @@ def _replace_model_recursive(obj):
         return [_replace_model_recursive(v) for v in obj]
     if isinstance(obj, str):
         obj = _clean_model_string(obj)
-        if obj in DEPRECATED_MODELS:
-            print(f'Model migrated: {obj} -> {CURRENT_ANTHROPIC_MODEL}')
-            return CURRENT_ANTHROPIC_MODEL
+        replacement = MODEL_MIGRATIONS.get(obj)
+        if replacement:
+            print(f'Model migrated: {obj} -> {replacement}')
+            return replacement
     return obj
 
 c = _replace_model_recursive(c)
+
+# Model allowlists use full model refs as dictionary keys, so migrate those
+# separately; the recursive value migration above intentionally leaves keys alone.
+configured_models = c.get('agents', {}).get('defaults', {}).get('models')
+if isinstance(configured_models, dict):
+    for old_model, new_model in MODEL_MIGRATIONS.items():
+        if old_model not in configured_models:
+            continue
+        old_settings = configured_models.pop(old_model)
+        configured_models.setdefault(new_model, old_settings)
+        print(f'Model allowlist migrated: {old_model} -> {new_model}')
 
 with open(config_path, 'w') as f:
     json.dump(c, f, indent=2)
@@ -978,7 +1011,7 @@ fi
 
 # ── Daily provider reset (04:00) ──────────────────────────────────────────────
 # Resets L1 to the configured Codex Web model at 4am each day.
-# User can switch during the day via /codex54full, /sonnet46, /gpt54, etc.
+# User can switch during the day via /codex56sol, /sonnet5, /gpt54, etc.
 RESET_SRC="$HOME/openclaw/attached_assets/integrations/provider-switch/daily-reset.py"
 RESET_DST="$HOME/.openclaw/integrations/provider-switch/daily-reset.py"
 RESET_LOG="$HOME/.openclaw/workspace/memory/daily-reset.log"
@@ -989,7 +1022,7 @@ if [ -f "$RESET_SRC" ]; then
     chmod +x "$RESET_DST"
     RESET_CRON="0 4 * * * $PYTHON3_BIN $RESET_DST >> $RESET_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "daily-reset.py"; echo "$RESET_CRON" ) | crontab -
-    info "Daily provider reset cron installed: 04:00 daily → ${OPENCLAW_CODEX_MODEL:-openai-codex/gpt-5.4}"
+    info "Daily provider reset cron installed: 04:00 daily → ${OPENCLAW_CODEX56_TERRA_MODEL:-openai-codex/gpt-5.6-terra}"
 else
     warn "daily-reset.py not found at $RESET_SRC — skipping"
 fi
@@ -1372,7 +1405,7 @@ fi
 # OpenClaw Management Bot
 # Separate Telegram bot that intercepts system commands BEFORE the LLM.
 # Works even when OpenAI is rate-limited or the gateway is completely down.
-# Commands: /status /codex54full /sonnet46 /gpt54 /restart /pull /reboot
+# Commands: /status /codex56terra /sonnet5 /gpt54 /restart /pull /reboot
 # Requires a SECOND Telegram bot token (separate from the main OpenClaw bot).
 # ---------------------------------------------------------------------------
 MGMT_BOT_SRC="$HOME/openclaw/attached_assets/integrations/mgmt-bot/mgmt-bot.py"
@@ -1455,7 +1488,7 @@ EOF
         warn "       MGMT_BOT_TOKEN=<token>"
         warn "       MGMT_BOT_CHAT_ID=<your_numeric_id>"
         warn "       OPENCLAW_OPENAI_MODEL=openai/gpt-5-mini"
-        warn "       OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5"
+        warn "       OPENCLAW_SONNET5_MODEL=anthropic/claude-sonnet-5"
         warn "  4. Re-run this install script to start the service"
     else
         systemctl --user enable "$MGMT_SERVICE" 2>/dev/null || true
@@ -2047,13 +2080,10 @@ echo "      /status    — model, gateway state, uptime, reboot safety"
 echo "      /health    — run system health check now"
 echo "      /logs      — recent errors across all poller logs"
 echo "      /disk      — disk space on the Pi"
-echo "      /codex54full — switch to Codex Web 5.4 full (default) + restart gateway"
-echo "      /codex55full — switch to Codex Web 5.5 full + restart gateway"
-echo "      /codex53mini — switch to Codex Web 5.3 mini + restart gateway"
-echo "      /codex54mini — switch to Codex Web 5.4 mini + restart gateway"
-echo "      /sonnet45  — switch to Anthropic Sonnet 4.5 + restart gateway"
-echo "      /sonnet46  — switch to Anthropic Sonnet 4.6 + restart gateway"
-echo "      /opus46    — switch to Anthropic Opus 4.6 + restart gateway"
+echo "      /codex56sol   — switch to Codex 5.6 Sol (frontier) + restart gateway"
+echo "      /codex56terra — switch to Codex 5.6 Terra (balanced, daily default) + restart gateway"
+echo "      /codex56luna  — switch to Codex 5.6 Luna (fast, lowest credit use) + restart gateway"
+echo "      /sonnet5   — switch to lower-cost Anthropic Sonnet 5 + restart gateway"
 echo "      /gpt5mini  — switch to OpenAI GPT-5 mini + restart gateway"
 echo "      /gpt54     — switch to OpenAI GPT-5.4 + restart gateway"
 echo "      /restart   — restart L1 gateway"
@@ -2066,9 +2096,8 @@ echo "    Requires in ~/.openclaw/.env:"
 echo "      MGMT_BOT_TOKEN=<second bot token from BotFather>"
 echo "      MGMT_BOT_CHAT_ID=<your numeric Telegram ID from @userinfobot>"
 echo "      OPENCLAW_OPENAI_MODEL=openai/gpt-5-mini"
-echo "      OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5"
-echo "      OPENCLAW_CODEX_MODEL=openai-codex/gpt-5.4           (optional, this is the default)"
-echo "      OPENCLAW_CODEX_MINI_MODEL=openai-codex/gpt-5.3-codex-spark (optional, this is the default)"
+echo "      OPENCLAW_SONNET5_MODEL=anthropic/claude-sonnet-5                 (optional)"
+echo "      OPENCLAW_CODEX56_TERRA_MODEL=openai-codex/gpt-5.6-terra         (optional, daily default)"
 echo "      OPENCLAW_VAULT_PASSPHRASE=<already set if vault is in use>"
 echo "      OPENCLAW_TAILSCALE_DISABLE_DNS=1   (optional — auto-fix DNS single point of failure;"
 echo "                                          makes install run 'tailscale set --accept-dns=false')"
@@ -2165,7 +2194,7 @@ fi
 #      MagicDNS (100.100.100.100) as the ONLY resolver. If tailscaled hiccups,
 #      ALL name resolution fails (Errno -3 "Temporary failure in name
 #      resolution") and the mgmt-bot can't reach api.telegram.org, so Telegram
-#      commands (/codex54full, /sonnet46, …) silently stop responding. Dropping
+#      commands (/codex56terra, /sonnet5, …) silently stop responding. Dropping
 #      MagicDNS can affect *.ts.net resolution (e.g. the WCP tunnel), so the
 #      automatic fix is opt-in: set OPENCLAW_TAILSCALE_DISABLE_DNS=1 in
 #      ~/.openclaw/.env. Otherwise we just warn with the zero-tradeoff

@@ -1,28 +1,14 @@
+import {
+  isRetainedAnthropicModelId,
+  isRetainedOpenAICodexModelId,
+} from "./model-affordability-policy.js";
+
 export type ModelRef = {
   provider?: string | null;
   id?: string | null;
 };
 
-const ANTHROPIC_PREFIXES = [
-  "claude-opus-4-6",
-  "claude-sonnet-4-6",
-  "claude-opus-4-5",
-  "claude-sonnet-4-5",
-  "claude-haiku-4-5",
-];
 const OPENAI_MODELS = ["gpt-5.6", "gpt-5.5", "gpt-5.4", "gpt-5.2", "gpt-5.0"];
-const CODEX_MODELS = [
-  "gpt-5.6",
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.2",
-  "gpt-5.2-codex",
-  "gpt-5.3-codex",
-  "gpt-5.3-codex-spark",
-  "gpt-5.1-codex",
-  "gpt-5.1-codex-mini",
-  "gpt-5.1-codex-max",
-];
 const GOOGLE_PREFIXES = ["gemini-3"];
 const ZAI_PREFIXES = ["glm-5", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx"];
 const MINIMAX_PREFIXES = ["minimax-m2.5", "minimax-m2.5"];
@@ -44,7 +30,7 @@ export function isModernModelRef(ref: ModelRef): boolean {
   }
 
   if (provider === "anthropic") {
-    return matchesPrefix(id, ANTHROPIC_PREFIXES);
+    return isRetainedAnthropicModelId(id);
   }
 
   if (provider === "openai") {
@@ -52,7 +38,7 @@ export function isModernModelRef(ref: ModelRef): boolean {
   }
 
   if (provider === "openai-codex") {
-    return matchesExactOrPrefix(id, CODEX_MODELS);
+    return isRetainedOpenAICodexModelId(id);
   }
 
   if (provider === "google" || provider === "google-gemini-cli") {

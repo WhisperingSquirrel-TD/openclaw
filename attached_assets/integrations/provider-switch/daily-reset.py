@@ -2,8 +2,8 @@
 """
 Daily model reset — runs at 04:00 every day via cron.
 
-Switches L1 to the Codex OAuth model (openai-codex/gpt-5.4) at the
-start of each day so we always begin on the most cost-effective option.
+Switches L1 to the balanced Codex harness model (openai-codex/gpt-5.6-terra)
+at the start of each day so we begin on a current, cost-effective option.
 The user can switch manually via /openai or /anthropic during the day.
 
 Cron entry (added by install script):
@@ -48,7 +48,9 @@ CONFIG_PATH   = Path(os.environ.get("OPENCLAW_CONFIG_PATH",
                      str(Path.home() / ".openclaw" / "openclaw.json")))
 LOG_FILE      = Path.home() / ".openclaw" / "workspace" / "memory" / "daily-reset.log"
 SERVICE_NAME  = os.environ.get("OPENCLAW_SERVICE_NAME", "openclaw-gateway.service")
-CODEX_MODEL   = os.environ.get("OPENCLAW_CODEX_MODEL", "openai-codex/gpt-5.4")
+CODEX_MODEL   = os.environ.get(
+    "OPENCLAW_CODEX56_TERRA_MODEL", "openai-codex/gpt-5.6-terra"
+)
 LOG_MAX_LINES = 500
 
 # Locate chattr — it lives in /sbin or /usr/sbin, which cron's PATH often omits.

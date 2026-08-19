@@ -298,10 +298,14 @@ describe("normalizeModelCompat", () => {
 });
 
 describe("isModernModelRef", () => {
-  it("includes OpenAI gpt-5.4 variants in modern selection", () => {
+  it("keeps direct OpenAI variants but limits Codex and Anthropic to affordable models", () => {
     expect(isModernModelRef({ provider: "openai", id: "gpt-5.4" })).toBe(true);
     expect(isModernModelRef({ provider: "openai", id: "gpt-5.4-pro" })).toBe(true);
-    expect(isModernModelRef({ provider: "openai-codex", id: "gpt-5.4" })).toBe(true);
+    expect(isModernModelRef({ provider: "openai-codex", id: "gpt-5.4" })).toBe(false);
+    expect(isModernModelRef({ provider: "openai-codex", id: "gpt-5.6-terra" })).toBe(true);
+    expect(isModernModelRef({ provider: "openai-codex", id: "gpt-5.6-sol-pro" })).toBe(false);
+    expect(isModernModelRef({ provider: "anthropic", id: "claude-sonnet-4-6" })).toBe(false);
+    expect(isModernModelRef({ provider: "anthropic", id: "claude-sonnet-5" })).toBe(true);
   });
 
   it("excludes opencode minimax variants from modern selection", () => {
@@ -355,28 +359,44 @@ describe("resolveForwardCompatModel", () => {
     expect(model?.maxTokens).toBe(128_000);
   });
 
-  it("resolves openai-codex gpt-5.4 via codex template fallback", () => {
+  it("rejects retired openai-codex models", () => {
     const registry = createRegistry({
       "openai-codex/gpt-5.2-codex": createOpenAICodexTemplateModel("gpt-5.2-codex"),
     });
-    const model = resolveForwardCompatModel("openai-codex", "gpt-5.4", registry);
-    expectResolvedForwardCompat(model, { provider: "openai-codex", id: "gpt-5.4" });
-    expect(model?.api).toBe("openai-codex-responses");
-    expect(model?.baseUrl).toBe("https://chatgpt.com/backend-api");
-    expect(model?.contextWindow).toBe(272_000);
-    expect(model?.maxTokens).toBe(128_000);
+    for (const id of [
+      "gpt-5.1-codex",
+      "gpt-5.1-codex-mini",
+      "gpt-5.2",
+      "gpt-5.2-codex",
+      "gpt-5.3-codex",
+      "gpt-5.3-codex-spark",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.5",
+    ]) {
+      expect(resolveForwardCompatModel("openai-codex", id, registry)).toBeUndefined();
+    }
   });
 
-  it("resolves openai-codex gpt-5.6 family (sol/terra/luna + bare alias) via codex template", () => {
+  it("resolves only the retained openai-codex gpt-5.6 tiers via codex template", () => {
     const registry = createRegistry({
       "openai-codex/gpt-5.2-codex": createOpenAICodexTemplateModel("gpt-5.2-codex"),
     });
-    for (const id of ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-sol-pro", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+    for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
       const model = resolveForwardCompatModel("openai-codex", id, registry);
       expectResolvedForwardCompat(model, { provider: "openai-codex", id });
       expect(model?.api).toBe("openai-codex-responses");
       expect(model?.baseUrl).toBe("https://chatgpt.com/backend-api");
+      expect(model?.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     }
+  });
+
+  it("rejects unapproved openai-codex gpt-5.6 aliases and variants", () => {
+    const registry = createRegistry({
+      "openai-codex/gpt-5.2-codex": createOpenAICodexTemplateModel("gpt-5.2-codex"),
+    });
+    expect(resolveForwardCompatModel("openai-codex", "gpt-5.6", registry)).toBeUndefined();
+    expect(resolveForwardCompatModel("openai-codex", "gpt-5.6-sol-pro", registry)).toBeUndefined();
   });
 
   it("resolves openai-codex gpt-5.6 without templates using codex fallback defaults", () => {

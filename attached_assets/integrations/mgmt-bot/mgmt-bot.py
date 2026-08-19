@@ -9,16 +9,10 @@ the gateway is completely down.
 COMMANDS
 --------
   /status       — current provider, service state, Pi uptime
-  /codex54full  — switch to Codex Web 5.4 full (default) and restart gateway
-  /codex55full  — switch to Codex Web 5.5 full and restart gateway
   /codex56sol   — switch to Codex Web 5.6 Sol (frontier) and restart gateway
   /codex56terra — switch to Codex Web 5.6 Terra (balanced) and restart gateway
   /codex56luna  — switch to Codex Web 5.6 Luna (fast) and restart gateway
-  /codex53mini  — switch to Codex Web 5.3 mini and restart gateway
-  /codex54mini  — switch to Codex Web 5.4 mini and restart gateway
-  /sonnet45     — switch to Anthropic Sonnet 4.5 and restart gateway
-  /sonnet46     — switch to Anthropic Sonnet 4.6 and restart gateway
-  /opus46       — switch to Anthropic Opus 4.6 and restart gateway
+  /sonnet5      — switch to Anthropic Sonnet 5 and restart gateway
   /gpt5mini     — switch to OpenAI GPT-5 mini and restart gateway
   /gpt54        — switch to OpenAI GPT-5.4 and restart gateway
   /gpt56        — switch to OpenAI GPT-5.6 Sol (API key) and restart gateway
@@ -51,16 +45,10 @@ REQUIRED ENV VARS (in ~/.openclaw/.env)
   MGMT_BOT_CHAT_ID          Your Telegram chat/user ID — only this ID is obeyed
   All model IDs below are OPTIONAL — each command has a built-in default and
   works out of the box. Set a var only to override the exact model ID string.
-  OPENCLAW_CODEX_MODEL        override /codex54full, default openai-codex/gpt-5.4
-  OPENCLAW_CODEX55_MODEL      override /codex55full, default openai-codex/gpt-5.5
   OPENCLAW_CODEX56_SOL_MODEL  override /codex56sol,  default openai-codex/gpt-5.6-sol
   OPENCLAW_CODEX56_TERRA_MODEL override /codex56terra, default openai-codex/gpt-5.6-terra
   OPENCLAW_CODEX56_LUNA_MODEL override /codex56luna, default openai-codex/gpt-5.6-luna
-  OPENCLAW_CODEX_MINI_MODEL   override /codex53mini, default openai-codex/gpt-5.3-codex-spark
-  OPENCLAW_CODEX_MINI54_MODEL override /codex54mini, default openai-codex/gpt-5.4-mini
-  OPENCLAW_ANTHROPIC_MODEL    override /sonnet45,    default anthropic/claude-sonnet-4-5
-  OPENCLAW_SONNET_MODEL       override /sonnet46,    default anthropic/claude-sonnet-4-6
-  OPENCLAW_OPUS_MODEL         override /opus46,      default anthropic/claude-opus-4-6
+  OPENCLAW_SONNET5_MODEL      override /sonnet5,     default anthropic/claude-sonnet-5
   OPENCLAW_OPENAI_MODEL       override /gpt5mini,    default openai/gpt-5-mini
   OPENCLAW_GPT54_MODEL        override /gpt54,       default openai/gpt-5.4
   OPENCLAW_GPT56_MODEL        override /gpt56,       default openai/gpt-5.6-sol
@@ -93,8 +81,8 @@ SETUP
      MGMT_BOT_TOKEN=<token>
      MGMT_BOT_CHAT_ID=<your_numeric_id>
      OPENCLAW_OPENAI_MODEL=openai/gpt-5-mini
-     OPENCLAW_ANTHROPIC_MODEL=anthropic/claude-sonnet-4-5
-     OPENCLAW_CODEX_MODEL=openai-codex/gpt-5.4
+     OPENCLAW_SONNET5_MODEL=anthropic/claude-sonnet-5
+     OPENCLAW_CODEX56_TERRA_MODEL=openai-codex/gpt-5.6-terra
 4. Run the install script — deploys this file and installs the systemd service
 5. Verify: systemctl --user status openclaw-mgmt-bot.service
 """
@@ -614,19 +602,13 @@ def cmd_status(token: str, chat_id: str) -> None:
 #   gateway_prefix : provider prefix added to a bare model ID
 #   label          : human-friendly name shown in Telegram replies
 MODEL_REGISTRY = {
-    # --- Codex Web (OAuth, no API key). gpt-5.4 is the daily-reset default. ---
-    "codex54full": ("OPENCLAW_CODEX_MODEL",        "openai-codex/gpt-5.4",         None,            "openai-codex", "Codex 5.4 (full)"),
-    "codex55full": ("OPENCLAW_CODEX55_MODEL",      "openai-codex/gpt-5.5",         None,            "openai-codex", "Codex 5.5 (full)"),
+    # --- Codex harness (ChatGPT sign-in; Terra is the lower-cost daily default). ---
     # gpt-5.6 family (July 2026): Sol = frontier, Terra = balanced, Luna = fast.
     "codex56sol":  ("OPENCLAW_CODEX56_SOL_MODEL",  "openai-codex/gpt-5.6-sol",     None,            "openai-codex", "Codex 5.6 Sol (frontier)"),
     "codex56terra":("OPENCLAW_CODEX56_TERRA_MODEL","openai-codex/gpt-5.6-terra",   None,            "openai-codex", "Codex 5.6 Terra (balanced)"),
     "codex56luna": ("OPENCLAW_CODEX56_LUNA_MODEL", "openai-codex/gpt-5.6-luna",    None,            "openai-codex", "Codex 5.6 Luna (fast)"),
-    "codex53mini": ("OPENCLAW_CODEX_MINI_MODEL",   "openai-codex/gpt-5.3-codex-spark", None,        "openai-codex", "Codex 5.3 Spark (Pro)"),
-    "codex54mini": ("OPENCLAW_CODEX_MINI54_MODEL", "openai-codex/gpt-5.4-mini",    None,            "openai-codex", "Codex 5.4 mini"),
     # --- Anthropic API (auth handled internally by the gateway) ---
-    "sonnet45":    ("OPENCLAW_ANTHROPIC_MODEL",    "anthropic/claude-sonnet-4-5",  None,            "anthropic",    "Anthropic Sonnet 4.5"),
-    "sonnet46":    ("OPENCLAW_SONNET_MODEL",       "anthropic/claude-sonnet-4-6",  None,            "anthropic",    "Anthropic Sonnet 4.6"),
-    "opus46":      ("OPENCLAW_OPUS_MODEL",         "anthropic/claude-opus-4-6",    None,            "anthropic",    "Anthropic Opus 4.6"),
+    "sonnet5":     ("OPENCLAW_SONNET5_MODEL",       "anthropic/claude-sonnet-5",    None,            "anthropic",    "Anthropic Sonnet 5"),
     # --- OpenAI API (needs OPENAI_API_KEY) ---
     "gpt5mini":    ("OPENCLAW_OPENAI_MODEL",       "openai/gpt-5-mini",            "OPENAI_API_KEY", "openai",      "OpenAI GPT-5 mini"),
     "gpt54":       ("OPENCLAW_GPT54_MODEL",        "openai/gpt-5.4",               "OPENAI_API_KEY", "openai",      "OpenAI GPT-5.4"),
@@ -2701,16 +2683,10 @@ def cmd_help(token: str, chat_id: str) -> None:
          "/logs — recent errors across all poller logs\n"
          "/disk — disk space on the Pi\n\n"
          "*Provider (model switch)*\n"
-         "/codex54full — Codex 5.4 full [default] + restart\n"
-         "/codex55full — Codex 5.5 full + restart\n"
          "/codex56sol — Codex 5.6 Sol (frontier) + restart\n"
-         "/codex56terra — Codex 5.6 Terra (balanced) + restart\n"
+         "/codex56terra — Codex 5.6 Terra (balanced) [daily default] + restart\n"
          "/codex56luna — Codex 5.6 Luna (fast) + restart\n"
-         "/codex53mini — Codex 5.3 mini + restart\n"
-         "/codex54mini — Codex 5.4 mini + restart\n"
-         "/sonnet45 — Anthropic Sonnet 4.5 + restart\n"
-         "/sonnet46 — Anthropic Sonnet 4.6 + restart\n"
-         "/opus46 — Anthropic Opus 4.6 + restart\n"
+         "/sonnet5 — Anthropic Sonnet 5 (lower cost) + restart\n"
          "/gpt5mini — OpenAI GPT-5 mini + restart\n"
          "/gpt54 — OpenAI GPT-5.4 + restart\n"
          "/gpt56 — OpenAI GPT-5.6 Sol (API key) + restart\n"
@@ -2776,16 +2752,10 @@ MENU_COMMANDS = [
     ("install",   "Git pull + run install script"),
     ("reboot",    "Reboot the Pi (refused if not safe)"),
     # Model switching
-    ("codex54full", "Switch to Codex Web 5.4 full (default)"),
-    ("codex55full", "Switch to Codex Web 5.5 full"),
     ("codex56sol",  "Switch to Codex Web 5.6 Sol (frontier)"),
-    ("codex56terra","Switch to Codex Web 5.6 Terra (balanced)"),
+    ("codex56terra","Switch to Codex Web 5.6 Terra (daily default)"),
     ("codex56luna", "Switch to Codex Web 5.6 Luna (fast)"),
-    ("codex53mini", "Switch to Codex Web 5.3 mini"),
-    ("codex54mini", "Switch to Codex Web 5.4 mini"),
-    ("sonnet45",    "Switch to Anthropic Sonnet 4.5"),
-    ("sonnet46",    "Switch to Anthropic Sonnet 4.6"),
-    ("opus46",      "Switch to Anthropic Opus 4.6"),
+    ("sonnet5",     "Switch to lower-cost Anthropic Sonnet 5"),
     ("gpt5mini",    "Switch to OpenAI GPT-5 mini"),
     ("gpt54",       "Switch to OpenAI GPT-5.4"),
     ("gpt56",       "Switch to OpenAI GPT-5.6 Sol (API key)"),
@@ -3196,16 +3166,10 @@ def _check_dev_triggers(token: str, chat_id: str) -> None:
 
 COMMANDS = {
     "/status":     cmd_status,
-    "/codex54full":  lambda t, c: cmd_switch(t, c, "codex54full"),
-    "/codex55full":  lambda t, c: cmd_switch(t, c, "codex55full"),
     "/codex56sol":   lambda t, c: cmd_switch(t, c, "codex56sol"),
     "/codex56terra": lambda t, c: cmd_switch(t, c, "codex56terra"),
     "/codex56luna":  lambda t, c: cmd_switch(t, c, "codex56luna"),
-    "/codex53mini":  lambda t, c: cmd_switch(t, c, "codex53mini"),
-    "/codex54mini":  lambda t, c: cmd_switch(t, c, "codex54mini"),
-    "/sonnet45":     lambda t, c: cmd_switch(t, c, "sonnet45"),
-    "/sonnet46":     lambda t, c: cmd_switch(t, c, "sonnet46"),
-    "/opus46":       lambda t, c: cmd_switch(t, c, "opus46"),
+    "/sonnet5":      lambda t, c: cmd_switch(t, c, "sonnet5"),
     "/gpt5mini":     lambda t, c: cmd_switch(t, c, "gpt5mini"),
     "/gpt54":        lambda t, c: cmd_switch(t, c, "gpt54"),
     "/gpt56":        lambda t, c: cmd_switch(t, c, "gpt56"),

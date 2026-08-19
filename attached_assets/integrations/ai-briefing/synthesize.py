@@ -49,7 +49,7 @@ STATE_FILE      = BRIEFING_DIR / "state.json"
 TAVILY_SCRIPT   = Path.home() / ".openclaw" / "integrations" / "tavily" / "search.py"
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-SONNET_MODEL      = "claude-sonnet-4-5"
+SONNET_MODEL      = "claude-sonnet-5"
 
 TAVILY_MAX_ITEMS    = 4     # enrich at most this many items
 TAVILY_MAX_CHARS    = 3000  # max content chars per Tavily result
