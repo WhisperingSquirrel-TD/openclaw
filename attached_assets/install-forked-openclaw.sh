@@ -69,6 +69,9 @@ _SOUL_ENC_PATH="$_SOUL_VAULT_DIR/SOUL.md.enc"
 # Remove any stale plaintext SOUL.md that may have been left by older installs.
 _SOUL_PLAINTEXT_PATH="$HOME/.openclaw/workspace/SOUL.md"
 if [ -f "$_SOUL_PLAINTEXT_PATH" ] || [ -L "$_SOUL_PLAINTEXT_PATH" ]; then
+    if [ ! -f "$_SOUL_ENC_PATH" ]; then
+        fail "[soul] Refusing to remove plaintext SOUL.md because no encrypted vault exists at $_SOUL_ENC_PATH"
+    fi
     # Older installs could mark the plaintext file immutable. Clear that flag
     # before deleting it; otherwise set -e aborts the install before self-update.
     sudo chattr -i "$_SOUL_PLAINTEXT_PATH" 2>/dev/null ||
