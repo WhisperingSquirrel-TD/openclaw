@@ -126,3 +126,7 @@ attached_assets/*.png
 attached_assets/*.jpg
 attached_assets/*.jpeg
 attached_assets/Pasted-*.txt
+
+# Pi-local backup snapshots — retain on the Pi, never commit to GitHub
+*.bak
+pi-services/expense-intake-watcher/backups/
