@@ -1332,13 +1332,21 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
         return
 
     summary['expense_candidates'] += 1
+
+    # Routine expense enrichment must stay inside this least-privilege watcher.
+    # Calling the reader here uses its fixed local path, existing mailbox token
+    # and immutable sender allowlist; it must never fall back to agent exec/TOTP.
+    reader = run_reader(entry)
+    reader_detail = 'trusted reader extracted body/attachments' if reader else 'trusted reader unavailable; autonomous retry required'
     capture = capture_sqlite_candidate(source_surface=f'email:{entry.account}:{entry.section}', source_ref=key,
                                        source_timestamp=entry.date_str, supplier=entry.party, evidence_ref=f'{entry.mailbox_path}:{entry.message_id}')
     if capture.outcome == 'captured':
-        routed_detail = f'Captured in SQLite expense_id={capture.expense_id}'
-        blocker = 'Captured in SQLite; explicit review/enrichment is required before finance posting'
+        routed_detail = f'Captured in SQLite expense_id={capture.expense_id}; {reader_detail}'
+        blocker = ('Captured in SQLite; explicit review/enrichment is required before finance posting'
+                   if reader else
+                   'Captured in SQLite; trusted reader failed, so body/attachment enrichment will retry autonomously')
     else:
-        routed_detail = 'SQLite capture failed; durable replay preserved'
+        routed_detail = f'SQLite capture failed; durable replay preserved; {reader_detail}'
         blocker = f'Durable SQLite replay pending autonomous retry: {capture.blocker}'
     advance_item_lifecycle(state, key, 'email', 'routed', routed_detail)
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
