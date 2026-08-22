@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/skilzvolt",
+  "version": "2026.3.8",
+  "private": true,
+  "description": "Fixed-endpoint SkilzVolt compatibility adapter for OpenClaw",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

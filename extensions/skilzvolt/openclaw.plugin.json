@@ -1,0 +1,36 @@
+{
+  "id": "skilzvolt",
+  "name": "SkilzVolt",
+  "description": "Owner-only, fixed-endpoint access to governed SkilzVolt workspace skills.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "connectionKeyEnv": {
+        "type": "string",
+        "default": "SKILZVOLT_CONNECTION_KEY",
+        "description": "Environment variable containing the private SkilzVolt bearer connection key."
+      },
+      "allowProposals": {
+        "type": "boolean",
+        "default": true,
+        "description": "Allow the three governed SkilzVolt proposal operations."
+      },
+      "agentIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": ["main"],
+        "description": "Agents that receive SkilzVolt organisation-knowledge guidance."
+      },
+      "organisationSkillNames": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Local managed skills eligible for verified migration retirement."
+      }
+    }
+  }
+}
