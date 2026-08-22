@@ -32,10 +32,7 @@ export type McpToolDescription = {
   inputSchema?: Record<string, unknown>;
 };
 
-type FetchLike = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export type SkilzVoltClientOptions = {
   connectionKeyEnv: string;
@@ -46,18 +43,21 @@ export type SkilzVoltClientOptions = {
   getBearerToken?: () => string | undefined;
 };
 
-const REQUIRED_TOOLS = new Set([
-  "workspaces_list",
-  "skills_search",
-  "skills_get",
-]);
+const REQUIRED_TOOLS = new Set(["workspaces_list", "skills_search", "skills_get"]);
 const ALLOWED_TOOL_SET = new Set<string>(SKILZVOLT_ALLOWED_TOOLS);
 const PROPOSAL_TOOL_SET = new Set<string>(SKILZVOLT_PROPOSAL_TOOLS);
 
-function redact(value: string): string {
-  return value
+function redact(value: string, secret?: string): string {
+  let redacted = value;
+  if (secret) {
+    redacted = redacted.split(secret).join("[REDACTED]");
+    redacted = redacted.split(encodeURIComponent(secret)).join("[REDACTED]");
+    redacted = redacted.split(JSON.stringify(secret).slice(1, -1)).join("[REDACTED]");
+  }
+  return redacted
     .replace(/\bsvk_[A-Za-z0-9._~-]+\b/g, "[REDACTED]")
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*\b/gi, "Bearer [REDACTED]")
+    .replace(/\b(token|key|authorization)\s*[:=]\s*["']?[^,}"'\s]+/gi, "$1=[REDACTED]")
     .slice(0, 500);
 }
 
@@ -72,8 +72,9 @@ export class SkilzVoltError extends Error {
       | "timeout"
       | "response_too_large"
       | "contract_drift",
+    secret?: string,
   ) {
-    super(redact(message));
+    super(redact(message, secret));
     this.name = "SkilzVoltError";
   }
 }
@@ -92,19 +93,13 @@ function parseSse(text: string): unknown[] {
     try {
       messages.push(JSON.parse(data));
     } catch {
-      throw new SkilzVoltError(
-        "SkilzVolt returned malformed event-stream JSON",
-        "protocol",
-      );
+      throw new SkilzVoltError("SkilzVolt returned malformed event-stream JSON", "protocol");
     }
   }
   return messages;
 }
 
-function parseResponsePayload(
-  text: string,
-  contentType: string | null,
-): unknown[] {
+function parseResponsePayload(text: string, contentType: string | null): unknown[] {
   if (!text.trim()) {
     return [];
   }
@@ -119,10 +114,7 @@ function parseResponsePayload(
   }
 }
 
-async function readBoundedBody(
-  response: Response,
-  maxBytes: number,
-): Promise<string> {
+async function readBoundedBody(response: Response, maxBytes: number): Promise<string> {
   if (!response.body) {
     return "";
   }
@@ -164,8 +156,7 @@ export class SkilzVoltClient {
     this.timeoutMs = options.timeoutMs ?? 20_000;
     this.maxResponseBytes = options.maxResponseBytes ?? 512_000;
     this.getBearerToken =
-      options.getBearerToken ??
-      (() => process.env[this.options.connectionKeyEnv]?.trim());
+      options.getBearerToken ?? (() => process.env[this.options.connectionKeyEnv]?.trim());
   }
 
   private bearerToken(): string {
@@ -186,6 +177,7 @@ export class SkilzVoltClient {
     signal?: AbortSignal,
   ): Promise<unknown> {
     const id = notification ? undefined : ++this.requestId;
+    const bearerToken = this.bearerToken();
     const controller = new AbortController();
     const onAbort = () => controller.abort(signal?.reason);
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -197,12 +189,10 @@ export class SkilzVoltClient {
           method: "POST",
           headers: {
             accept: "application/json, text/event-stream",
-            authorization: `Bearer ${this.bearerToken()}`,
+            authorization: `Bearer ${bearerToken}`,
             "content-type": "application/json",
             ...(this.sessionId ? { "mcp-session-id": this.sessionId } : {}),
-            ...(this.initialized
-              ? { "mcp-protocol-version": this.protocolVersion }
-              : {}),
+            ...(this.initialized ? { "mcp-protocol-version": this.protocolVersion } : {}),
           },
           body: JSON.stringify({
             jsonrpc: "2.0",
@@ -217,11 +207,13 @@ export class SkilzVoltClient {
           throw new SkilzVoltError(
             "SkilzVolt request timed out or was cancelled",
             "timeout",
+            bearerToken,
           );
         }
         throw new SkilzVoltError(
           `SkilzVolt network request failed: ${error instanceof Error ? error.message : String(error)}`,
           "network",
+          bearerToken,
         );
       }
 
@@ -238,25 +230,20 @@ export class SkilzVoltClient {
         );
       }
       if (response.status === 403) {
-        throw new SkilzVoltError(
-          "SkilzVolt denied this workspace operation",
-          "permission",
-        );
+        throw new SkilzVoltError("SkilzVolt denied this workspace operation", "permission");
       }
       if (!response.ok) {
         throw new SkilzVoltError(
           `SkilzVolt returned HTTP ${response.status}${text ? `: ${redact(text)}` : ""}`,
           "protocol",
+          bearerToken,
         );
       }
       if (notification || response.status === 202 || response.status === 204) {
         return undefined;
       }
 
-      const payloads = parseResponsePayload(
-        text,
-        response.headers.get("content-type"),
-      );
+      const payloads = parseResponsePayload(text, response.headers.get("content-type"));
       const payload = payloads.find(
         (candidate) =>
           candidate &&
@@ -271,11 +258,8 @@ export class SkilzVoltClient {
       }
       if (payload.error && typeof payload.error === "object") {
         const error = payload.error as Record<string, unknown>;
-        const message =
-          typeof error.message === "string"
-            ? error.message
-            : "Unknown MCP error";
-        throw new SkilzVoltError(`SkilzVolt MCP error: ${message}`, "protocol");
+        const message = typeof error.message === "string" ? error.message : "Unknown MCP error";
+        throw new SkilzVoltError(`SkilzVolt MCP error: ${message}`, "protocol", bearerToken);
       }
       return payload.result;
     } finally {
@@ -316,30 +300,21 @@ export class SkilzVoltClient {
     if (this.tools) {
       return this.tools;
     }
-    const result = (await this.request(
-      "tools/list",
-      undefined,
-      false,
-      signal,
-    )) as Record<string, unknown> | undefined;
+    const result = (await this.request("tools/list", undefined, false, signal)) as
+      | Record<string, unknown>
+      | undefined;
     const rawTools = Array.isArray(result?.tools) ? result.tools : [];
     const tools = rawTools
       .filter((entry): entry is Record<string, unknown> =>
-        Boolean(
-          entry && typeof entry === "object" && typeof entry.name === "string",
-        ),
+        Boolean(entry && typeof entry === "object" && typeof entry.name === "string"),
       )
       .filter((entry) => ALLOWED_TOOL_SET.has(entry.name as string))
       .filter(
-        (entry) =>
-          this.options.allowProposals ||
-          !PROPOSAL_TOOL_SET.has(entry.name as string),
+        (entry) => this.options.allowProposals || !PROPOSAL_TOOL_SET.has(entry.name as string),
       )
       .map((entry) => ({
         name: entry.name as string,
-        ...(typeof entry.description === "string"
-          ? { description: entry.description }
-          : {}),
+        ...(typeof entry.description === "string" ? { description: entry.description } : {}),
         ...(entry.inputSchema && typeof entry.inputSchema === "object"
           ? { inputSchema: entry.inputSchema as Record<string, unknown> }
           : {}),
@@ -362,23 +337,14 @@ export class SkilzVoltClient {
     signal?: AbortSignal,
   ): Promise<unknown> {
     if (!ALLOWED_TOOL_SET.has(name)) {
-      throw new SkilzVoltError(
-        `SkilzVolt tool is not allowed: ${name}`,
-        "permission",
-      );
+      throw new SkilzVoltError(`SkilzVolt tool is not allowed: ${name}`, "permission");
     }
     if (PROPOSAL_TOOL_SET.has(name) && !this.options.allowProposals) {
-      throw new SkilzVoltError(
-        "SkilzVolt proposal operations are disabled",
-        "permission",
-      );
+      throw new SkilzVoltError("SkilzVolt proposal operations are disabled", "permission");
     }
     const size = Buffer.byteLength(JSON.stringify(args));
     if (size > 384_000) {
-      throw new SkilzVoltError(
-        "SkilzVolt tool arguments exceeded the safety limit",
-        "protocol",
-      );
+      throw new SkilzVoltError("SkilzVolt tool arguments exceeded the safety limit", "protocol");
     }
     const tools = await this.listTools(signal);
     if (!tools.some((tool) => tool.name === name)) {
@@ -387,11 +353,6 @@ export class SkilzVoltClient {
         "contract_drift",
       );
     }
-    return await this.request(
-      "tools/call",
-      { name, arguments: args },
-      false,
-      signal,
-    );
+    return await this.request("tools/call", { name, arguments: args }, false, signal);
   }
 }

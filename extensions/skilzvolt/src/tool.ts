@@ -5,10 +5,7 @@ import type { SkilzVoltClient, SkilzVoltToolName } from "./client.js";
 import { SKILZVOLT_ALLOWED_TOOLS, SkilzVoltError } from "./client.js";
 import type { SkilzVoltMigrationManager } from "./migration.js";
 
-const stringEnum = <T extends readonly string[]>(
-  values: T,
-  description: string,
-) =>
+const stringEnum = <T extends readonly string[]>(values: T, description: string) =>
   Type.Unsafe<T[number]>({
     type: "string",
     enum: [...values],
@@ -16,8 +13,7 @@ const stringEnum = <T extends readonly string[]>(
   });
 
 const ArgumentsSchema = Type.Record(Type.String(), Type.Unknown(), {
-  description:
-    "Arguments matching the live SkilzVolt tool schema returned by describe.",
+  description: "Arguments matching the live SkilzVolt tool schema returned by describe.",
 });
 
 type SkilzVoltParams = {
@@ -31,6 +27,7 @@ type MigrationParams = {
   skillName?: string;
   arguments?: Record<string, unknown>;
   contentParameter?: string;
+  proposalStatusArguments?: Record<string, unknown>;
 };
 
 function publicError(error: unknown): ReturnType<typeof jsonResult> {
@@ -39,10 +36,7 @@ function publicError(error: unknown): ReturnType<typeof jsonResult> {
   }
   return jsonResult({
     ok: false,
-    error:
-      error instanceof Error
-        ? error.message.slice(0, 500)
-        : "Unknown SkilzVolt error",
+    error: error instanceof Error ? error.message.slice(0, 500) : "Unknown SkilzVolt error",
   });
 }
 
@@ -55,15 +49,9 @@ export function createSkilzVoltTool(client: SkilzVoltClient): AnyAgentTool {
     ownerOnly: true,
     parameters: Type.Object(
       {
-        action: stringEnum(
-          ["describe", "call"] as const,
-          "Describe allowed tools or call one.",
-        ),
+        action: stringEnum(["describe", "call"] as const, "Describe allowed tools or call one."),
         toolName: Type.Optional(
-          stringEnum(
-            SKILZVOLT_ALLOWED_TOOLS,
-            "Exact allowed SkilzVolt tool name.",
-          ),
+          stringEnum(SKILZVOLT_ALLOWED_TOOLS, "Exact allowed SkilzVolt tool name."),
         ),
         arguments: Type.Optional(ArgumentsSchema),
       },
@@ -84,11 +72,7 @@ export function createSkilzVoltTool(client: SkilzVoltClient): AnyAgentTool {
         return jsonResult({
           ok: true,
           toolName: params.toolName,
-          result: await client.callTool(
-            params.toolName,
-            params.arguments ?? {},
-            signal,
-          ),
+          result: await client.callTool(params.toolName, params.arguments ?? {}, signal),
         });
       } catch (error) {
         return publicError(error);
@@ -97,9 +81,7 @@ export function createSkilzVoltTool(client: SkilzVoltClient): AnyAgentTool {
   };
 }
 
-export function createSkilzVoltMigrationTool(
-  migration: SkilzVoltMigrationManager,
-): AnyAgentTool {
+export function createSkilzVoltMigrationTool(migration: SkilzVoltMigrationManager): AnyAgentTool {
   return {
     name: "skilzvolt_local_migration",
     label: "SkilzVolt Local Skill Migration",
@@ -125,6 +107,11 @@ export function createSkilzVoltMigrationTool(
           Type.String({
             description:
               "For submit, the exact live skills_create schema property that carries skill content.",
+          }),
+        ),
+        proposalStatusArguments: Type.Optional(
+          Type.Record(Type.String(), Type.Unknown(), {
+            description: "Live skill_proposals_get arguments for the recorded proposal.",
           }),
         ),
       },
@@ -157,6 +144,7 @@ export function createSkilzVoltMigrationTool(
           ok: true,
           result: await migration.verifyAndRetire({
             skillName: params.skillName,
+            proposalStatusArguments: params.proposalStatusArguments ?? {},
             getArguments: params.arguments ?? {},
             signal,
           }),

@@ -10,7 +10,7 @@ type JournalEntry = {
   hash: string;
   submittedAt?: string;
   retiredAt?: string;
-  proposal?: Record<string, string>;
+  proposalId?: string;
 };
 
 type Journal = {
@@ -24,87 +24,123 @@ export type MigrationConfig = {
 };
 
 function defaultStateDir(): string {
-  return (
-    process.env.OPENCLAW_STATE_DIR?.trim() ||
-    path.join(os.homedir(), ".openclaw")
-  );
-}
-
-function normalizedContent(value: string): string {
-  return value.replace(/\r\n/g, "\n").trim();
+  return process.env.OPENCLAW_STATE_DIR?.trim() || path.join(os.homedir(), ".openclaw");
 }
 
 function hashContent(value: string): string {
-  return createHash("sha256").update(normalizedContent(value)).digest("hex");
+  return createHash("sha256").update(value).digest("hex");
 }
 
-function collectStrings(value: unknown, output: string[], depth = 0): void {
-  if (depth > 12 || output.length > 5000) {
-    return;
-  }
-  if (typeof value === "string") {
-    output.push(value);
-    if (
-      (value.startsWith("{") || value.startsWith("[")) &&
-      value.length <= MAX_SKILL_BYTES * 2
-    ) {
-      try {
-        collectStrings(JSON.parse(value), output, depth + 1);
-      } catch {
-        // MCP text content is not necessarily JSON.
-      }
-    }
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      collectStrings(entry, output, depth + 1);
-    }
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const entry of Object.values(value as Record<string, unknown>)) {
-      collectStrings(entry, output, depth + 1);
-    }
-  }
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
-function proposalSummary(value: unknown): Record<string, string> {
-  const wanted = new Set([
-    "proposalId",
-    "proposal_id",
-    "skillId",
-    "skill_id",
-    "status",
-    "reviewStatus",
-    "review_status",
-  ]);
-  const summary: Record<string, string> = {};
-  const visit = (entry: unknown, depth = 0): void => {
-    if (depth > 8 || !entry || typeof entry !== "object") {
-      return;
-    }
-    if (Array.isArray(entry)) {
-      for (const item of entry) {
-        visit(item, depth + 1);
+function readTextResult(value: unknown): Record<string, unknown> {
+  const direct = asRecord(value);
+  if (!direct) {
+    throw new Error("SkilzVolt returned an invalid structured response");
+  }
+  const structured = asRecord(direct.structuredContent);
+  if (structured) {
+    return structured;
+  }
+  const text = Array.isArray(direct.content)
+    ? direct.content.find(
+        (entry) => asRecord(entry)?.type === "text" && typeof asRecord(entry)?.text === "string",
+      )
+    : undefined;
+  if (text) {
+    try {
+      const parsed = JSON.parse(asRecord(text)?.text as string);
+      const parsedRecord = asRecord(parsed);
+      if (parsedRecord) {
+        return parsedRecord;
       }
-      return;
+    } catch {
+      // A plain text response has no machine-verifiable migration identity.
     }
-    for (const [key, child] of Object.entries(
-      entry as Record<string, unknown>,
-    )) {
-      if (
-        wanted.has(key) &&
-        (typeof child === "string" || typeof child === "number")
-      ) {
-        summary[key] = String(child).slice(0, 200);
-      } else {
-        visit(child, depth + 1);
-      }
+  }
+  return direct;
+}
+
+function readNamedString(
+  value: Record<string, unknown>,
+  names: readonly string[],
+): string | undefined {
+  for (const name of names) {
+    if (typeof value[name] === "string" && value[name]) {
+      return value[name] as string;
     }
-  };
-  visit(value);
-  return summary;
+  }
+  return undefined;
+}
+
+function extractProposal(
+  value: unknown,
+  requireStatus: boolean,
+): {
+  proposalId: string;
+  status?: string;
+  skillId?: string;
+} {
+  const body = readTextResult(value);
+  const nestedProposal = asRecord(body.proposal);
+  const proposal =
+    nestedProposal ??
+    (Object.hasOwn(body, "proposalId") || Object.hasOwn(body, "proposal_id") ? body : undefined);
+  if (!proposal) {
+    throw new Error("SkilzVolt response lacks the canonical proposal object");
+  }
+  const proposalId = readNamedString(proposal, ["proposalId", "proposal_id", "id"]);
+  if (!proposalId) {
+    throw new Error("SkilzVolt proposal response lacks its canonical proposal ID");
+  }
+  const status = readNamedString(proposal, ["status"]);
+  if (requireStatus && !status) {
+    throw new Error("SkilzVolt proposal response lacks its canonical status");
+  }
+  const nestedSkill = asRecord(proposal.skill);
+  const skillId =
+    readNamedString(proposal, ["skillId", "skill_id", "currentSkillId", "current_skill_id"]) ??
+    readNamedString(nestedSkill ?? {}, ["id", "skillId", "skill_id"]);
+  return { proposalId, status, skillId };
+}
+
+function extractCurrentSkill(value: unknown): {
+  skillId: string;
+  content: string;
+} {
+  const body = readTextResult(value);
+  const nestedSkill = asRecord(body.skill);
+  const skill =
+    nestedSkill ??
+    (Object.hasOwn(body, "content") || Object.hasOwn(body, "markdown") ? body : undefined);
+  if (!skill) {
+    throw new Error("SkilzVolt response lacks the canonical current skill object");
+  }
+  const skillId = readNamedString(skill, ["skillId", "skill_id", "id"]);
+  const content = readNamedString(skill, ["content", "markdown"]);
+  if (!skillId || content === undefined) {
+    throw new Error("SkilzVolt current skill response lacks canonical ID or content");
+  }
+  return { skillId, content };
+}
+
+function bindIdentityArgument(
+  argumentsInput: Record<string, unknown>,
+  identity: string,
+  allowedKeys: readonly string[],
+  label: string,
+): Record<string, unknown> {
+  const keys = allowedKeys.filter((key) => Object.hasOwn(argumentsInput, key));
+  if (keys.length !== 1) {
+    throw new Error(
+      `${label} arguments must include exactly one canonical identifier field: ${allowedKeys.join(", ")}`,
+    );
+  }
+  return { ...argumentsInput, [keys[0]!]: identity };
 }
 
 export class SkilzVoltMigrationManager {
@@ -139,29 +175,19 @@ export class SkilzVoltMigrationManager {
 
   private assertAllowedName(name: string): void {
     if (!this.allowedNames.has(name)) {
-      throw new Error(
-        `Skill is not in the configured organisation migration set: ${name}`,
-      );
+      throw new Error(`Skill is not in the configured organisation migration set: ${name}`);
     }
   }
 
   private async readJournal(): Promise<Journal> {
     try {
-      const parsed = JSON.parse(
-        await fs.readFile(this.journalPath(), "utf8"),
-      ) as Journal;
-      if (
-        parsed?.version === 1 &&
-        parsed.skills &&
-        typeof parsed.skills === "object"
-      ) {
+      const parsed = JSON.parse(await fs.readFile(this.journalPath(), "utf8")) as Journal;
+      if (parsed?.version === 1 && parsed.skills && typeof parsed.skills === "object") {
         return parsed;
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw new Error(
-          "SkilzVolt migration journal is malformed or unreadable",
-        );
+        throw new Error("SkilzVolt migration journal is malformed or unreadable");
       }
     }
     return { version: 1, skills: {} };
@@ -176,15 +202,11 @@ export class SkilzVoltMigrationManager {
     await fs.rename(tempPath, this.journalPath());
   }
 
-  private async readSkill(
-    name: string,
-  ): Promise<{ content: string; hash: string; bytes: number }> {
+  private async readSkill(name: string): Promise<{ content: string; hash: string; bytes: number }> {
     const skillPath = path.join(this.skillDir(name), "SKILL.md");
     const stat = await fs.stat(skillPath);
     if (!stat.isFile() || stat.size > MAX_SKILL_BYTES) {
-      throw new Error(
-        `Local skill is missing or exceeds ${MAX_SKILL_BYTES} bytes: ${name}`,
-      );
+      throw new Error(`Local skill is missing or exceeds ${MAX_SKILL_BYTES} bytes: ${name}`);
     }
     const content = await fs.readFile(skillPath, "utf8");
     return {
@@ -214,7 +236,7 @@ export class SkilzVoltMigrationManager {
             : journal.skills[name]?.submittedAt
               ? "submitted"
               : "ready",
-          proposal: journal.skills[name]?.proposal,
+          proposalId: journal.skills[name]?.proposalId,
         });
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -222,7 +244,7 @@ export class SkilzVoltMigrationManager {
             name,
             local: false,
             status: marker ? "retired" : "missing_unverified",
-            proposal: journal.skills[name]?.proposal,
+            proposalId: journal.skills[name]?.proposalId,
           });
           continue;
         }
@@ -246,8 +268,7 @@ export class SkilzVoltMigrationManager {
       throw new Error("SkilzVolt did not advertise skills_create");
     }
     const properties =
-      createTool.inputSchema?.properties &&
-      typeof createTool.inputSchema.properties === "object"
+      createTool.inputSchema?.properties && typeof createTool.inputSchema.properties === "object"
         ? (createTool.inputSchema.properties as Record<string, unknown>)
         : undefined;
     if (!properties || !Object.hasOwn(properties, params.contentParameter)) {
@@ -257,16 +278,13 @@ export class SkilzVoltMigrationManager {
     }
     const createArguments = structuredClone(params.createArguments);
     createArguments[params.contentParameter] = local.content;
-    const result = await this.client.callTool(
-      "skills_create",
-      createArguments,
-      params.signal,
-    );
+    const result = await this.client.callTool("skills_create", createArguments, params.signal);
+    const proposalId = extractProposal(result, false).proposalId;
     const journal = await this.readJournal();
     journal.skills[params.skillName] = {
       hash: local.hash,
       submittedAt: new Date().toISOString(),
-      proposal: proposalSummary(result),
+      proposalId,
     };
     await this.writeJournal(journal);
     return {
@@ -274,24 +292,23 @@ export class SkilzVoltMigrationManager {
       deletedLocally: false,
       skillName: params.skillName,
       sha256: local.hash,
-      proposal: journal.skills[params.skillName].proposal,
+      proposalId,
       result,
-      next: "Wait for approval/current publication, then run verify_and_retire with skills_get arguments.",
+      next: "Wait for explicit approval/current status, then run verify_and_retire with canonical proposal and skill identifiers.",
     };
   }
 
   async verifyAndRetire(params: {
     skillName: string;
+    proposalStatusArguments: Record<string, unknown>;
     getArguments: Record<string, unknown>;
     signal?: AbortSignal;
   }): Promise<unknown> {
     this.assertAllowedName(params.skillName);
     const journal = await this.readJournal();
     const submitted = journal.skills[params.skillName];
-    if (!submitted?.submittedAt) {
-      throw new Error(
-        "No recorded SkilzVolt submission exists for this local skill",
-      );
+    if (!submitted?.submittedAt || !submitted.proposalId) {
+      throw new Error("No recorded SkilzVolt submission exists for this local skill");
     }
     const local = await this.readSkill(params.skillName);
     if (local.hash !== submitted.hash) {
@@ -299,23 +316,54 @@ export class SkilzVoltMigrationManager {
         "Local skill changed after submission; submit the new content before retiring it",
       );
     }
-    const current = await this.client.callTool(
-      "skills_get",
-      params.getArguments,
+    const proposal = await this.client.callTool(
+      "skill_proposals_get",
+      bindIdentityArgument(
+        params.proposalStatusArguments,
+        submitted.proposalId,
+        ["proposalId", "proposal_id", "id"],
+        "skill_proposals_get",
+      ),
       params.signal,
     );
-    const strings: string[] = [];
-    collectStrings(current, strings);
-    const matches = strings.some(
-      (value) => normalizedContent(value) === normalizedContent(local.content),
+    const verifiedProposal = extractProposal(proposal, true);
+    if (verifiedProposal.proposalId !== submitted.proposalId) {
+      throw new Error("Live proposal identity does not match the recorded local-skill submission");
+    }
+    const proposalStatus = verifiedProposal.status!.toLowerCase();
+    if (proposalStatus !== "approved" && proposalStatus !== "current") {
+      return {
+        verified: false,
+        deletedLocally: false,
+        skillName: params.skillName,
+        reason: `SkilzVolt proposal is ${proposalStatus || "not approved"}; local content remains in place.`,
+      };
+    }
+    const skillId = verifiedProposal.skillId;
+    if (!skillId) {
+      throw new Error("Approved SkilzVolt proposal lacks a canonical current skill ID");
+    }
+    const current = await this.client.callTool(
+      "skills_get",
+      bindIdentityArgument(
+        params.getArguments,
+        skillId,
+        ["skillId", "skill_id", "id"],
+        "skills_get",
+      ),
+      params.signal,
     );
-    if (!matches) {
+    const verifiedSkill = extractCurrentSkill(current);
+    if (verifiedSkill.skillId !== skillId) {
+      throw new Error("Live current skill identity does not match the approved proposal");
+    }
+    if (verifiedSkill.content !== local.content) {
       return {
         verified: false,
         deletedLocally: false,
         skillName: params.skillName,
         reason:
-          "SkilzVolt current skill content does not exactly match the submitted local content.",
+          "SkilzVolt current skill content is not a byte-for-byte match for the submitted local content.",
       };
     }
 
