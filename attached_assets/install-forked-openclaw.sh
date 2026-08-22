@@ -542,6 +542,45 @@ for _tool in ['youtube_transcript', 'web_search']:
         print(f'Added {_tool} to tools.alsoAllow')
 print(f'tools.alsoAllow: {also_allow}')
 
+# Enable the repo-owned SkilzVolt compatibility adapter.  The adapter owns its
+# endpoint and reads the bearer connection key only from this Pi's environment;
+# never put the key in openclaw.json, the repository, or a prompt.
+plugins = c.setdefault('plugins', {})
+if not isinstance(plugins, dict):
+    c['plugins'] = {}
+    plugins = c['plugins']
+plugin_entries = plugins.setdefault('entries', {})
+if not isinstance(plugin_entries, dict):
+    plugins['entries'] = {}
+    plugin_entries = plugins['entries']
+skilzvolt_entry = plugin_entries.setdefault('skilzvolt', {})
+if not isinstance(skilzvolt_entry, dict):
+    plugin_entries['skilzvolt'] = {}
+    skilzvolt_entry = plugin_entries['skilzvolt']
+skilzvolt_entry['enabled'] = True
+skilzvolt_config = skilzvolt_entry.setdefault('config', {})
+if not isinstance(skilzvolt_config, dict):
+    skilzvolt_entry['config'] = {}
+    skilzvolt_config = skilzvolt_entry['config']
+skilzvolt_config.setdefault('connectionKeyEnv', 'SKILZVOLT_CONNECTION_KEY')
+skilzvolt_config.setdefault('allowProposals', True)
+skilzvolt_config.setdefault('agentIds', ['main'])
+skilzvolt_config.setdefault('organisationSkillNames', [
+    'app-plan', 'app-init', 'app-build', 'app-test', 'app-deploy',
+    'app-patch', 'app-resume', 'mgmt-bot', 'sharepoint', 'youtube-transcript'
+])
+existing_allow = plugins.get('allow')
+if isinstance(existing_allow, list):
+    if 'skilzvolt' not in existing_allow:
+        existing_allow.append('skilzvolt')
+else:
+    # Preserve every explicitly configured plugin when first establishing the
+    # allowlist; do not accidentally disable an existing extension.
+    plugins['allow'] = list(plugin_entries.keys())
+    if 'skilzvolt' not in plugins['allow']:
+        plugins['allow'].append('skilzvolt')
+print('SkilzVolt: fixed adapter enabled (private key env: SKILZVOLT_CONNECTION_KEY)')
+
 # Enable WhatsApp watch action scanner (AI-powered action detection from WhatsApp messages)
 wa_actions = wa.setdefault('watchActions', {})
 if not isinstance(wa_actions, dict):
@@ -2181,11 +2220,17 @@ fi
 # Deploy extra skills from attached_assets/skills/ (symlinked into ~/.openclaw/skills/)
 EXTRA_SKILLS_SRC="$HOME/openclaw/attached_assets/skills"
 EXTRA_SKILLS_DST="$HOME/.openclaw/skills"
+SKILZVOLT_RETIRED_DIR="$HOME/.openclaw/skilzvolt/retired-skills"
 if [ -d "$EXTRA_SKILLS_SRC" ]; then
     mkdir -p "$EXTRA_SKILLS_DST"
     for skill_dir in "$EXTRA_SKILLS_SRC"/*/; do
         skill_name="$(basename "$skill_dir")"
         if [ -f "$skill_dir/SKILL.md" ]; then
+            if [ -f "$SKILZVOLT_RETIRED_DIR/$skill_name" ]; then
+                rm -rf "$EXTRA_SKILLS_DST/$skill_name"
+                info "Skipping retired SkilzVolt organisation skill: $skill_name"
+                continue
+            fi
             mkdir -p "$EXTRA_SKILLS_DST/$skill_name"
             ln -sf "$skill_dir/SKILL.md" "$EXTRA_SKILLS_DST/$skill_name/SKILL.md"
         fi

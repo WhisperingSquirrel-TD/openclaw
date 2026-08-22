@@ -20,6 +20,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OPENCLAW_DIR="$HOME/.openclaw"
 WORKSPACE_DIR="$OPENCLAW_DIR/workspace"
 SKILLS_DIR="$OPENCLAW_DIR/skills"
+SKILZVOLT_RETIRED_DIR="$OPENCLAW_DIR/skilzvolt/retired-skills"
 SPECS_DIR="$WORKSPACE_DIR/specs"
 REFERENCE_DIR="$WORKSPACE_DIR/reference"
 PROJECTS_DIR="$WORKSPACE_DIR/projects"
@@ -47,7 +48,7 @@ echo ""
 echo "Deploying skills..."
 SKILLS_SOURCE="$REPO_DIR/attached_assets/skills"
 
-for skill in app-plan app-init app-build app-test app-deploy app-patch app-resume mgmt-bot sharepoint; do
+for skill in app-plan app-init app-build app-test app-deploy app-patch app-resume mgmt-bot sharepoint youtube-transcript; do
     src="$SKILLS_SOURCE/$skill/SKILL.md"
     dst_dir="$SKILLS_DIR/$skill"
     dst="$dst_dir/SKILL.md"
@@ -55,6 +56,12 @@ for skill in app-plan app-init app-build app-test app-deploy app-patch app-resum
     if [[ ! -f "$src" ]]; then
         fail "Source skill not found: $src"
         exit 1
+    fi
+
+    if [[ -f "$SKILZVOLT_RETIRED_DIR/$skill" ]]; then
+        rm -rf "$dst_dir"
+        info "Skipping retired SkilzVolt organisation skill: $skill"
+        continue
     fi
 
     mkdir -p "$dst_dir"
