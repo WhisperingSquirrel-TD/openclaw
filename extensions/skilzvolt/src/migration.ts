@@ -140,6 +140,10 @@ function readTextResult(value: unknown): Record<string, unknown> {
       `SkilzVolt reported an MCP tool error${typeof text === "string" ? `: ${text.slice(0, 500)}` : ""}`,
     );
   }
+  const parsedData = asRecord(direct.data);
+  if (parsedData) {
+    return parsedData;
+  }
   const structured = asRecord(direct.structuredContent);
   if (structured) {
     return structured;

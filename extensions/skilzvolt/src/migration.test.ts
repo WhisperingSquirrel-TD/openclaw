@@ -27,7 +27,7 @@ function fakeClient(params: { current: string; proposalStatus?: string }): Skilz
     callTool: async (name: string, args: Record<string, unknown>) => {
       if (name === "skills_create") {
         expect(args.content).toBe(content);
-        return { proposal: { id: "proposal-1" } };
+        return { data: { proposal: { id: "proposal-1" } } };
       }
       if (name === "skills_proposal_status") {
         return {
