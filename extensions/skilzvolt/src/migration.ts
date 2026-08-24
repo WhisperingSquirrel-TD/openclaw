@@ -140,31 +140,28 @@ function readTextResult(value: unknown): Record<string, unknown> {
       `SkilzVolt reported an MCP tool error${typeof text === "string" ? `: ${text.slice(0, 500)}` : ""}`,
     );
   }
-  const parsedData = asRecord(direct.data);
-  if (parsedData) {
-    return parsedData;
+  let parsedData = asRecord(direct.data);
+  if (!parsedData) {
+    parsedData = asRecord(direct.structuredContent);
   }
-  const structured = asRecord(direct.structuredContent);
-  if (structured) {
-    return structured;
-  }
-  const text = Array.isArray(direct.content)
-    ? direct.content.find(
-        (entry) => asRecord(entry)?.type === "text" && typeof asRecord(entry)?.text === "string",
-      )
-    : undefined;
-  if (text) {
-    try {
-      const parsed = JSON.parse(asRecord(text)?.text as string);
-      const parsedRecord = asRecord(parsed);
-      if (parsedRecord) {
-        return parsedRecord;
+  if (!parsedData) {
+    const text = Array.isArray(direct.content)
+      ? direct.content.find(
+          (entry) => asRecord(entry)?.type === "text" && typeof asRecord(entry)?.text === "string",
+        )
+      : undefined;
+    if (text) {
+      try {
+        parsedData = asRecord(JSON.parse(asRecord(text)?.text as string));
+      } catch {
+        // A plain text response has no machine-verifiable migration identity.
       }
-    } catch {
-      // A plain text response has no machine-verifiable migration identity.
     }
   }
-  return direct;
+  if (parsedData) {
+    return asRecord(parsedData.result) ?? parsedData;
+  }
+  return asRecord(direct.result) ?? direct;
 }
 
 function readNamedString(
@@ -188,6 +185,21 @@ function extractProposal(
   skillId?: string;
 } {
   const body = readTextResult(value);
+  if (body.needs_revision === true || body.saved === false) {
+    const message = readNamedString(body, ["message"]) ?? "SkilzVolt requested revisions";
+    const guidance = Array.isArray(body.field_guidance)
+      ? body.field_guidance
+          .map(asRecord)
+          .map((item) => {
+            const field = readNamedString(item ?? {}, ["field"]);
+            const problem = readNamedString(item ?? {}, ["problem", "guidance"]);
+            return field && problem ? `${field}: ${problem}` : undefined;
+          })
+          .filter((item): item is string => Boolean(item))
+          .join("; ")
+      : "";
+    throw new Error(`SkilzVolt requested revisions: ${message}${guidance ? ` (${guidance})` : ""}`);
+  }
   const nestedProposal = asRecord(body.proposal);
   const proposal =
     nestedProposal ??

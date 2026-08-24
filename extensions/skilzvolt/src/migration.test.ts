@@ -27,7 +27,7 @@ function fakeClient(params: { current: string; proposalStatus?: string }): Skilz
     callTool: async (name: string, args: Record<string, unknown>) => {
       if (name === "skills_create") {
         expect(args.content).toBe(content);
-        return { data: { proposal: { id: "proposal-1" } } };
+        return { data: { result: { proposal_id: "proposal-1" } } };
       }
       if (name === "skills_proposal_status") {
         return {
@@ -131,6 +131,42 @@ describe("SkilzVoltMigrationManager", () => {
     })) as { verified: boolean };
     expect(result.verified).toBe(false);
     await expect(fs.stat(path.join(skillDir, "SKILL.md"))).resolves.toBeTruthy();
+  });
+
+  it("reports SkilzVolt revision guidance instead of treating it as a missing proposal", async () => {
+    const { stateDir } = await setup();
+    const client = {
+      listTools: async () => [
+        {
+          name: "skills_create",
+          inputSchema: { properties: { content: { type: "string" } } },
+        },
+      ],
+      callTool: async () => ({
+        data: {
+          result: {
+            needs_revision: true,
+            saved: false,
+            message: "A description is required",
+            field_guidance: [{ field: "description", problem: "Provide a concise summary" }],
+          },
+        },
+      }),
+    } as unknown as SkilzVoltClient;
+    const manager = new SkilzVoltMigrationManager(client, {
+      stateDir,
+      organisationSkillNames: ["app-build"],
+    });
+
+    await expect(
+      manager.submit({
+        skillName: "app-build",
+        createArguments: { workspace_id: "workspace-1", name: "app-build" },
+        contentParameter: "content",
+      }),
+    ).rejects.toThrow(
+      "SkilzVolt requested revisions: A description is required (description: Provide a concise summary)",
+    );
   });
 
   it("previews the full discovered inventory and only submits entries classified as new", async () => {
