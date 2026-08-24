@@ -2,11 +2,14 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { SKILZVOLT_MAX_ARGUMENT_BYTES } from "./client.js";
 import type { SkilzVoltClient } from "./client.js";
 
 const MAX_SKILL_BYTES = 256_000;
 const MAX_RESOURCE_BYTES = 256_000;
 const MAX_RESOURCE_COUNT = 50;
+// Leave room for the JSON-RPC envelope and small schema additions.
+const MIGRATION_BATCH_ARGUMENT_BYTES = SKILZVOLT_MAX_ARGUMENT_BYTES - 16_384;
 
 type JournalEntry = {
   hash: string;
@@ -47,6 +50,62 @@ type LocalSkillRoot = {
   source: string;
   directory: string;
 };
+
+type MigrationItem = {
+  client_ref: string;
+  name: string;
+  description?: string;
+  content: string;
+  suggested_purpose?: string;
+  suggested_rules?: string;
+  rationale?: string;
+};
+
+function batchMigrationItems(
+  workspaceId: string,
+  items: MigrationItem[],
+  extraArguments: Record<string, unknown> = {},
+): MigrationItem[][] {
+  const batches: MigrationItem[][] = [];
+  let batch: MigrationItem[] = [];
+  for (const item of items) {
+    const candidate = [...batch, item];
+    const size = Buffer.byteLength(
+      JSON.stringify({ workspace_id: workspaceId, ...extraArguments, skills: candidate }),
+    );
+    if (size > MIGRATION_BATCH_ARGUMENT_BYTES) {
+      if (batch.length === 0) {
+        throw new Error(
+          `Migration item ${item.name} exceeds the safe SkilzVolt argument size; split or shorten that skill before migrating`,
+        );
+      }
+      batches.push(batch);
+      batch = [item];
+      const singleSize = Buffer.byteLength(
+        JSON.stringify({ workspace_id: workspaceId, ...extraArguments, skills: batch }),
+      );
+      if (singleSize > MIGRATION_BATCH_ARGUMENT_BYTES) {
+        throw new Error(
+          `Migration item ${item.name} exceeds the safe SkilzVolt argument size; split or shorten that skill before migrating`,
+        );
+      }
+    } else {
+      batch = candidate;
+    }
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+function combineMigrationResponses(responses: unknown[]): Record<string, unknown> {
+  const bodies = responses.map(readTextResult);
+  const first = bodies[0] ?? {};
+  return {
+    ...first,
+    results: bodies.flatMap((body) => (Array.isArray(body.results) ? body.results : [])),
+    batch_count: responses.length,
+  };
+}
 
 function defaultStateDir(): string {
   return process.env.OPENCLAW_STATE_DIR?.trim() || path.join(os.homedir(), ".openclaw");
@@ -427,30 +486,28 @@ export class SkilzVoltMigrationManager {
   async previewAll(params: { workspaceId?: string; signal?: AbortSignal }): Promise<unknown> {
     const workspaceId = await this.writableWorkspace(params.workspaceId, params.signal);
     const skills = await this.discoverLocalSkills();
-    const candidates = skills.map((skill) => ({
+    const candidates: MigrationItem[] = skills.map((skill) => ({
       client_ref: `${skill.source}:${skill.name}:${skill.hash}`,
       name: skill.name,
       content: skill.content,
     }));
-    return this.client.callTool(
-      "skills_migration_preview",
-      { workspace_id: workspaceId, skills: candidates },
-      params.signal,
-    );
+    const responses: unknown[] = [];
+    for (const batch of batchMigrationItems(workspaceId, candidates)) {
+      responses.push(
+        await this.client.callTool(
+          "skills_migration_preview",
+          { workspace_id: workspaceId, skills: batch },
+          params.signal,
+        ),
+      );
+    }
+    return combineMigrationResponses(responses);
   }
 
   async submitAll(params: {
     workspaceId?: string;
     migrationOperationId: string;
-    items: Array<{
-      client_ref: string;
-      name: string;
-      description?: string;
-      content: string;
-      suggested_purpose?: string;
-      suggested_rules?: string;
-      rationale?: string;
-    }>;
+    items: MigrationItem[];
     signal?: AbortSignal;
   }): Promise<unknown> {
     const workspaceId = await this.writableWorkspace(params.workspaceId, params.signal);
@@ -474,13 +531,18 @@ export class SkilzVoltMigrationManager {
         );
       }
     }
-    const preview = await this.client.callTool(
-      "skills_migration_preview",
-      { workspace_id: workspaceId, skills: params.items },
-      params.signal,
-    );
-    const previewBody = readTextResult(preview);
-    const previewResults = Array.isArray(previewBody.results) ? previewBody.results : [];
+    const previewResponses: unknown[] = [];
+    for (const batch of batchMigrationItems(workspaceId, params.items)) {
+      previewResponses.push(
+        await this.client.callTool(
+          "skills_migration_preview",
+          { workspace_id: workspaceId, skills: batch },
+          params.signal,
+        ),
+      );
+    }
+    const preview = combineMigrationResponses(previewResponses);
+    const previewResults = Array.isArray(preview.results) ? preview.results : [];
     const newRefs = new Set(
       previewResults
         .map(asRecord)
@@ -503,17 +565,24 @@ export class SkilzVoltMigrationManager {
         })),
       };
     }
-    const result = await this.client.callTool(
-      "skills_migration_submit",
-      {
-        workspace_id: workspaceId,
-        migration_operation_id: params.migrationOperationId,
-        skills: approvedItems,
-      },
-      params.signal,
-    );
-    const body = readTextResult(result);
-    const results = Array.isArray(body.results) ? body.results : [];
+    const submitResponses: unknown[] = [];
+    for (const batch of batchMigrationItems(workspaceId, approvedItems, {
+      migration_operation_id: params.migrationOperationId,
+    })) {
+      submitResponses.push(
+        await this.client.callTool(
+          "skills_migration_submit",
+          {
+            workspace_id: workspaceId,
+            migration_operation_id: params.migrationOperationId,
+            skills: batch,
+          },
+          params.signal,
+        ),
+      );
+    }
+    const result = combineMigrationResponses(submitResponses);
+    const results = Array.isArray(result.results) ? result.results : [];
     const journal = await this.readJournal();
     for (const item of results) {
       const record = asRecord(item);

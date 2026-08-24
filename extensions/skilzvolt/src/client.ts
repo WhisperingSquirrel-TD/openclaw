@@ -26,6 +26,8 @@ export const SKILZVOLT_MIGRATION_TOOLS = [
   "skills_migration_recover",
 ] as const;
 
+export const SKILZVOLT_MAX_ARGUMENT_BYTES = 384_000;
+
 export const SKILZVOLT_ALLOWED_TOOLS = [
   ...SKILZVOLT_READ_TOOLS,
   ...SKILZVOLT_PROPOSAL_TOOLS,
@@ -469,7 +471,7 @@ export class SkilzVoltClient {
       throw new SkilzVoltError("SkilzVolt proposal operations are disabled", "permission");
     }
     const size = Buffer.byteLength(JSON.stringify(args));
-    if (size > 384_000) {
+    if (size > SKILZVOLT_MAX_ARGUMENT_BYTES) {
       throw new SkilzVoltError("SkilzVolt tool arguments exceeded the safety limit", "protocol");
     }
     const tools = await this.listTools(signal);

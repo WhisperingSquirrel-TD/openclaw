@@ -256,4 +256,32 @@ describe("SkilzVoltMigrationManager", () => {
       sha256: createHash("sha256").update(workspaceContent).digest("hex"),
     });
   });
+
+  it("splits large migration previews into bounded requests", async () => {
+    const { stateDir, skillDir } = await setup();
+    const secondSkillDir = path.join(stateDir, "skills", "second-skill");
+    await fs.mkdir(secondSkillDir, { recursive: true });
+    const firstContent = `${"# first\n"}${"a".repeat(190_000)}`;
+    const secondContent = `${"# second\n"}${"b".repeat(190_000)}`;
+    await fs.writeFile(path.join(skillDir, "SKILL.md"), firstContent);
+    await fs.writeFile(path.join(secondSkillDir, "SKILL.md"), secondContent);
+    const previewBatchSizes: number[] = [];
+    const client = {
+      callTool: async (name: string, args: Record<string, unknown>) => {
+        if (name === "skills_migration_preview") {
+          previewBatchSizes.push((args.skills as unknown[]).length);
+          return { structuredContent: { results: [] } };
+        }
+        return {};
+      },
+    } as unknown as SkilzVoltClient;
+    const manager = new SkilzVoltMigrationManager(client, {
+      stateDir,
+      organisationSkillNames: [],
+    });
+
+    await manager.previewAll({ workspaceId: "workspace-1" });
+
+    expect(previewBatchSizes).toEqual([1, 1]);
+  });
 });
