@@ -530,10 +530,12 @@ export class SkilzVoltMigrationManager {
       seenRefs.add(item.client_ref);
       const local = await this.findLocalSkill(item.name);
       const expectedRef = `${local.source}:${local.name}:${local.hash}`;
-      if (
-        (item.content !== undefined && item.content !== local.content) ||
-        item.client_ref !== expectedRef
-      ) {
+      if ((item.content?.length ?? 0) > 0 && item.content !== local.content) {
+        throw new Error(
+          `Migration item ${item.name} no longer matches the discovered local skill or stable client_ref`,
+        );
+      }
+      if (item.client_ref !== expectedRef) {
         throw new Error(
           `Migration item ${item.name} no longer matches the discovered local skill or stable client_ref`,
         );

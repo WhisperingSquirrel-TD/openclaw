@@ -184,7 +184,7 @@ describe("SkilzVoltMigrationManager", () => {
     await manager.submitAll({
       workspaceId: "workspace-1",
       migrationOperationId: "operation-1",
-      items: [{ client_ref: clientRef, name: "app-build" }],
+      items: [{ client_ref: clientRef, name: "app-build", content: "" }],
     });
     expect(calls.map((call) => call.name)).toEqual([
       "skills_migration_preview",
