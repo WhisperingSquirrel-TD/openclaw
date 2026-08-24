@@ -124,7 +124,12 @@ export function createSkilzVoltMigrationTool(migration: SkilzVoltMigrationManage
               client_ref: Type.String(),
               name: Type.String(),
               description: Type.Optional(Type.String()),
-              content: Type.String(),
+              content: Type.Optional(
+                Type.String({
+                  description:
+                    "Optional integrity check. The bridge loads the exact active local SKILL.md itself.",
+                }),
+              ),
               suggested_purpose: Type.Optional(Type.String()),
               suggested_rules: Type.Optional(Type.String()),
               rationale: Type.Optional(Type.String()),

@@ -61,6 +61,10 @@ type MigrationItem = {
   rationale?: string;
 };
 
+type MigrationInputItem = Omit<MigrationItem, "content"> & {
+  content?: string;
+};
+
 function batchMigrationItems(
   workspaceId: string,
   items: MigrationItem[],
@@ -507,7 +511,7 @@ export class SkilzVoltMigrationManager {
   async submitAll(params: {
     workspaceId?: string;
     migrationOperationId: string;
-    items: MigrationItem[];
+    items: MigrationInputItem[];
     signal?: AbortSignal;
   }): Promise<unknown> {
     const workspaceId = await this.writableWorkspace(params.workspaceId, params.signal);
@@ -518,6 +522,7 @@ export class SkilzVoltMigrationManager {
       throw new Error("At least one preview candidate is required for migration submission");
     }
     const seenRefs = new Set<string>();
+    const items: MigrationItem[] = [];
     for (const item of params.items) {
       if (!item.client_ref || seenRefs.has(item.client_ref)) {
         throw new Error("Each migration item must have a unique non-empty client_ref");
@@ -525,14 +530,18 @@ export class SkilzVoltMigrationManager {
       seenRefs.add(item.client_ref);
       const local = await this.findLocalSkill(item.name);
       const expectedRef = `${local.source}:${local.name}:${local.hash}`;
-      if (item.content !== local.content || item.client_ref !== expectedRef) {
+      if (
+        (item.content !== undefined && item.content !== local.content) ||
+        item.client_ref !== expectedRef
+      ) {
         throw new Error(
           `Migration item ${item.name} no longer matches the discovered local skill or stable client_ref`,
         );
       }
+      items.push({ ...item, content: local.content });
     }
     const previewResponses: unknown[] = [];
-    for (const batch of batchMigrationItems(workspaceId, params.items)) {
+    for (const batch of batchMigrationItems(workspaceId, items)) {
       previewResponses.push(
         await this.client.callTool(
           "skills_migration_preview",
@@ -551,14 +560,14 @@ export class SkilzVoltMigrationManager {
         .map((item) => readNamedString(item, ["client_ref", "clientRef"]))
         .filter((ref): ref is string => Boolean(ref)),
     );
-    const approvedItems = params.items.filter((item) => newRefs.has(item.client_ref));
+    const approvedItems = items.filter((item) => newRefs.has(item.client_ref));
     if (approvedItems.length === 0) {
       return {
         submitted: false,
         migrationOperationId: params.migrationOperationId,
         workspaceId,
         preview,
-        outcomes: params.items.map((item) => ({
+      outcomes: items.map((item) => ({
           client_ref: item.client_ref,
           skill_name: item.name,
           status: "not_submitted_not_new",
@@ -612,7 +621,7 @@ export class SkilzVoltMigrationManager {
       migrationOperationId: params.migrationOperationId,
       preview,
       result,
-      skipped: params.items
+      skipped: items
         .filter((item) => !newRefs.has(item.client_ref))
         .map((item) => ({ client_ref: item.client_ref, skill_name: item.name })),
     };
