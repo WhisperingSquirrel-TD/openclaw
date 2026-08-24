@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -28,7 +29,7 @@ function fakeClient(params: { current: string; proposalStatus?: string }): Skilz
         expect(args.content).toBe(content);
         return { proposal: { id: "proposal-1" } };
       }
-      if (name === "skill_proposals_get") {
+      if (name === "skills_proposal_status") {
         return {
           proposal: {
             id: "proposal-1",
@@ -105,7 +106,10 @@ describe("SkilzVoltMigrationManager", () => {
     expect(result.deletedLocally).toBe(true);
     await expect(fs.stat(skillDir)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
-      fs.readFile(path.join(stateDir, "skilzvolt", "retired-skills", "app-build"), "utf8"),
+      fs.readFile(
+        path.join(stateDir, "skilzvolt", "retired-skills", "managed", "app-build"),
+        "utf8",
+      ),
     ).resolves.toMatch(/^[a-f0-9]{64}\n$/);
   });
 
@@ -127,5 +131,129 @@ describe("SkilzVoltMigrationManager", () => {
     })) as { verified: boolean };
     expect(result.verified).toBe(false);
     await expect(fs.stat(path.join(skillDir, "SKILL.md"))).resolves.toBeTruthy();
+  });
+
+  it("previews the full discovered inventory and only submits entries classified as new", async () => {
+    const { stateDir, skillDir } = await setup();
+    await fs.mkdir(path.join(skillDir, "resources"), { recursive: true });
+    await fs.writeFile(path.join(skillDir, "resources", "runbook.txt"), "reference");
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const client = {
+      callTool: async (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        if (name === "skills_migration_preview") {
+          return {
+            structuredContent: {
+              results: [{ client_ref: clientRef, classification: "new" }],
+            },
+          };
+        }
+        if (name === "skills_migration_submit") {
+          return {
+            structuredContent: {
+              results: [
+                {
+                  client_ref: clientRef,
+                  skill_name: "app-build",
+                  proposal_id: "proposal-2",
+                  status: "processing",
+                },
+              ],
+            },
+          };
+        }
+        return {};
+      },
+    } as unknown as SkilzVoltClient;
+    const manager = new SkilzVoltMigrationManager(client, {
+      stateDir,
+      organisationSkillNames: [],
+    });
+    const clientRef = `managed:app-build:${createHash("sha256").update(content).digest("hex")}`;
+    const inventory = (await manager.inventory()) as {
+      scope: string;
+      skills: Array<{ name: string; resourceCoverage: string; resources: unknown[] }>;
+    };
+    expect(inventory.scope).toBe("all-local-skill-roots");
+    expect(inventory.skills[0]).toMatchObject({
+      name: "app-build",
+      resourceCoverage: "local-only-unverified",
+    });
+    expect(inventory.skills[0]?.resources).toHaveLength(1);
+
+    await manager.submitAll({
+      workspaceId: "workspace-1",
+      migrationOperationId: "operation-1",
+      items: [{ client_ref: clientRef, name: "app-build", content }],
+    });
+    expect(calls.map((call) => call.name)).toEqual([
+      "skills_migration_preview",
+      "skills_migration_submit",
+    ]);
+    await expect(fs.stat(path.join(skillDir, "SKILL.md"))).resolves.toBeTruthy();
+  });
+
+  it("does not submit non-new preview results and recovers uncertain requests by stable identifiers", async () => {
+    const { stateDir } = await setup();
+    const clientRef = `managed:app-build:${createHash("sha256").update(content).digest("hex")}`;
+    const calls: string[] = [];
+    const client = {
+      callTool: async (name: string) => {
+        calls.push(name);
+        if (name === "skills_migration_preview") {
+          return {
+            structuredContent: {
+              results: [{ client_ref: clientRef, classification: "already current" }],
+            },
+          };
+        }
+        if (name === "skills_migration_recover") {
+          return { structuredContent: { found: true, result: { proposal_id: "proposal-1" } } };
+        }
+        return {};
+      },
+    } as unknown as SkilzVoltClient;
+    const manager = new SkilzVoltMigrationManager(client, {
+      stateDir,
+      organisationSkillNames: [],
+    });
+    const result = (await manager.submitAll({
+      workspaceId: "workspace-1",
+      migrationOperationId: "operation-1",
+      items: [{ client_ref: clientRef, name: "app-build", content }],
+    })) as { submitted: boolean };
+    expect(result.submitted).toBe(false);
+    expect(calls).toEqual(["skills_migration_preview"]);
+    await expect(
+      manager.recover({
+        workspaceId: "workspace-1",
+        migrationOperationId: "operation-1",
+        clientRef,
+      }),
+    ).resolves.toMatchObject({ structuredContent: { found: true } });
+  });
+
+  it("uses the active workspace skill when a lower-precedence local copy has the same name", async () => {
+    const { stateDir } = await setup();
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "skilzvolt-workspace-"));
+    const workspaceSkillDir = path.join(workspaceDir, "skills", "app-build");
+    const workspaceContent = "# Workspace build\n\nThis copy is active.\n";
+    await fs.mkdir(workspaceSkillDir, { recursive: true });
+    await fs.writeFile(path.join(workspaceSkillDir, "SKILL.md"), workspaceContent);
+    const manager = new SkilzVoltMigrationManager({} as SkilzVoltClient, {
+      stateDir,
+      workspaceDir,
+      organisationSkillNames: [],
+    });
+
+    const inventory = (await manager.inventory()) as {
+      skills: Array<{ name: string; source: string; sha256: string }>;
+    };
+    expect(inventory.skills).toHaveLength(1);
+    expect(inventory.skills[0]).toMatchObject({
+      name: "app-build",
+      source: "workspace",
+      sha256: createHash("sha256").update(workspaceContent).digest("hex"),
+    });
   });
 });

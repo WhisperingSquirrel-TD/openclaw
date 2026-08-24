@@ -18,7 +18,6 @@ export const SKILZVOLT_PROPOSAL_TOOLS = [
   "skills_create",
   "skills_propose_change",
   "skills_submit_review",
-  "skills_migration_submit",
 ] as const;
 
 export const SKILZVOLT_MIGRATION_TOOLS = [
@@ -41,6 +40,15 @@ export type McpToolDescription = {
   inputSchema?: Record<string, unknown>;
 };
 
+export type SkilzVoltToolResult = {
+  isError?: boolean;
+  content?: unknown[];
+  structuredContent?: Record<string, unknown>;
+  /** Parsed structuredContent or the JSON encoded in a text content block. */
+  data?: unknown;
+  [key: string]: unknown;
+};
+
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export type SkilzVoltClientOptions = {
@@ -50,16 +58,19 @@ export type SkilzVoltClientOptions = {
   timeoutMs?: number;
   maxResponseBytes?: number;
   getBearerToken?: () => string | undefined;
+  subscribeToNotifications?: boolean;
 };
 
 const REQUIRED_TOOLS = new Set([
   "workspaces_list",
   "skills_search",
   "skills_get",
-  "connection_diagnostic",
 ]);
 const ALLOWED_TOOL_SET = new Set<string>(SKILZVOLT_ALLOWED_TOOLS);
-const PROPOSAL_TOOL_SET = new Set<string>(SKILZVOLT_PROPOSAL_TOOLS);
+const PROPOSAL_TOOL_SET = new Set<string>([
+  ...SKILZVOLT_PROPOSAL_TOOLS,
+  "skills_migration_submit",
+]);
 
 function redact(value: string, secret?: string): string {
   let redacted = value;
@@ -128,6 +139,42 @@ function parseResponsePayload(text: string, contentType: string | null): unknown
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function parseToolResult(value: unknown): SkilzVoltToolResult {
+  const result = asRecord(value);
+  if (!result) {
+    throw new SkilzVoltError("SkilzVolt returned an invalid tool result", "protocol");
+  }
+  const structuredContent = asRecord(result.structuredContent);
+  if (structuredContent) {
+    return { ...result, structuredContent, data: structuredContent };
+  }
+  const text = Array.isArray(result.content)
+    ? result.content
+        .map(asRecord)
+        .find((entry) => entry?.type === "text" && typeof entry.text === "string")?.text
+    : undefined;
+  if (typeof text === "string") {
+    try {
+      return { ...result, data: JSON.parse(text) };
+    } catch {
+      if (result.isError === true) {
+        return { ...result, data: { message: text } };
+      }
+      throw new SkilzVoltError(
+        "SkilzVolt returned non-JSON text content for a successful tool result",
+        "protocol",
+      );
+    }
+  }
+  return result;
+}
+
 async function readBoundedBody(response: Response, maxBytes: number): Promise<string> {
   if (!response.body) {
     return "";
@@ -164,6 +211,7 @@ export class SkilzVoltClient {
   private initialized = false;
   private requestId = 0;
   private tools?: McpToolDescription[];
+  private notificationController?: AbortController;
 
   constructor(private readonly options: SkilzVoltClientOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -312,9 +360,59 @@ export class SkilzVoltClient {
     }
     await this.request("notifications/initialized", undefined, true, signal);
     this.initialized = true;
+    if (this.options.subscribeToNotifications) {
+      void this.startNotificationStream();
+    }
+  }
+
+  private async startNotificationStream(): Promise<void> {
+    if (this.notificationController || !this.sessionId) return;
+    const controller = new AbortController();
+    this.notificationController = controller;
+    try {
+      const response = await this.fetchImpl(SKILZVOLT_ENDPOINT, {
+        method: "GET",
+        headers: {
+          accept: "text/event-stream",
+          authorization: `Bearer ${this.bearerToken()}`,
+          "mcp-session-id": this.sessionId,
+          "mcp-protocol-version": this.protocolVersion,
+        },
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (!controller.signal.aborted) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const frames = buffer.split(/\r?\n\r?\n/);
+        buffer = frames.pop() ?? "";
+        for (const payload of parseSse(frames.join("\n\n"))) {
+          if (
+            payload &&
+            typeof payload === "object" &&
+            (payload as Record<string, unknown>).method ===
+              "notifications/tools/list_changed"
+          ) {
+            this.tools = undefined;
+          }
+        }
+      }
+    } catch {
+      // The POST transport remains fully functional if an optional inbound SSE stream closes.
+    } finally {
+      if (this.notificationController === controller) {
+        this.notificationController = undefined;
+      }
+    }
   }
 
   reset(): void {
+    this.notificationController?.abort();
+    this.notificationController = undefined;
     this.sessionId = undefined;
     this.initialized = false;
     this.tools = undefined;
@@ -322,6 +420,9 @@ export class SkilzVoltClient {
 
   async listTools(signal?: AbortSignal): Promise<McpToolDescription[]> {
     await this.initialize(signal);
+    if (this.options.subscribeToNotifications && !this.notificationController) {
+      void this.startNotificationStream();
+    }
     if (this.tools) {
       return this.tools;
     }
@@ -378,6 +479,8 @@ export class SkilzVoltClient {
         "contract_drift",
       );
     }
-    return await this.request("tools/call", { name, arguments: args }, false, signal);
+    return parseToolResult(
+      await this.request("tools/call", { name, arguments: args }, false, signal),
+    );
   }
 }

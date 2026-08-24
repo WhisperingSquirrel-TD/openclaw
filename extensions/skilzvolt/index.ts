@@ -1,4 +1,5 @@
 import type { OpenClawPluginApi } from "../../src/plugin-sdk/index.js";
+import { resolvePluginSkillDirs } from "../../src/agents/skills/plugin-skills.js";
 import { resolveSkilzVoltConfig } from "./src/config.js";
 import { SkilzVoltClient } from "./src/client.js";
 import { SkilzVoltMigrationManager } from "./src/migration.js";
@@ -21,7 +22,7 @@ export default function registerSkilzVolt(api: OpenClawPluginApi) {
     if (ctx.senderIsOwner !== true) {
       return null;
     }
-    const client = new SkilzVoltClient(config);
+    const client = new SkilzVoltClient({ ...config, subscribeToNotifications: true });
     return createSkilzVoltTool(client);
   });
 
@@ -29,9 +30,15 @@ export default function registerSkilzVolt(api: OpenClawPluginApi) {
     if (ctx.senderIsOwner !== true) {
       return null;
     }
-    const client = new SkilzVoltClient(config);
+    const client = new SkilzVoltClient({ ...config, subscribeToNotifications: true });
     const migration = new SkilzVoltMigrationManager(client, {
       organisationSkillNames: config.organisationSkillNames,
+      workspaceDir: ctx.workspaceDir,
+      extraSkillDirs: ctx.config?.skills?.load?.extraDirs,
+      pluginSkillDirs: resolvePluginSkillDirs({
+        workspaceDir: ctx.workspaceDir,
+        config: ctx.config,
+      }),
     });
     return createSkilzVoltMigrationTool(migration);
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SkilzVoltClient } from "./client.js";
+import { SKILZVOLT_ALLOWED_TOOLS, SkilzVoltClient } from "./client.js";
 import { SKILZVOLT_ENDPOINT } from "./config.js";
 
 function rpc(id: number, result: unknown): Response {
@@ -25,6 +25,34 @@ const liveTools = [
 }));
 
 describe("SkilzVoltClient", () => {
+  it("allowlists every published contract tool and no arbitrary tool", async () => {
+    expect(SKILZVOLT_ALLOWED_TOOLS).toHaveLength(17);
+    const tools = SKILZVOLT_ALLOWED_TOOLS.map((name) => ({
+      name,
+      inputSchema: { type: "object", properties: {} },
+    }));
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { id?: number; method: string };
+      if (body.method === "initialize") return rpc(body.id!, { protocolVersion: "2025-06-18" });
+      if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+      if (body.method === "tools/list") return rpc(body.id!, { tools: [...tools, { name: "nope" }] });
+      return rpc(body.id!, { structuredContent: { page: 1 }, content: [] });
+    });
+    const client = new SkilzVoltClient({
+      connectionKeyEnv: "TEST_SKILZVOLT_KEY",
+      allowProposals: true,
+      fetchImpl: fetchImpl as typeof fetch,
+      getBearerToken: () => "svk_test_only",
+    });
+
+    expect((await client.listTools()).map((tool) => tool.name)).toEqual(SKILZVOLT_ALLOWED_TOOLS);
+    await expect(client.callTool("skills_export_all", { cursor: "opaque", limit: 1 })).resolves.toEqual({
+      content: [],
+      structuredContent: { page: 1 },
+      data: { page: 1 },
+    });
+  });
+
   it("uses only the fixed endpoint and filters the live tool list", async () => {
     const urls: string[] = [];
     const calls: string[] = [];
@@ -44,7 +72,7 @@ describe("SkilzVoltClient", () => {
       if (body.method === "tools/list") {
         return rpc(body.id!, { tools: liveTools });
       }
-      return rpc(body.id!, { content: [{ type: "text", text: "ok" }] });
+      return rpc(body.id!, { content: [{ type: "text", text: "{}" }] });
     });
     const client = new SkilzVoltClient({
       connectionKeyEnv: "TEST_SKILZVOLT_KEY",
@@ -181,5 +209,49 @@ describe("SkilzVoltClient", () => {
     await expect(client.callTool("skills_search", {})).rejects.toMatchObject({
       kind: "contract_drift",
     });
+  });
+
+  it("refreshes its catalogue after a tool-list-changed notification and preserves MCP errors", async () => {
+    let toolListCalls = 0;
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { id?: number; method: string };
+      if (body.method === "initialize") return rpc(body.id!, { protocolVersion: "2025-06-18" });
+      if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+      if (body.method === "tools/list") {
+        toolListCalls += 1;
+        return rpc(body.id!, {
+          tools: [
+            { name: "workspaces_list" },
+            { name: "skills_search" },
+            { name: "skills_get" },
+            ...(toolListCalls > 1 ? [{ name: "connection_diagnostic" }] : []),
+          ],
+        });
+      }
+      return new Response(
+        [
+          'data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}',
+          "",
+          `data: {"jsonrpc":"2.0","id":${body.id},"result":{"isError":true,"content":[{"type":"text","text":"denied"}]}}`,
+          "",
+        ].join("\n"),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    });
+    const client = new SkilzVoltClient({
+      connectionKeyEnv: "TEST_SKILZVOLT_KEY",
+      allowProposals: true,
+      fetchImpl: fetchImpl as typeof fetch,
+      getBearerToken: () => "svk_test_only",
+    });
+
+    await client.listTools();
+    await expect(client.callTool("skills_search", { query: "test" })).resolves.toEqual({
+      isError: true,
+      content: [{ type: "text", text: "denied" }],
+      data: { message: "denied" },
+    });
+    expect((await client.listTools()).map((tool) => tool.name)).toContain("connection_diagnostic");
+    expect(toolListCalls).toBe(2);
   });
 });

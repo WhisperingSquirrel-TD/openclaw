@@ -23,8 +23,20 @@ type SkilzVoltParams = {
 };
 
 type MigrationParams = {
-  action: "inventory" | "submit" | "verify_and_retire";
+  action: "inventory" | "preview" | "submit" | "submit_all" | "recover" | "verify_and_retire";
   skillName?: string;
+  workspaceId?: string;
+  migrationOperationId?: string;
+  clientRef?: string;
+  items?: Array<{
+    client_ref: string;
+    name: string;
+    description?: string;
+    content: string;
+    suggested_purpose?: string;
+    suggested_rules?: string;
+    rationale?: string;
+  }>;
   arguments?: Record<string, unknown>;
   contentParameter?: string;
   proposalStatusArguments?: Record<string, unknown>;
@@ -86,16 +98,38 @@ export function createSkilzVoltMigrationTool(migration: SkilzVoltMigrationManage
     name: "skilzvolt_local_migration",
     label: "SkilzVolt Local Skill Migration",
     description:
-      "Owner-only migration control. Inventory is dry-run. Submit injects the exact local SKILL.md into a governed proposal and never deletes it. verify_and_retire deletes only after skills_get returns an exact current content match.",
+      "Owner-only migration control. Inventory and preview are read-only. Preview the complete local skill inventory, submit only preview-approved new items with stable migration_operation_id/client_ref values, and use recover after uncertain requests. No action deletes a local skill; verify_and_retire requires approved/current status plus byte-for-byte readback.",
     ownerOnly: true,
     parameters: Type.Object(
       {
         action: stringEnum(
-          ["inventory", "submit", "verify_and_retire"] as const,
-          "Migration action.",
+          ["inventory", "preview", "submit", "submit_all", "recover", "verify_and_retire"] as const,
+          "Migration action. Use preview before submit_all.",
         ),
         skillName: Type.Optional(
           Type.String({ description: "Configured organisation skill name." }),
+        ),
+        workspaceId: Type.Optional(
+          Type.String({ description: "Target writable SkilzVolt workspace ID." }),
+        ),
+        migrationOperationId: Type.Optional(
+          Type.String({ description: "Stable idempotency key reused across retries." }),
+        ),
+        clientRef: Type.Optional(
+          Type.String({ description: "Stable item reference used by preview and recovery." }),
+        ),
+        items: Type.Optional(
+          Type.Array(
+            Type.Object({
+              client_ref: Type.String(),
+              name: Type.String(),
+              description: Type.Optional(Type.String()),
+              content: Type.String(),
+              suggested_purpose: Type.Optional(Type.String()),
+              suggested_rules: Type.Optional(Type.String()),
+              rationale: Type.Optional(Type.String()),
+            }),
+          ),
         ),
         arguments: Type.Optional(
           Type.Record(Type.String(), Type.Unknown(), {
@@ -111,7 +145,7 @@ export function createSkilzVoltMigrationTool(migration: SkilzVoltMigrationManage
         ),
         proposalStatusArguments: Type.Optional(
           Type.Record(Type.String(), Type.Unknown(), {
-            description: "Live skill_proposals_get arguments for the recorded proposal.",
+              description: "Live skills_proposal_status arguments for the recorded proposal.",
           }),
         ),
       },
@@ -122,6 +156,42 @@ export function createSkilzVoltMigrationTool(migration: SkilzVoltMigrationManage
       try {
         if (params.action === "inventory") {
           return jsonResult({ ok: true, result: await migration.inventory() });
+        }
+        if (params.action === "preview") {
+          return jsonResult({
+            ok: true,
+            result: await migration.previewAll({ workspaceId: params.workspaceId, signal }),
+          });
+        }
+        if (params.action === "submit_all") {
+          if (!params.migrationOperationId || !params.items) {
+            throw new Error("migrationOperationId and items are required for action=submit_all");
+          }
+          return jsonResult({
+            ok: true,
+            result: await migration.submitAll({
+              workspaceId: params.workspaceId,
+              migrationOperationId: params.migrationOperationId,
+              items: params.items,
+              signal,
+            }),
+          });
+        }
+        if (params.action === "recover") {
+          if (!params.workspaceId || !params.migrationOperationId || !params.clientRef) {
+            throw new Error(
+              "workspaceId, migrationOperationId, and clientRef are required for action=recover",
+            );
+          }
+          return jsonResult({
+            ok: true,
+            result: await migration.recover({
+              workspaceId: params.workspaceId,
+              migrationOperationId: params.migrationOperationId,
+              clientRef: params.clientRef,
+              signal,
+            }),
+          });
         }
         if (!params.skillName) {
           throw new Error("skillName is required for this migration action");
