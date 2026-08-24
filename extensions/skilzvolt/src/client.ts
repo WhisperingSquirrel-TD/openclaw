@@ -6,22 +6,31 @@ export const SKILZVOLT_READ_TOOLS = [
   "workspaces_list",
   "skills_search",
   "skills_get",
+  "connection_diagnostic",
   "skills_get_resource",
-  "skill_proposals_list",
-  "skill_proposals_get",
-  "skill_proposals_get_diff",
-  "skill_proposals_status",
+  "skills_export_all",
+  "skills_check_pending",
+  "skills_proposal_status",
+  "skills_get_proposal_diff",
 ] as const;
 
 export const SKILZVOLT_PROPOSAL_TOOLS = [
   "skills_create",
   "skills_propose_change",
   "skills_submit_review",
+  "skills_migration_submit",
+] as const;
+
+export const SKILZVOLT_MIGRATION_TOOLS = [
+  "skills_migration_preview",
+  "skills_migration_submit",
+  "skills_migration_recover",
 ] as const;
 
 export const SKILZVOLT_ALLOWED_TOOLS = [
   ...SKILZVOLT_READ_TOOLS,
   ...SKILZVOLT_PROPOSAL_TOOLS,
+  ...SKILZVOLT_MIGRATION_TOOLS,
 ] as const;
 
 export type SkilzVoltToolName = (typeof SKILZVOLT_ALLOWED_TOOLS)[number];
@@ -43,7 +52,12 @@ export type SkilzVoltClientOptions = {
   getBearerToken?: () => string | undefined;
 };
 
-const REQUIRED_TOOLS = new Set(["workspaces_list", "skills_search", "skills_get"]);
+const REQUIRED_TOOLS = new Set([
+  "workspaces_list",
+  "skills_search",
+  "skills_get",
+  "connection_diagnostic",
+]);
 const ALLOWED_TOOL_SET = new Set<string>(SKILZVOLT_ALLOWED_TOOLS);
 const PROPOSAL_TOOL_SET = new Set<string>(SKILZVOLT_PROPOSAL_TOOLS);
 
@@ -244,6 +258,17 @@ export class SkilzVoltClient {
       }
 
       const payloads = parseResponsePayload(text, response.headers.get("content-type"));
+      if (
+        payloads.some(
+          (candidate) =>
+            candidate &&
+            typeof candidate === "object" &&
+            (candidate as Record<string, unknown>).method ===
+              "notifications/tools/list_changed",
+        )
+      ) {
+        this.tools = undefined;
+      }
       const payload = payloads.find(
         (candidate) =>
           candidate &&
