@@ -4,6 +4,12 @@
 
 Task-system email delivery is allowed without a fresh TOTP prompt only after the owner has approved the prerequisite work and explicitly signed off the final draft. The task system, not the assistant client, is the authorization authority.
 
+## Drafting before recipient resolution
+
+An unknown or unresolved recipient must not block drafting. The assistant may submit a fresh-message brief or draft request and the task system should save it as unsent, clearly marking recipient resolution as pending. It may be reviewed, enriched, and edited like any other draft. No email provider call or dispatch permit is allowed at this stage.
+
+Recipient resolution is required only when the owner is ready to approve final delivery. The signed permit must contain the resolved final To/CC/BCC lists, and any later change must invalidate that approval.
+
 ## Required server behaviour
 
 1. Persist a canonical draft containing the sender, To/CC/BCC recipients, subject, body type and body, reply target, and immutable attachment identifiers or hashes.

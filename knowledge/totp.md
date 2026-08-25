@@ -23,6 +23,8 @@ When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator 
 
 Task-system email is the only exception to a fresh TOTP prompt. The task system must first record the prerequisite task approvals and an explicit owner sign-off of the final email. It then issues a signed, short-lived, single-use permit bound to that exact draft.
 
+Recipient uncertainty does not block drafting: the task system may save an unsent draft while recipient resolution is pending. It must not issue a dispatch permit or contact Microsoft Graph until the final recipient list is resolved and owner-approved.
+
 The Microsoft sender verifies the permit's signature, task and draft identity, expiry, one-time identifier, and fingerprint of recipients, BCC, sender name, subject, body, reply target, and attachment hashes before sending. A changed or replayed permit is blocked. The assistant must never be able to set an approval field, provide a permit, or provide edited email content when requesting task-system delivery.
 
 ## Setup

@@ -281,7 +281,7 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
     name: "task_system",
     ownerOnly: true,
     description:
-      "Operate the Workspace Control Panel task system directly over its bearer-authenticated Pi gateway without shell exec. Supports fast capture/capture_batch, generic brief_intake, intake decompose/commit, entity context/timeline, CRUD, operator control, bounded task-context-broker registry/binding/load actions, and a task-bound Outlook reply-draft writer that never sends and does not use shell exec. Broker retrieval accepts only stored task/subtask/entity/profile bindings and never accepts arbitrary paths, searches, URLs, or mailbox/thread selectors.",
+      "Operate the Workspace Control Panel task system directly over its bearer-authenticated Pi gateway without shell exec. Supports fast capture/capture_batch, generic brief_intake, entity context/timeline, CRUD, operator control, bounded task-context-broker registry/binding/load actions, and email draft creation that never sends. Unknown or unresolved recipients may remain in an unsent draft; only final dispatch requires a resolved, owner-signed draft. Broker retrieval accepts only stored task/subtask/entity/profile bindings and never accepts arbitrary paths, searches, URLs, or mailbox/thread selectors.",
     parameters: TaskSystemToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;

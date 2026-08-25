@@ -20,7 +20,8 @@ afterEach(async () => {
 describe("task_system brief_intake bridge", () => {
   it("forwards the chat fresh-Outlook brief unchanged to the bounded intake route", async () => {
     const expectedPayload = {
-      brief: "Create an unsent fresh Outlook draft... standalone new message, not a reply...",
+      brief:
+        "Create an unsent fresh Outlook draft to the new contact at an unknown address; leave it as a draft and do not send.",
       idempotency_key: "bridge-fresh-outlook-regression-v1",
     };
     let observed: { method?: string; path?: string; authorization?: string; payload?: unknown } =
@@ -42,7 +43,8 @@ describe("task_system brief_intake bridge", () => {
           interpretation: { work_type: "email_new_draft" },
           context_loading_contract: {
             reply_mode: "standalone_new_message",
-            context_requirements: [{ category: "verified_recipient_identity", required: true }],
+            recipient_resolution: "unknown_allowed_for_draft",
+            context_requirements: [{ category: "verified_recipient_identity", required: false }],
           },
         }),
       );
