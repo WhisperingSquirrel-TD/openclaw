@@ -41,3 +41,7 @@ externalPort = 3000
 deploymentTarget = "static"
 build = ["/nix/store/61lr9izijvg30pcribjdxgjxvh3bysp4-pnpm-10.26.1/bin/pnpm", "run", "build"]
 publicDir = "dist/control-ui"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 300000
