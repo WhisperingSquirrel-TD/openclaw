@@ -37,6 +37,10 @@ externalPort = 80
 localPort = 23636
 externalPort = 3000
 
+[[ports]]
+localPort = 23637
+externalPort = 3001
+
 [deployment]
 deploymentTarget = "static"
 build = ["/nix/store/61lr9izijvg30pcribjdxgjxvh3bysp4-pnpm-10.26.1/bin/pnpm", "run", "build"]
