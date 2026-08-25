@@ -10,15 +10,6 @@ An unknown or unresolved recipient must not block drafting. The assistant may su
 
 Recipient resolution is required only when the owner is ready to approve final delivery. The signed permit must contain the resolved final To/CC/BCC lists, and any later change must invalidate that approval.
 
-## Two drafting modes
-
-The task-system API has two distinct draft routes:
-
-- `email_reply_draft` (legacy alias: `email_draft_create`) → `/task-system/email-draft/reply`. This is strictly thread-bound and must load the exact registered conversation context.
-- `email_new_draft` → `/task-system/email-draft/new`. This is a standalone outbound draft bound to the registered entity/current context. It must not require or infer a thread, mailbox, message, or conversation selector. Recipient resolution may remain pending while the draft is unsent.
-
-The fresh route is additive; it must not reclassify `fresh_outbound` as `reply_inbound`, and it must not weaken the reply route's exact-thread controls.
-
 ## Required server behaviour
 
 1. Persist a canonical draft containing the sender, To/CC/BCC recipients, subject, body type and body, reply target, and immutable attachment identifiers or hashes.
