@@ -6,10 +6,9 @@ import base64
 import hashlib
 import json
 import os
-import shutil
 import tarfile
 import tempfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -28,6 +27,7 @@ PROSPECTS = ROOT / 'prospects'
 AUDIT_EXPORTS = WORKSPACE / 'reference/pi-audit-exports/2026-06-03'
 TMP_ROOT = OPENCLAW / 'tmp/sharepoint-backup-staging'
 STATE_FILE = OPENCLAW / 'integrations/microsoft/sharepoint-backup-state.json'
+LOCAL_CLEANUP_JOURNAL = OPENCLAW / 'integrations/microsoft/sharepoint-local-archive-cleanup.json'
 LOG_FILE = WORKSPACE / 'memory/sharepoint-backup-log.txt'
 BACKUP_ROOT = '/OpenClaw Backups'
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -79,6 +79,20 @@ def log(msg: str):
 def write_state(state: dict):
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, indent=2), encoding='utf-8')
+
+
+def _write_cleanup_journal(journal: dict):
+    LOCAL_CLEANUP_JOURNAL.parent.mkdir(parents=True, exist_ok=True)
+    temporary = LOCAL_CLEANUP_JOURNAL.with_suffix('.tmp')
+    temporary.write_text(json.dumps(journal, indent=2), encoding='utf-8')
+    os.replace(temporary, LOCAL_CLEANUP_JOURNAL)
+
+
+def _read_cleanup_journal() -> dict:
+    try:
+        return json.loads(LOCAL_CLEANUP_JOURNAL.read_text(encoding='utf-8'))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 
 def should_exclude(rel: str, path: Path) -> bool:
@@ -291,13 +305,13 @@ def upload_file(access_token: str, site_id: str, drive_id: str, local_path: Path
 
 def _local_archive_files() -> list[Path]:
     """Return only the explicitly generated archive names at the backup root."""
-    if not LOCAL_BACKUP_ROOT.is_dir():
+    if not LOCAL_BACKUP_ROOT.is_dir() or LOCAL_BACKUP_ROOT.is_symlink():
         return []
     files: set[Path] = set()
     for pattern in LOCAL_BACKUP_PATTERNS:
         files.update(
             path for path in LOCAL_BACKUP_ROOT.glob(pattern)
-            if path.is_file() and path.parent == LOCAL_BACKUP_ROOT
+            if path.is_file() and not path.is_symlink() and path.parent == LOCAL_BACKUP_ROOT
         )
     return sorted(files)
 
@@ -315,7 +329,9 @@ def cleanup_uploaded_local_archives(
     """
     cutoff = datetime.now().timestamp() - (RETENTION_DAYS * 24 * 60 * 60)
     outcomes: list[dict] = []
+    journal = _read_cleanup_journal()
     for local_path in _local_archive_files():
+        journal_key = str(local_path)
         if local_path.stat().st_mtime > cutoff:
             outcomes.append({'file': str(local_path), 'status': 'retained_recent'})
             continue
@@ -325,15 +341,62 @@ def cleanup_uploaded_local_archives(
             before = local_path.stat()
             expected_size = before.st_size
             expected_sha256 = _local_sha256(local_path)
-            upload_file(access_token, site_id, drive_id, local_path, remote_path)
-            proof = verify_remote_file(
-                access_token, site_id, drive_id, local_path, remote_path,
-                expected_size=expected_size, expected_sha256=expected_sha256,
+            prior = journal.get(journal_key, {})
+            prior_matches = (
+                prior.get('remote_path') == remote_path
+                and prior.get('size') == expected_size
+                and prior.get('sha256') == expected_sha256
+                and prior.get('mtime_ns') == before.st_mtime_ns
+                and prior.get('status') in ('uploaded', 'verified')
             )
+            proof = None
+            if prior_matches:
+                try:
+                    proof = verify_remote_file(
+                        access_token, site_id, drive_id, local_path, remote_path,
+                        expected_size=expected_size, expected_sha256=expected_sha256,
+                    )
+                    log(f'Resumed verified local archive without re-upload: {local_path}')
+                except Exception:
+                    log(f'Previous remote proof is no longer valid; re-uploading: {local_path}')
+
+            if proof is None:
+                journal[journal_key] = {
+                    'remote_path': remote_path,
+                    'size': expected_size,
+                    'sha256': expected_sha256,
+                    'mtime_ns': before.st_mtime_ns,
+                    'status': 'pending',
+                    'updated_utc': datetime.now(timezone.utc).isoformat(),
+                }
+                _write_cleanup_journal(journal)
+                upload_file(access_token, site_id, drive_id, local_path, remote_path)
+                journal[journal_key].update({
+                    'status': 'uploaded',
+                    'updated_utc': datetime.now(timezone.utc).isoformat(),
+                })
+                _write_cleanup_journal(journal)
+                proof = verify_remote_file(
+                    access_token, site_id, drive_id, local_path, remote_path,
+                    expected_size=expected_size, expected_sha256=expected_sha256,
+                )
             after = local_path.stat()
             if after.st_size != expected_size or after.st_mtime_ns != before.st_mtime_ns:
                 raise RuntimeError('Local archive changed during upload; deletion refused')
+            journal[journal_key].update({
+                'status': 'verified',
+                'remote_item_id': proof.get('item_id'),
+                'remote_etag': proof.get('etag'),
+                'proof': proof.get('proof'),
+                'updated_utc': datetime.now(timezone.utc).isoformat(),
+            })
+            _write_cleanup_journal(journal)
             local_path.unlink()
+            journal[journal_key].update({
+                'status': 'deleted',
+                'updated_utc': datetime.now(timezone.utc).isoformat(),
+            })
+            _write_cleanup_journal(journal)
             outcomes.append({
                 'file': str(local_path),
                 'remote_path': remote_path,
@@ -422,6 +485,7 @@ def main():
         f'{BACKUP_ROOT}/snapshots/{TODAY}/sensitive',
         f'{BACKUP_ROOT}/snapshots/{TODAY}/inventory',
         f'{BACKUP_ROOT}/snapshots/{TODAY}/runbooks',
+        LOCAL_BACKUP_REMOTE_ROOT,
     ]
     for d in remote_dirs:
         ensure_folder(access, site_id, drive_id, d)
@@ -445,7 +509,11 @@ def main():
     except Exception as e:
         log(f'WARN: retention pruning skipped: {e}')
 
+    artifact_proofs = []
     for p in artifacts:
+        before = p.stat()
+        expected_size = before.st_size
+        expected_sha256 = _local_sha256(p)
         if p.parent == current_core:
             targets = [f'{BACKUP_ROOT}/current/core/{p.name}', f'{BACKUP_ROOT}/snapshots/{TODAY}/core/{p.name}']
         elif p.parent == current_sensitive:
@@ -459,14 +527,36 @@ def main():
         for target in targets:
             log(f'Uploading {p.name} ({p.stat().st_size} bytes) -> {target}')
             upload_file(access, site_id, drive_id, p, target)
+            proof = verify_remote_file(
+                access, site_id, drive_id, p, target,
+                expected_size=expected_size, expected_sha256=expected_sha256,
+            )
+            artifact_proofs.append(proof)
+        after = p.stat()
+        if after.st_size != expected_size or after.st_mtime_ns != before.st_mtime_ns:
+            raise RuntimeError(f'Local staged artifact changed during upload; cleanup refused: {p}')
+
+    local_archive_cleanup = cleanup_uploaded_local_archives(access, site_id, drive_id)
 
     write_state({
         'updated_utc': datetime.now(timezone.utc).isoformat(),
         'backup_root': BACKUP_ROOT,
         'snapshot_date': TODAY,
         'artifacts': [{'name': p.name, 'size': p.stat().st_size} for p in artifacts],
+        'remote_proofs': artifact_proofs,
+        'local_archive_cleanup': local_archive_cleanup,
         'status': 'ok',
     })
+    for p in artifacts:
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+    for directory in sorted({p.parent for p in artifacts}, key=lambda path: len(path.parts), reverse=True):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
     log('SharePoint backup completed successfully.')
 
 
