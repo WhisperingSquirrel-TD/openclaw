@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import io
+import base64
+import hashlib
 import json
 import os
+import shutil
 import tarfile
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -30,6 +33,9 @@ BACKUP_ROOT = '/OpenClaw Backups'
 TODAY = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 STAMP = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')
 RETENTION_DAYS = 7
+LOCAL_BACKUP_ROOT = ROOT / 'l1-backups'
+LOCAL_BACKUP_REMOTE_ROOT = f'{BACKUP_ROOT}/local-archives'
+LOCAL_BACKUP_PATTERNS = ('l1-config-*.tar.gz', 'l1-vault-*.tar.gz')
 
 RUNBOOK_FILES = [
     'reference/PI-PORTABILITY-BACKUP-PLAN.md',
@@ -160,7 +166,93 @@ def delete_folder_if_exists(access_token: str, site_id: str, drive_id: str, sp_p
     return True
 
 
-def upload_file(access_token: str, site_id: str, drive_id: str, local_path: Path, sp_path: str) -> None:
+def _local_sha1_base64(local_path: Path) -> str:
+    digest = hashlib.sha1()
+    with local_path.open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return base64.b64encode(digest.digest()).decode('ascii')
+
+
+def _local_sha256(local_path: Path) -> str:
+    digest = hashlib.sha256()
+    with local_path.open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _remote_item(access_token: str, site_id: str, drive_id: str, sp_path: str) -> dict:
+    url = f"{sp.GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{sp_path.strip('/')}"
+    resp = requests.get(url, headers=graph_headers(access_token), timeout=60)
+    if resp.status_code == 404:
+        raise FileNotFoundError(sp_path)
+    if not resp.ok:
+        raise RuntimeError(f'Remote verification lookup failed for {sp_path}: {resp.status_code} {resp.text[:300]}')
+    item = resp.json()
+    if 'folder' in item or 'file' not in item:
+        raise RuntimeError(f'Remote verification target is not a file: {sp_path}')
+    return item
+
+
+def verify_remote_file(
+    access_token: str,
+    site_id: str,
+    drive_id: str,
+    local_path: Path,
+    sp_path: str,
+    expected_size: int | None = None,
+    expected_sha256: str | None = None,
+) -> dict:
+    """Re-read a remote item and prove it matches the local source.
+
+    SharePoint commonly returns a base64 SHA-1 in file.hashes. When it does
+    not, download the remote content and compare SHA-256 instead. Size alone
+    is deliberately never considered sufficient proof for local deletion.
+    """
+    item = _remote_item(access_token, site_id, drive_id, sp_path)
+    local_size = local_path.stat().st_size if expected_size is None else expected_size
+    if item.get('size') != local_size:
+        raise RuntimeError(
+            f'Remote size mismatch for {sp_path}: remote={item.get("size")} local={local_size}'
+        )
+
+    hashes = item.get('file', {}).get('hashes', {})
+    remote_sha1 = hashes.get('sha1Hash')
+    if remote_sha1:
+        local_sha1 = _local_sha1_base64(local_path)
+        if remote_sha1 != local_sha1:
+            raise RuntimeError(f'Remote SHA-1 mismatch for {sp_path}')
+        proof = {'algorithm': 'sha1', 'digest': local_sha1}
+    else:
+        url = f"{sp.GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{sp_path.strip('/')}:/content"
+        resp = requests.get(
+            url,
+            headers=graph_headers(access_token),
+            timeout=300,
+            allow_redirects=True,
+            stream=True,
+        )
+        if not resp.ok:
+            raise RuntimeError(f'Remote content verification failed for {sp_path}: {resp.status_code}')
+        remote_digest = hashlib.sha256()
+        for chunk in resp.iter_content(chunk_size=1024 * 1024):
+            remote_digest.update(chunk)
+        local_digest = expected_sha256 or _local_sha256(local_path)
+        if remote_digest.hexdigest() != local_digest:
+            raise RuntimeError(f'Remote SHA-256 mismatch for {sp_path}')
+        proof = {'algorithm': 'sha256', 'digest': local_digest}
+
+    return {
+        'path': sp_path,
+        'item_id': item.get('id'),
+        'etag': item.get('eTag'),
+        'size': item.get('size'),
+        'proof': proof,
+    }
+
+
+def upload_file(access_token: str, site_id: str, drive_id: str, local_path: Path, sp_path: str) -> dict:
     size = local_path.stat().st_size
     if size < 4 * 1024 * 1024:
         url = f"{sp.GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{sp_path.strip('/')}:/content"
@@ -168,7 +260,7 @@ def upload_file(access_token: str, site_id: str, drive_id: str, local_path: Path
             resp = requests.put(url, headers={**graph_headers(access_token), 'Content-Type': 'application/octet-stream'}, data=f, timeout=120)
         if not resp.ok:
             raise RuntimeError(f'Upload failed for {sp_path}: {resp.status_code} {resp.text[:300]}')
-        return
+        return resp.json()
 
     session_url = f"{sp.GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{sp_path.strip('/')}:/createUploadSession"
     session_payload = {'item': {'@microsoft.graph.conflictBehavior': 'replace'}}
@@ -194,6 +286,70 @@ def upload_file(access_token: str, site_id: str, drive_id: str, local_path: Path
             if resp.status_code not in (200, 201, 202):
                 raise RuntimeError(f'Chunk upload failed for {sp_path}: {resp.status_code} {resp.text[:300]}')
             sent += len(chunk)
+    return resp.json()
+
+
+def _local_archive_files() -> list[Path]:
+    """Return only the explicitly generated archive names at the backup root."""
+    if not LOCAL_BACKUP_ROOT.is_dir():
+        return []
+    files: set[Path] = set()
+    for pattern in LOCAL_BACKUP_PATTERNS:
+        files.update(
+            path for path in LOCAL_BACKUP_ROOT.glob(pattern)
+            if path.is_file() and path.parent == LOCAL_BACKUP_ROOT
+        )
+    return sorted(files)
+
+
+def cleanup_uploaded_local_archives(
+    access_token: str,
+    site_id: str,
+    drive_id: str,
+) -> list[dict]:
+    """Upload, independently verify, and remove old local backup archives.
+
+    Recent archives are retained locally. Every older candidate is kept unless
+    its deterministic SharePoint counterpart is proven to match exactly and
+    the local file has not changed during the operation.
+    """
+    cutoff = datetime.now().timestamp() - (RETENTION_DAYS * 24 * 60 * 60)
+    outcomes: list[dict] = []
+    for local_path in _local_archive_files():
+        if local_path.stat().st_mtime > cutoff:
+            outcomes.append({'file': str(local_path), 'status': 'retained_recent'})
+            continue
+
+        remote_path = f'{LOCAL_BACKUP_REMOTE_ROOT}/{local_path.name}'
+        try:
+            before = local_path.stat()
+            expected_size = before.st_size
+            expected_sha256 = _local_sha256(local_path)
+            upload_file(access_token, site_id, drive_id, local_path, remote_path)
+            proof = verify_remote_file(
+                access_token, site_id, drive_id, local_path, remote_path,
+                expected_size=expected_size, expected_sha256=expected_sha256,
+            )
+            after = local_path.stat()
+            if after.st_size != expected_size or after.st_mtime_ns != before.st_mtime_ns:
+                raise RuntimeError('Local archive changed during upload; deletion refused')
+            local_path.unlink()
+            outcomes.append({
+                'file': str(local_path),
+                'remote_path': remote_path,
+                'status': 'deleted_after_verified_upload',
+                'proof': proof,
+            })
+            log(f'✓ Verified and deleted local archive: {local_path} -> {remote_path}')
+        except Exception as exc:
+            outcomes.append({
+                'file': str(local_path),
+                'remote_path': remote_path,
+                'status': 'retained_upload_or_verification_failed',
+                'error': str(exc),
+            })
+            log(f'WARN: Kept local archive after failed verification: {local_path}: {exc}')
+    return outcomes
 
 
 def main():
