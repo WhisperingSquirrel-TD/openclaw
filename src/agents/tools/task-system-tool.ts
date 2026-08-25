@@ -41,6 +41,8 @@ const TASK_SYSTEM_ACTIONS = [
   "context_broker_recovery_admit",
   "context_broker_load",
   "email_draft_create",
+  "email_reply_draft",
+  "email_new_draft",
   "email_dispatch",
 ] as const;
 
@@ -223,6 +225,45 @@ function requireDispatchPayload(payload: JsonRecord | undefined): { draft_id: st
     );
   }
   return { draft_id: readStringParam(payload, "draft_id", { required: true }) };
+}
+
+function rejectThreadSelectors(payload: JsonRecord | undefined): void {
+  if (!payload) {
+    return;
+  }
+  const forbidden = new Set([
+    "exactemailthread",
+    "exactthread",
+    "threadid",
+    "messageid",
+    "conversationid",
+    "replytomessageid",
+    "mailbox",
+    "mailboxid",
+    "threadselector",
+    "messageselector",
+    "conversationselector",
+    "mailboxselector",
+    "replyselector",
+  ]);
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (forbidden.has(key.replace(/[^a-z0-9]/gi, "").toLowerCase())) {
+        throw new ToolInputError(
+          "email_new_draft cannot use reply-thread or mailbox selectors; use email_reply_draft for a thread reply",
+        );
+      }
+      visit(child);
+    }
+  };
+  visit(payload);
 }
 
 function rejectEmailAuthorizationMutation(payload: JsonRecord | undefined): void {
@@ -523,10 +564,23 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
         return jsonResult({ ok: true, result });
       }
 
-      if (action === "email_draft_create") {
+      if (action === "email_draft_create" || action === "email_reply_draft") {
         const result = await callTaskSystem({
           method: "POST",
           path: "/task-system/email-draft/reply",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload,
+        });
+        return jsonResult({ ok: true, result });
+      }
+
+      if (action === "email_new_draft") {
+        rejectThreadSelectors(payload);
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-system/email-draft/new",
           baseUrl,
           token: authToken,
           timeoutMs,
