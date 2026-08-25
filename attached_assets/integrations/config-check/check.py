@@ -16,7 +16,7 @@ WORKSPACE    = os.path.expanduser("~/.openclaw/workspace")
 
 EXPECTED = {
     ("tools", "exec", "host"): "gateway",
-    ("agents", "defaults", "totpWindowMinutes"): 2,
+    ("agents", "defaults", "totpWindowMinutes"): 10,
     ("channels", "telegram", "dmPolicy"): "allowlist",
     ("channels", "whatsapp", "mode"): "watch",
     ("agents", "defaults", "approvalMode"): "totp",
@@ -34,10 +34,12 @@ MUST_DENY = [
     "contacts.add",    # prevent silent contact writes
 ]
 
-# Commands that must be in requireApproval (genuinely TOTP-gated by the trust gate)
+# Commands that must be in requireApproval. Email sent through the L1 Microsoft
+# sender is an exec.run action, so it is TOTP-gated here. Task-system dispatch
+# is not allowed to rely on this config; it must verify its signed one-time
+# permit against the exact signed-off draft before Graph delivery.
 MUST_REQUIRE_APPROVAL = [
     "exec.run",        # TOTP-gated shell — hardcoded in trust gate
-    "message.send",    # TOTP-gated outbound messages — hardcoded in trust gate
 ]
 
 # Any email integration output file ending in _EXTERNAL.md must carry the

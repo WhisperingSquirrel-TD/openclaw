@@ -496,6 +496,9 @@ agents.setdefault('trustLevel', 1)
 # requireApproval: only exec.run is intercepted by the trust gate for TOTP.
 # message.send must NOT be in this list — it gates ALL outgoing messages including
 # cron job deliveries and subagent announces, breaking routine L1 communication.
+# Direct L1 email uses the TOTP-gated exec route. A task-system email delivery
+# may avoid a fresh prompt only when its sender verifies a signed, short-lived,
+# single-use permit for the exact owner-signed draft.
 # WhatsApp outgoing is already blocked by watch mode; no need to gate message.send.
 required = agents.setdefault('requireApproval', [])
 if not isinstance(required, list):

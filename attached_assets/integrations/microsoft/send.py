@@ -41,14 +41,25 @@ Exit codes:
 """
 import argparse
 import base64
+import fcntl
+import hashlib
+import hmac
 import json
 import mimetypes
+import os
 import sys
+import time
 import requests
 from pathlib import Path
 
 STATE_DIR  = Path.home() / ".openclaw"
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+TASK_DISPATCH_AUDIENCE = "openclaw.microsoft.email.send"
+TASK_DISPATCH_KEY_ENV = "TASK_SYSTEM_EMAIL_DISPATCH_KEY"
+TASK_DISPATCH_MAX_TTL_SECONDS = 15 * 60
+TASK_DISPATCH_STATE_PATH = STATE_DIR / "integrations" / "microsoft" / "task-dispatch-used.json"
+TASK_DISPATCH_LOCK_PATH = STATE_DIR / "integrations" / "microsoft" / "task-dispatch-used.lock"
+TASK_DISPATCH_AUDIT_PATH = STATE_DIR / "integrations" / "microsoft" / "task-dispatch-audit.log"
 
 
 def parse_args() -> argparse.Namespace:
@@ -79,6 +90,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bcc-file",         default=None,
                    help="Read BCC recipients from this file — one per line or comma-separated. "
                         "All addresses go on ONE email as bccRecipients.")
+    p.add_argument("--cc",               default="",
+                    help="CC recipient address(es) — comma-separated for multiple")
+    p.add_argument("--cc-file",          default=None,
+                    help="Read CC recipients from this file — one per line or comma-separated. "
+                         "All addresses go on ONE email as ccRecipients.")
     p.add_argument("--subject-file",     default=None,
                    help="Read subject from this file (overrides subject positional arg)")
     p.add_argument("--body-file",        default=None,
@@ -88,6 +104,10 @@ def parse_args() -> argparse.Namespace:
                    help="Body type for Microsoft Graph message body")
     p.add_argument("--attachment", action="append", default=[],
                    help="Path to file to attach. Can be repeated.")
+    p.add_argument("--task-dispatch-permit", default=None,
+                    help="Path to a signed, single-use task-system dispatch permit. "
+                         "It is bound to the exact email and is valid only after "
+                         "the task system has recorded owner sign-off.")
     return p.parse_args()
 
 
@@ -242,8 +262,10 @@ def whoami(access_token: str) -> None:
     print(f"{email}  ({name})")
 
 
-def _build_attachments(paths: list[str]) -> list[dict]:
+def _build_attachment_snapshot(paths: list[str]) -> tuple[list[dict], list[dict]]:
+    """Read attachment bytes once for both Graph upload and permit binding."""
     attachments = []
+    fingerprints = []
     for raw in paths:
         if not raw:
             continue
@@ -259,7 +281,151 @@ def _build_attachments(paths: list[str]) -> list[dict]:
             "contentType": mime,
             "contentBytes": base64.b64encode(data).decode("ascii"),
         })
-    return attachments
+        fingerprints.append({
+            "name": p.name,
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        })
+    return attachments, sorted(fingerprints, key=lambda item: (item["name"], item["sha256"]))
+
+
+def _canonical_json(data: dict) -> bytes:
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _normalise_addresses(addresses: list[str]) -> list[str]:
+    return sorted(addr.strip().lower() for addr in addresses if addr.strip())
+
+
+def email_fingerprint(
+    recipients: list[str],
+    cc_recipients: list[str],
+    bcc_recipients: list[str],
+    from_name: str,
+    subject: str,
+    body: str,
+    body_content_type: str,
+    reply_to_message_id: str | None,
+    reply_all: bool,
+    attachment_fingerprints: list[dict],
+) -> str:
+    """Hash the exact email fields a task-system sign-off is allowed to authorise."""
+    graph_body = body if body_content_type.lower() == "html" else body.replace("\\n", "\n")
+    canonical_email = {
+        "attachments": attachment_fingerprints,
+        "bcc": _normalise_addresses(bcc_recipients),
+        "cc": _normalise_addresses(cc_recipients),
+        "body": graph_body,
+        "body_content_type": body_content_type.lower(),
+        "from_name": from_name,
+        "reply_all": bool(reply_all),
+        "reply_to_message_id": reply_to_message_id or "",
+        "subject": subject,
+        "to": _normalise_addresses(recipients),
+    }
+    return hashlib.sha256(_canonical_json(canonical_email)).hexdigest()
+
+
+def _task_dispatch_audit(event: str, *, task_id: str | None = None,
+                         permit_id: str | None = None, detail: str | None = None) -> None:
+    """Write a small local audit record without email content or recipient data."""
+    TASK_DISPATCH_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "at": int(time.time()),
+        "event": event,
+        "task_id": task_id,
+        "permit_id": permit_id,
+        "detail": detail,
+    }
+    with TASK_DISPATCH_AUDIT_PATH.open("a", encoding="utf-8") as audit_file:
+        audit_file.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+def _load_task_dispatch_key() -> bytes:
+    key = os.environ.get(TASK_DISPATCH_KEY_ENV, "")
+    if len(key.encode("utf-8")) < 32:
+        raise ValueError(
+            f"{TASK_DISPATCH_KEY_ENV} must be configured with at least 32 bytes for task dispatch"
+        )
+    return key.encode("utf-8")
+
+
+def _read_used_permits() -> dict:
+    try:
+        raw = TASK_DISPATCH_STATE_PATH.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError):
+        raise ValueError("task dispatch replay ledger is unreadable")
+
+
+def _write_used_permits(used: dict) -> None:
+    tmp_path = TASK_DISPATCH_STATE_PATH.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(used, sort_keys=True), encoding="utf-8")
+    tmp_path.replace(TASK_DISPATCH_STATE_PATH)
+
+
+def verify_and_consume_task_dispatch_permit(permit_path: str, expected_email_digest: str) -> dict:
+    """Validate and atomically consume a task-system email dispatch permit."""
+    try:
+        permit = json.loads(Path(permit_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _task_dispatch_audit("permit_blocked", detail="permit_unreadable")
+        raise ValueError("task dispatch permit is unreadable") from exc
+
+    if not isinstance(permit, dict):
+        _task_dispatch_audit("permit_blocked", detail="permit_not_object")
+        raise ValueError("task dispatch permit must be a JSON object")
+
+    signature = permit.pop("signature", None)
+    task_id = permit.get("task_id") if isinstance(permit.get("task_id"), str) else None
+    draft_id = permit.get("draft_id") if isinstance(permit.get("draft_id"), str) else None
+    permit_id = permit.get("jti") if isinstance(permit.get("jti"), str) else None
+    try:
+        if permit.get("version") != 1:
+            raise ValueError("unsupported permit version")
+        if permit.get("audience") != TASK_DISPATCH_AUDIENCE:
+            raise ValueError("permit audience is invalid")
+        if not task_id or not draft_id or not permit_id or not isinstance(signature, str):
+            raise ValueError("permit is missing required claims")
+        expires_at = permit.get("expires_at")
+        if type(expires_at) is not int:
+            raise ValueError("permit expiry is invalid")
+        now = int(time.time())
+        if expires_at <= now:
+            raise ValueError("permit has expired")
+        if expires_at > now + TASK_DISPATCH_MAX_TTL_SECONDS:
+            raise ValueError("permit expiry exceeds the allowed lifetime")
+        if permit.get("email_digest") != expected_email_digest:
+            raise ValueError("permit does not match the exact email being sent")
+        expected_signature = hmac.new(
+            _load_task_dispatch_key(), _canonical_json(permit), hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_signature):
+            raise ValueError("permit signature is invalid")
+    except ValueError as exc:
+        _task_dispatch_audit("permit_blocked", task_id=task_id, permit_id=permit_id, detail=str(exc))
+        raise
+
+    TASK_DISPATCH_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with TASK_DISPATCH_LOCK_PATH.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            used = _read_used_permits()
+            if permit_id in used:
+                _task_dispatch_audit(
+                    "permit_blocked", task_id=task_id, permit_id=permit_id, detail="permit_replayed"
+                )
+                raise ValueError("task dispatch permit was already used")
+            used[permit_id] = {"task_id": task_id, "consumed_at": int(time.time())}
+            _write_used_permits(used)
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    _task_dispatch_audit("permit_consumed", task_id=task_id, permit_id=permit_id)
+    return {"task_id": task_id, "permit_id": permit_id}
 
 
 def send_email(
@@ -273,8 +439,10 @@ def send_email(
     attachments: list[dict] | None = None,
     reply_all: bool = False,
     bcc_recipients: list[str] | None = None,
+    cc_recipients: list[str] | None = None,
 ) -> None:
     bcc_recipients = bcc_recipients or []
+    cc_recipients = cc_recipients or []
     if not recipients and not bcc_recipients:
         print("ERROR: no valid To or BCC recipient addresses found", file=sys.stderr)
         sys.exit(3)
@@ -287,6 +455,7 @@ def send_email(
     # All recipients go on ONE email — never loop and send separately.
     to_recipients = [{"emailAddress": {"address": addr}} for addr in recipients]
     graph_bcc_recipients = [{"emailAddress": {"address": addr}} for addr in bcc_recipients]
+    graph_cc_recipients = [{"emailAddress": {"address": addr}} for addr in cc_recipients]
 
     graph_body_type = "HTML" if body_content_type.lower() == "html" else "Text"
     message: dict = {
@@ -299,6 +468,8 @@ def send_email(
     }
     if graph_bcc_recipients:
         message["bccRecipients"] = graph_bcc_recipients
+    if graph_cc_recipients:
+        message["ccRecipients"] = graph_cc_recipients
     if attachments:
         message["attachments"] = attachments
 
@@ -319,9 +490,10 @@ def send_email(
             "subject": subject,
             "body": message["body"],
             "toRecipients": to_recipients,
+            # Prevent a reply-all draft retaining recipients outside the signed-off draft.
+            "ccRecipients": graph_cc_recipients,
+            "bccRecipients": graph_bcc_recipients,
         }
-        if graph_bcc_recipients:
-            draft_patch["bccRecipients"] = graph_bcc_recipients
         if attachments:
             draft_patch["attachments"] = attachments
         resp = requests.patch(update_url, headers=headers, json=draft_patch, timeout=15)
@@ -391,6 +563,15 @@ def main() -> None:
             sys.exit(3)
     bcc_recipients = parse_recipients(bcc_raw)
 
+    cc_raw = args.cc or ""
+    if args.cc_file:
+        try:
+            cc_raw = Path(args.cc_file).read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"ERROR: Cannot read --cc-file {args.cc_file}: {e}", file=sys.stderr)
+            sys.exit(3)
+    cc_recipients = parse_recipients(cc_raw)
+
     if not recipients and not bcc_recipients:
         print("ERROR: at least one To or BCC recipient is required (positional <to>, --recipients-file, --bcc, or --bcc-file)",
               file=sys.stderr)
@@ -420,20 +601,58 @@ def main() -> None:
         print("ERROR: body is required (positional arg or --body-file)", file=sys.stderr)
         sys.exit(3)
 
-    attachments = _build_attachments(args.attachment)
+    attachments, attachment_fingerprints = _build_attachment_snapshot(args.attachment)
+    permit_context = None
+    if args.task_dispatch_permit:
+        try:
+            permit_context = verify_and_consume_task_dispatch_permit(
+                args.task_dispatch_permit,
+                email_fingerprint(
+                    recipients=recipients,
+                    cc_recipients=cc_recipients,
+                    bcc_recipients=bcc_recipients,
+                    from_name=args.from_name,
+                    subject=subject,
+                    body=body,
+                    body_content_type=args.body_content_type,
+                    reply_to_message_id=args.reply_to_message_id,
+                    reply_all=args.reply_all,
+                    attachment_fingerprints=attachment_fingerprints,
+                ),
+            )
+        except ValueError as exc:
+            print(f"ERROR: task-system email dispatch blocked: {exc}", file=sys.stderr)
+            sys.exit(3)
 
-    send_email(
-        access_token,
-        recipients=recipients,
-        from_name=args.from_name,
-        subject=subject,
-        body=body,
-        body_content_type=args.body_content_type,
-        reply_to_message_id=args.reply_to_message_id,
-        attachments=attachments,
-        reply_all=args.reply_all,
-        bcc_recipients=bcc_recipients,
-    )
+    try:
+        send_email(
+            access_token,
+            recipients=recipients,
+            from_name=args.from_name,
+            subject=subject,
+            body=body,
+            body_content_type=args.body_content_type,
+            reply_to_message_id=args.reply_to_message_id,
+            attachments=attachments,
+            reply_all=args.reply_all,
+            bcc_recipients=bcc_recipients,
+            cc_recipients=cc_recipients,
+        )
+    except SystemExit:
+        if permit_context:
+            _task_dispatch_audit(
+                "dispatch_failed",
+                task_id=permit_context["task_id"],
+                permit_id=permit_context["permit_id"],
+            )
+        raise
+    else:
+        if permit_context:
+            _task_dispatch_audit(
+                "dispatch_sent",
+                task_id=permit_context["task_id"],
+                permit_id=permit_context["permit_id"],
+            )
 
 
 if __name__ == "__main__":

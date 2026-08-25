@@ -7,7 +7,7 @@ When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator 
 
 ## How it works
 
-1. Agent attempts a gated action (`message.send` or `exec.run` at `trustLevel >= 1`)
+1. Agent attempts a gated action (on the Pi, `exec.run` at `trustLevel >= 1`)
 2. Trust gate checks for an active approval window — if open, action proceeds immediately
 3. If no window: owner is prompted to send their 6-digit code on Telegram
 4. Owner sends code → window opens for `totpWindowMinutes` (default 10) → all queued and future gated actions proceed
@@ -16,8 +16,14 @@ When `approvalMode: "totp"` is set, the trust gate uses a 6-digit authenticator 
 
 ## Gated actions
 
-- `message.send` — outbound messages to any channel (email, WhatsApp, Discord, etc.)
-- `exec.run` — shell command execution on the gateway host (closes the exec bypass gap where scripts could send emails via `exec` without TOTP)
+- `exec.run` — shell command execution on the gateway host. Direct email delivery uses this route and therefore requires TOTP.
+- `message.send` is intentionally not globally gated on the Pi because it would block routine Telegram status messages and scheduled notices.
+
+## Task-system email delivery
+
+Task-system email is the only exception to a fresh TOTP prompt. The task system must first record the prerequisite task approvals and an explicit owner sign-off of the final email. It then issues a signed, short-lived, single-use permit bound to that exact draft.
+
+The Microsoft sender verifies the permit's signature, task and draft identity, expiry, one-time identifier, and fingerprint of recipients, BCC, sender name, subject, body, reply target, and attachment hashes before sending. A changed or replayed permit is blocked. The assistant must never be able to set an approval field, provide a permit, or provide edited email content when requesting task-system delivery.
 
 ## Setup
 

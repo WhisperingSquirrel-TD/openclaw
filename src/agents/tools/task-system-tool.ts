@@ -41,6 +41,7 @@ const TASK_SYSTEM_ACTIONS = [
   "context_broker_recovery_admit",
   "context_broker_load",
   "email_draft_create",
+  "email_dispatch",
 ] as const;
 
 const TASK_ENTITY_KINDS = ["strategy", "objective", "task", "subtask"] as const;
@@ -56,9 +57,6 @@ const TaskSystemToolSchema = Type.Object(
     state: Type.Optional(Type.String()),
     owner: Type.Optional(Type.String()),
     payload: Type.Optional(Type.Object({}, { additionalProperties: true })),
-    baseUrl: Type.Optional(Type.String()),
-    authToken: Type.Optional(Type.String()),
-    envPath: Type.Optional(Type.String()),
     timeoutMs: Type.Optional(Type.Number()),
   },
   { additionalProperties: true },
@@ -69,12 +67,26 @@ type JsonRecord = Record<string, unknown>;
 type TaskSystemToolOptions = {
   defaultBaseUrl?: string;
   defaultEnvPath?: string;
+  defaultAuthToken?: string;
 };
 
 function normalizeBaseUrl(raw?: string) {
   const base = (raw ?? DEFAULT_BASE_URL).trim().replace(/\/$/, "");
   if (!base) {
     throw new ToolInputError("baseUrl required");
+  }
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    throw new ToolInputError("Task system base URL is invalid");
+  }
+  if (
+    url.protocol !== "http:" ||
+    !["127.0.0.1", "localhost", "::1"].includes(url.hostname) ||
+    url.pathname !== "/"
+  ) {
+    throw new ToolInputError("Task system must use a local HTTP gateway");
   }
   return base;
 }
@@ -200,6 +212,69 @@ async function callTaskSystem(params: {
   }
 }
 
+function requireDispatchPayload(payload: JsonRecord | undefined): { draft_id: string } {
+  if (!payload) {
+    throw new ToolInputError("email_dispatch requires payload.draft_id");
+  }
+  const keys = Object.keys(payload);
+  if (keys.length !== 1 || keys[0] !== "draft_id") {
+    throw new ToolInputError(
+      "email_dispatch accepts only payload.draft_id; the task system reloads the signed-off draft itself",
+    );
+  }
+  return { draft_id: readStringParam(payload, "draft_id", { required: true }) };
+}
+
+function rejectEmailAuthorizationMutation(payload: JsonRecord | undefined): void {
+  if (!payload) {
+    return;
+  }
+  const protectedKeys = new Set([
+    "emailapproval",
+    "emailapproved",
+    "emailsignoff",
+    "emailsignedoff",
+    "emaildispatch",
+    "emailpermit",
+    "dispatchpermit",
+    "dispatchauthorization",
+  ]);
+  const protectedEmailChildren = new Set([
+    "approval",
+    "approved",
+    "signoff",
+    "signedoff",
+    "dispatch",
+    "permit",
+    "authorization",
+  ]);
+  const visit = (value: unknown, insideEmail = false): void => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        visit(child, insideEmail);
+      }
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+      const childIsEmail = insideEmail || normalized === "email";
+      if (
+        protectedKeys.has(normalized) ||
+        (childIsEmail && protectedEmailChildren.has(normalized))
+      ) {
+        throw new ToolInputError(
+          "Email approval and dispatch fields are controlled by the task system and cannot be patched by the assistant",
+        );
+      }
+      visit(child, childIsEmail);
+    }
+  };
+  visit(payload);
+}
+
 export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool {
   return {
     label: "Task System",
@@ -211,16 +286,9 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
       const action = readStringParam(params, "action", { required: true });
-      const baseUrl = normalizeBaseUrl(
-        readStringParam(params, "baseUrl", { trim: false }) ?? opts?.defaultBaseUrl,
-      );
-      const envPath =
-        readStringParam(params, "envPath", { trim: false }) ??
-        opts?.defaultEnvPath ??
-        DEFAULT_ENV_PATH;
-      const authToken =
-        readStringParam(params, "authToken", { trim: false }) ??
-        (await readGatewayBearerToken(envPath));
+      const baseUrl = normalizeBaseUrl(opts?.defaultBaseUrl);
+      const envPath = opts?.defaultEnvPath ?? DEFAULT_ENV_PATH;
+      const authToken = opts?.defaultAuthToken ?? (await readGatewayBearerToken(envPath));
       const timeoutMs = normalizeTimeoutMs(params.timeoutMs);
       const payload =
         params.payload && typeof params.payload === "object" && !Array.isArray(params.payload)
@@ -467,6 +535,18 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
         return jsonResult({ ok: true, result });
       }
 
+      if (action === "email_dispatch") {
+        const result = await callTaskSystem({
+          method: "POST",
+          path: "/task-system/email-dispatch/request",
+          baseUrl,
+          token: authToken,
+          timeoutMs,
+          payload: requireDispatchPayload(payload),
+        });
+        return jsonResult({ ok: true, result });
+      }
+
       const kind = readStringParam(params, "kind", { required: true });
       const entityPath = resolveEntityPath(kind);
 
@@ -482,6 +562,7 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
       }
 
       if (action === "create") {
+        rejectEmailAuthorizationMutation(payload);
         const createPayload: JsonRecord = { ...payload };
         const parentId = readStringParam(params, "parent_id", { trim: true });
         if (parentId) {
@@ -551,6 +632,7 @@ export function createTaskSystemTool(opts?: TaskSystemToolOptions): AnyAgentTool
       }
 
       if (action === "patch") {
+        rejectEmailAuthorizationMutation(payload);
         const result = await callTaskSystem({
           method: "PATCH",
           path: `/${entityPath}/${encodeURIComponent(id)}`,
