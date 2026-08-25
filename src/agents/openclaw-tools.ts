@@ -6,6 +6,7 @@ import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
 import type { SpawnedToolContext } from "./spawned-context.js";
 import type { ToolFsPolicy } from "./tool-fs-policy.js";
 import { createAgentsListTool } from "./tools/agents-list-tool.js";
+import { createAgentLoopTool } from "./tools/agent-loop-tool.js";
 import { createBrowserTool } from "./tools/browser-tool.js";
 import { createCanvasTool } from "./tools/canvas-tool.js";
 import type { AnyAgentTool } from "./tools/common.js";
@@ -24,6 +25,7 @@ import { createSessionsSpawnTool } from "./tools/sessions-spawn-tool.js";
 import { createSubagentsTool } from "./tools/subagents-tool.js";
 import { createTaskSystemTool } from "./tools/task-system-tool.js";
 import { createTtsTool } from "./tools/tts-tool.js";
+import { isSubagentSessionKey } from "../routing/session-key.js";
 import {
   createWebFetchTool,
   createWebSearchTool,
@@ -158,6 +160,18 @@ export function createOpenClawTools(
     }),
     createTaskSystemTool(),
     createLinkedInMessageMirrorTool(),
+    ...(options?.senderIsOwner === true &&
+    options.agentDir &&
+    options.sessionId &&
+    !isSubagentSessionKey(options.agentSessionKey ?? "")
+      ? [
+          createAgentLoopTool({
+            agentDir: options.agentDir,
+            sessionId: options.sessionId,
+            sessionKey: options.agentSessionKey,
+          }),
+        ]
+      : []),
     createAgentsListTool({
       agentSessionKey: options?.agentSessionKey,
       requesterAgentIdOverride: options?.requesterAgentIdOverride,

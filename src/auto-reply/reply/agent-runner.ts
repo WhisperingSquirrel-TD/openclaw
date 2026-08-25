@@ -1,5 +1,9 @@
 import fs from "node:fs";
 import { lookupContextTokens } from "../../agents/context.js";
+import {
+  finishContinuation,
+  prepareContinuationAdvance,
+} from "../../agents/continuation-loop.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
 import { isCliProvider } from "../../agents/model-selection.js";
@@ -16,11 +20,17 @@ import {
 } from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
-import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
+import {
+  emitDiagnosticEvent,
+  isDiagnosticsEnabled,
+} from "../../infra/diagnostic-events.js";
 import { generateSecureUuid } from "../../infra/secure-random.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { defaultRuntime } from "../../runtime.js";
-import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
+import {
+  estimateUsageCost,
+  resolveModelCostConfig,
+} from "../../utils/usage-format.js";
 import {
   buildFallbackClearedNotice,
   buildFallbackNotice,
@@ -44,17 +54,36 @@ import {
   hasSessionRelatedCronJobs,
   hasUnbackedReminderCommitment,
 } from "./agent-runner-reminder-guard.js";
-import { appendUsageLine, formatResponseUsageLine } from "./agent-runner-utils.js";
-import { createAudioAsVoiceBuffer, createBlockReplyPipeline } from "./block-reply-pipeline.js";
+import {
+  appendUsageLine,
+  formatResponseUsageLine,
+} from "./agent-runner-utils.js";
+import {
+  createAudioAsVoiceBuffer,
+  createBlockReplyPipeline,
+} from "./block-reply-pipeline.js";
 import { resolveEffectiveBlockStreamingConfig } from "./block-streaming.js";
 import { createFollowupRunner } from "./followup-runner.js";
-import { resolveOriginMessageProvider, resolveOriginMessageTo } from "./origin-routing.js";
+import {
+  resolveOriginMessageProvider,
+  resolveOriginMessageTo,
+} from "./origin-routing.js";
 import { readPostCompactionContext } from "./post-compaction-context.js";
 import { resolveActiveRunQueueAction } from "./queue-policy.js";
-import { enqueueFollowupRun, type FollowupRun, type QueueSettings } from "./queue.js";
+import {
+  enqueueFollowupRun,
+  type FollowupRun,
+  type QueueSettings,
+} from "./queue.js";
 import { createReplyMediaPathNormalizer } from "./reply-media-paths.js";
-import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
-import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-run-accounting.js";
+import {
+  createReplyToModeFilterForChannel,
+  resolveReplyToMode,
+} from "./reply-threading.js";
+import {
+  incrementRunCompactionCount,
+  persistRunSessionUsage,
+} from "./session-run-accounting.js";
 import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
 
@@ -141,7 +170,8 @@ export async function runReplyAgent(params: {
   });
 
   const pendingToolTasks = new Set<Promise<void>>();
-  const blockReplyTimeoutMs = opts?.blockReplyTimeoutMs ?? BLOCK_REPLY_SEND_TIMEOUT_MS;
+  const blockReplyTimeoutMs =
+    opts?.blockReplyTimeoutMs ?? BLOCK_REPLY_SEND_TIMEOUT_MS;
 
   const replyToChannel = resolveOriginMessageProvider({
     originatingChannel: sessionCtx.OriginatingChannel,
@@ -153,7 +183,10 @@ export async function runReplyAgent(params: {
     sessionCtx.AccountId,
     sessionCtx.ChatType,
   );
-  const applyReplyToMode = createReplyToModeFilterForChannel(replyToMode, replyToChannel);
+  const applyReplyToMode = createReplyToModeFilterForChannel(
+    replyToMode,
+    replyToChannel,
+  );
   const cfg = followupRun.run.config;
   const normalizeReplyMediaPaths = createReplyMediaPathNormalizer({
     cfg,
@@ -195,7 +228,10 @@ export async function runReplyAgent(params: {
   };
 
   if (shouldSteer && isStreaming) {
-    const steered = queueEmbeddedPiMessage(followupRun.run.sessionId, followupRun.prompt);
+    const steered = queueEmbeddedPiMessage(
+      followupRun.run.sessionId,
+      followupRun.prompt,
+    );
     if (steered && !shouldFollowup) {
       await touchActiveSessionEntry();
       typing.cleanup();
@@ -314,7 +350,9 @@ export async function runReplyAgent(params: {
       if (resolved) {
         transcriptCandidates.add(resolved);
       }
-      transcriptCandidates.add(resolveSessionTranscriptPath(prevSessionId, agentId));
+      transcriptCandidates.add(
+        resolveSessionTranscriptPath(prevSessionId, agentId),
+      );
       for (const candidate of transcriptCandidates) {
         try {
           fs.unlinkSync(candidate);
@@ -325,13 +363,17 @@ export async function runReplyAgent(params: {
     }
     return true;
   };
-  const resetSessionAfterCompactionFailure = async (reason: string): Promise<boolean> =>
+  const resetSessionAfterCompactionFailure = async (
+    reason: string,
+  ): Promise<boolean> =>
     resetSession({
       failureLabel: "compaction failure",
       buildLogMessage: (nextSessionId) =>
         `Auto-compaction failed (${reason}). Restarting session ${sessionKey} -> ${nextSessionId} and retrying.`,
     });
-  const resetSessionAfterRoleOrderingConflict = async (reason: string): Promise<boolean> =>
+  const resetSessionAfterRoleOrderingConflict = async (
+    reason: string,
+  ): Promise<boolean> =>
     resetSession({
       failureLabel: "role ordering conflict",
       buildLogMessage: (nextSessionId) =>
@@ -365,7 +407,11 @@ export async function runReplyAgent(params: {
     });
 
     if (runOutcome.kind === "final") {
-      return finalizeWithFollowup(runOutcome.payload, queueKey, runFollowupTurn);
+      return finalizeWithFollowup(
+        runOutcome.payload,
+        queueKey,
+        runFollowupTurn,
+      );
     }
 
     const {
@@ -413,14 +459,18 @@ export async function runReplyAgent(params: {
 
     const usage = runResult.meta?.agentMeta?.usage;
     const promptTokens = runResult.meta?.agentMeta?.promptTokens;
-    const modelUsed = runResult.meta?.agentMeta?.model ?? fallbackModel ?? defaultModel;
+    const modelUsed =
+      runResult.meta?.agentMeta?.model ?? fallbackModel ?? defaultModel;
     const providerUsed =
-      runResult.meta?.agentMeta?.provider ?? fallbackProvider ?? followupRun.run.provider;
+      runResult.meta?.agentMeta?.provider ??
+      fallbackProvider ??
+      followupRun.run.provider;
     const verboseEnabled = resolvedVerboseLevel !== "off";
     const selectedProvider = followupRun.run.provider;
     const selectedModel = followupRun.run.model;
     const fallbackStateEntry =
-      activeSessionEntry ?? (sessionKey ? activeSessionStore?.[sessionKey] : undefined);
+      activeSessionEntry ??
+      (sessionKey ? activeSessionStore?.[sessionKey] : undefined);
     const fallbackTransition = resolveFallbackTransition({
       selectedProvider,
       selectedModel,
@@ -431,9 +481,12 @@ export async function runReplyAgent(params: {
     });
     if (fallbackTransition.stateChanged) {
       if (fallbackStateEntry) {
-        fallbackStateEntry.fallbackNoticeSelectedModel = fallbackTransition.nextState.selectedModel;
-        fallbackStateEntry.fallbackNoticeActiveModel = fallbackTransition.nextState.activeModel;
-        fallbackStateEntry.fallbackNoticeReason = fallbackTransition.nextState.reason;
+        fallbackStateEntry.fallbackNoticeSelectedModel =
+          fallbackTransition.nextState.selectedModel;
+        fallbackStateEntry.fallbackNoticeActiveModel =
+          fallbackTransition.nextState.activeModel;
+        fallbackStateEntry.fallbackNoticeReason =
+          fallbackTransition.nextState.reason;
         fallbackStateEntry.updatedAt = Date.now();
         activeSessionEntry = fallbackStateEntry;
       }
@@ -445,7 +498,8 @@ export async function runReplyAgent(params: {
           storePath,
           sessionKey,
           update: async () => ({
-            fallbackNoticeSelectedModel: fallbackTransition.nextState.selectedModel,
+            fallbackNoticeSelectedModel:
+              fallbackTransition.nextState.selectedModel,
             fallbackNoticeActiveModel: fallbackTransition.nextState.activeModel,
             fallbackNoticeReason: fallbackTransition.nextState.reason,
           }),
@@ -527,7 +581,9 @@ export async function runReplyAgent(params: {
           })
         : false;
     const guardedReplyPayloads =
-      hasReminderCommitment && successfulCronAdds === 0 && !coveredByExistingCron
+      hasReminderCommitment &&
+      successfulCronAdds === 0 &&
+      !coveredByExistingCron
         ? appendUnscheduledReminderNote(replyPayloads)
         : replyPayloads;
 
@@ -573,7 +629,9 @@ export async function runReplyAgent(params: {
 
     const responseUsageRaw =
       activeSessionEntry?.responseUsage ??
-      (sessionKey ? activeSessionStore?.[sessionKey]?.responseUsage : undefined);
+      (sessionKey
+        ? activeSessionStore?.[sessionKey]?.responseUsage
+        : undefined);
     const responseUsageMode = resolveResponseUsageMode(responseUsageRaw);
     if (responseUsageMode !== "off" && hasNonzeroUsage(usage)) {
       const authMode = resolveModelAuthMode(providerUsed, cfg);
@@ -603,7 +661,9 @@ export async function runReplyAgent(params: {
     const verboseNotices: ReplyPayload[] = [];
 
     if (verboseEnabled && activeIsNewSession) {
-      verboseNotices.push({ text: `🧭 New session: ${followupRun.run.sessionId}` });
+      verboseNotices.push({
+        text: `🧭 New session: ${followupRun.run.sessionId}`,
+      });
     }
 
     if (fallbackTransition.fallbackTransitioned) {
@@ -694,6 +754,51 @@ export async function runReplyAgent(params: {
     }
     if (responseUsageLine) {
       finalPayloads = appendUsageLine(finalPayloads, responseUsageLine);
+    }
+
+    const continuationAgentDir =
+      typeof followupRun.run.agentDir === "string"
+        ? followupRun.run.agentDir.trim()
+        : "";
+    if (continuationAgentDir) {
+      const continuation = await prepareContinuationAdvance({
+        agentDir: continuationAgentDir,
+        sessionId: followupRun.run.sessionId,
+      });
+      if (continuation.action === "continue") {
+        const queued = enqueueFollowupRun(
+          queueKey,
+          {
+            ...followupRun,
+            prompt: continuation.prompt,
+            summaryLine: `[Continuation ${continuation.state.turnsCompleted}/${continuation.state.maxTurns}]`,
+            enqueuedAt: Date.now(),
+          },
+          {
+            mode: "followup",
+            debounceMs: 0,
+            cap: 1,
+            dropPolicy: "new",
+          },
+          "none",
+        );
+        if (!queued) {
+          await finishContinuation({
+            agentDir: continuationAgentDir,
+            sessionId: followupRun.run.sessionId,
+            status: "blocked",
+            reason: "Unable to enqueue the next continuation turn safely.",
+          });
+          finalPayloads = [
+            ...finalPayloads,
+            {
+              text: "Continuation paused: another queued turn took precedence. Start a new bounded continuation when ready.",
+            },
+          ];
+        }
+      } else if (continuation.action === "terminal") {
+        finalPayloads = [...finalPayloads, { text: continuation.notice }];
+      }
     }
 
     return finalizeWithFollowup(
