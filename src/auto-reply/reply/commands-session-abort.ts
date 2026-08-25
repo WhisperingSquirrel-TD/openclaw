@@ -1,4 +1,6 @@
 import { abortEmbeddedPiRun } from "../../agents/pi-embedded.js";
+import { resolveAgentDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { cancelContinuationForSession } from "../../agents/continuation-loop.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
 import { createInternalHookEvent, triggerInternalHook } from "../../hooks/internal-hooks.js";
@@ -103,7 +105,16 @@ export const handleStopCommand: CommandHandler = async (params, allowTextCommand
     sessionEntry: params.sessionEntry,
     sessionStore: params.sessionStore,
   });
-  const cleared = clearSessionQueues([abortTarget.key, abortTarget.sessionId]);
+  const continuationAgentId = resolveSessionAgentId({
+    sessionKey: abortTarget.key ?? params.sessionKey ?? "",
+    config: params.cfg,
+  });
+  await cancelContinuationForSession({
+    agentDir: resolveAgentDir(params.cfg, continuationAgentId),
+    sessionId: abortTarget.sessionId,
+    reason: "Owner stopped the continuation.",
+  });
+  const cleared = await clearSessionQueues([abortTarget.key, abortTarget.sessionId]);
   if (cleared.followupCleared > 0 || cleared.laneCleared > 0) {
     logVerbose(
       `stop: cleared followups=${cleared.followupCleared} lane=${cleared.laneCleared} keys=${cleared.keys.join(",")}`,
@@ -135,7 +146,7 @@ export const handleStopCommand: CommandHandler = async (params, allowTextCommand
   );
   await triggerInternalHook(hookEvent);
 
-  const { stopped } = stopSubagentsForRequester({
+  const { stopped } = await stopSubagentsForRequester({
     cfg: params.cfg,
     requesterSessionKey: abortTarget.key ?? params.sessionKey,
   });

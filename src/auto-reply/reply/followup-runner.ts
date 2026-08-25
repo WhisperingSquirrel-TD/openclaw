@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import {
+  claimContinuationWork,
+  failContinuationWork,
+} from "../../agents/continuation-loop.js";
 import { resolveRunModelFallbacksOverride } from "../../agents/agent-scope.js";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
 import { lookupContextTokens } from "../../agents/context.js";
@@ -8,7 +12,7 @@ import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
 import { logVerbose } from "../../globals.js";
-import { registerAgentRunContext } from "../../infra/agent-events.js";
+import { emitAgentEvent, registerAgentRunContext } from "../../infra/agent-events.js";
 import { defaultRuntime } from "../../runtime.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
@@ -16,6 +20,7 @@ import type { OriginatingChannelType } from "../templating.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { resolveRunAuthProfile } from "./agent-runner-utils.js";
+import { scheduleContinuationTurn } from "./continuation-scheduler.js";
 import {
   resolveOriginAccountId,
   resolveOriginMessageProvider,
@@ -131,6 +136,33 @@ export function createFollowupRunner(params: {
 
   return async (queued: FollowupRun) => {
     try {
+      let continuationLease: { idempotencyKey: string; leaseId: string } | undefined;
+      let continuationLeaseExpiresAt: number | undefined;
+      const continuation = queued.continuation;
+      if (continuation) {
+        const claim = await claimContinuationWork({
+          agentDir: queued.run.agentDir,
+          sessionId: queued.run.sessionId,
+          idempotencyKey: continuation.idempotencyKey,
+          // Keep the lease bounded by the continuation deadline while leaving
+          // enough time for the configured agent execution budget.
+          leaseMs: Math.max(1_000, queued.run.timeoutMs + 30_000),
+        });
+        if (!claim.claimed) {
+          logVerbose(
+            `continuation work skipped (${continuation.idempotencyKey}): ${claim.reason}`,
+          );
+          return;
+        }
+        continuationLease = {
+          idempotencyKey: continuation.idempotencyKey,
+          leaseId: claim.lease.id,
+        };
+        // Prevent a worker from outliving its lease. Without this bound, a
+        // recovered worker could run in parallel with a still-live stale model
+        // call and duplicate external tool side effects.
+        continuationLeaseExpiresAt = claim.lease.expiresAt;
+      }
       const runId = crypto.randomUUID();
       const shouldSurfaceToControlUi = isInternalMessageChannel(
         resolveOriginMessageProvider({
@@ -143,6 +175,18 @@ export function createFollowupRunner(params: {
           sessionKey: queued.run.sessionKey,
           verboseLevel: queued.run.verboseLevel,
           isControlUiVisible: shouldSurfaceToControlUi,
+        });
+      }
+      if (continuationLease) {
+        emitAgentEvent({
+          runId,
+          sessionKey: queued.run.sessionKey,
+          stream: "lifecycle",
+          data: {
+            phase: "continuation_claimed",
+            idempotencyKey: continuationLease.idempotencyKey,
+            generation: continuation?.generation,
+          },
         });
       }
       let autoCompactionCompleted = false;
@@ -166,6 +210,13 @@ export function createFollowupRunner(params: {
             sessionKey: queued.run.sessionKey,
           }),
           run: async (provider, model, runOptions) => {
+            const remainingLeaseMs =
+              continuationLeaseExpiresAt == null
+                ? undefined
+                : continuationLeaseExpiresAt - Date.now() - 5_000;
+            if (remainingLeaseMs != null && remainingLeaseMs <= 0) {
+              throw new Error("Continuation lease expired before another model attempt could start.");
+            }
             const authProfile = resolveRunAuthProfile(queued.run, provider);
             const result = await runEmbeddedPiAgent({
               sessionId: queued.run.sessionId,
@@ -206,7 +257,10 @@ export function createFollowupRunner(params: {
               suppressToolErrorWarnings: opts?.suppressToolErrorWarnings,
               execOverrides: queued.run.execOverrides,
               bashElevated: queued.run.bashElevated,
-              timeoutMs: queued.run.timeoutMs,
+              timeoutMs: Math.min(
+                queued.run.timeoutMs,
+                remainingLeaseMs ?? queued.run.timeoutMs,
+              ),
               runId,
               allowTransientCooldownProbe: runOptions?.allowTransientCooldownProbe,
               blockReplyBreak: queued.run.blockReplyBreak,
@@ -237,6 +291,25 @@ export function createFollowupRunner(params: {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         defaultRuntime.error?.(`Followup agent failed before reply: ${message}`);
+        if (continuationLease) {
+          const failed = await failContinuationWork({
+            agentDir: queued.run.agentDir,
+            sessionId: queued.run.sessionId,
+            idempotencyKey: continuationLease.idempotencyKey,
+            leaseId: continuationLease.leaseId,
+            reason: `Agent execution failed: ${message}`,
+          });
+          if (failed) {
+            await sendFollowupPayloads(
+              [
+                {
+                  text: "Continuation paused because its agent turn failed. Resume it after checking the model or connection.",
+                },
+              ],
+              queued,
+            );
+          }
+        }
         return;
       }
 
@@ -264,7 +337,56 @@ export function createFollowupRunner(params: {
         });
       }
 
-      const payloadArray = runResult.payloads ?? [];
+      let continuationNotice: string | undefined;
+      if (continuationLease) {
+        try {
+          const scheduled = await scheduleContinuationTurn({
+            queueKey: continuation?.queueKey ?? queued.run.sessionKey ?? queued.run.sessionId,
+            followupRun: queued,
+            completedWork: continuationLease,
+          });
+          continuationNotice = scheduled.notice;
+          emitAgentEvent({
+            runId,
+            sessionKey: queued.run.sessionKey,
+            stream: "lifecycle",
+            data: {
+              phase: scheduled.scheduled ? "continuation_scheduled" : "continuation_completed",
+              idempotencyKey: continuationLease.idempotencyKey,
+              ...(scheduled.recovered ? { recovered: true } : {}),
+              ...(scheduled.notice ? { notice: scheduled.notice } : {}),
+            },
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const failed = await failContinuationWork({
+            agentDir: queued.run.agentDir,
+            sessionId: queued.run.sessionId,
+            idempotencyKey: continuationLease.idempotencyKey,
+            leaseId: continuationLease.leaseId,
+            reason: `Unable to schedule the next turn: ${message}`,
+          });
+          if (failed) {
+            continuationNotice =
+              "Continuation paused because the next turn could not be safely scheduled. Resume it when ready.";
+            emitAgentEvent({
+              runId,
+              sessionKey: queued.run.sessionKey,
+              stream: "lifecycle",
+              data: {
+                phase: "continuation_failed",
+                idempotencyKey: continuationLease.idempotencyKey,
+                reason: "next turn could not be safely scheduled",
+              },
+            });
+          }
+        }
+      }
+
+      const payloadArray = [
+        ...(runResult.payloads ?? []),
+        ...(continuationNotice ? [{ text: continuationNotice }] : []),
+      ];
       if (payloadArray.length === 0) {
         return;
       }

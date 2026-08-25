@@ -169,6 +169,7 @@ export function createOpenClawTools(
             agentDir: options.agentDir,
             sessionId: options.sessionId,
             sessionKey: options.agentSessionKey,
+            trustedOwner: true,
           }),
         ]
       : []),

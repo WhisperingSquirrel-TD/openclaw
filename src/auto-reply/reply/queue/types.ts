@@ -22,6 +22,15 @@ export type FollowupRun = {
   prompt: string;
   /** Provider message ID, when available (for deduplication). */
   messageId?: string;
+  /**
+   * Durable continuation identity. Unlike provider message IDs, this remains
+   * stable across a gateway restart and is claimed before the work can run.
+   */
+  continuation?: {
+    idempotencyKey: string;
+    generation: number;
+    queueKey: string;
+  };
   summaryLine?: string;
   enqueuedAt: number;
   /**

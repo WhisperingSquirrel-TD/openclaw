@@ -1,9 +1,6 @@
 import fs from "node:fs";
 import { lookupContextTokens } from "../../agents/context.js";
-import {
-  finishContinuation,
-  prepareContinuationAdvance,
-} from "../../agents/continuation-loop.js";
+import { finishContinuation } from "../../agents/continuation-loop.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
 import { isCliProvider } from "../../agents/model-selection.js";
@@ -63,6 +60,10 @@ import {
   createBlockReplyPipeline,
 } from "./block-reply-pipeline.js";
 import { resolveEffectiveBlockStreamingConfig } from "./block-streaming.js";
+import {
+  enqueueRecoveredContinuationTurns,
+  scheduleContinuationTurn,
+} from "./continuation-scheduler.js";
 import { createFollowupRunner } from "./followup-runner.js";
 import {
   resolveOriginMessageProvider,
@@ -287,7 +288,17 @@ export async function runReplyAgent(params: {
     defaultModel,
     agentCfgContextTokens,
   });
-
+  const continuationRecoveryDir = followupRun.run.agentDir?.trim();
+  if (continuationRecoveryDir) {
+    try {
+      await enqueueRecoveredContinuationTurns({
+        agentDir: continuationRecoveryDir,
+        queueKey,
+      });
+    } catch (error) {
+      defaultRuntime.error?.(`continuation recovery failed for ${queueKey}: ${String(error)}`);
+    }
+  }
   let responseUsageLine: string | undefined;
   type SessionResetOptions = {
     failureLabel: string;
@@ -307,6 +318,19 @@ export async function runReplyAgent(params: {
       return false;
     }
     const prevSessionId = cleanupTranscripts ? prevEntry.sessionId : undefined;
+    const continuationAgentDir = followupRun.run.agentDir?.trim();
+    if (continuationAgentDir) {
+      try {
+        await finishContinuation({
+          agentDir: continuationAgentDir,
+          sessionId: followupRun.run.sessionId,
+          status: "cancelled",
+          reason: `Session reset after ${failureLabel}; owner must resume explicitly.`,
+        });
+      } catch {
+        // No active continuation (or an already terminal one) is expected here.
+      }
+    }
     const nextSessionId = generateSecureUuid();
     const nextEntry: SessionEntry = {
       ...prevEntry,
@@ -756,49 +780,12 @@ export async function runReplyAgent(params: {
       finalPayloads = appendUsageLine(finalPayloads, responseUsageLine);
     }
 
-    const continuationAgentDir =
-      typeof followupRun.run.agentDir === "string"
-        ? followupRun.run.agentDir.trim()
-        : "";
-    if (continuationAgentDir) {
-      const continuation = await prepareContinuationAdvance({
-        agentDir: continuationAgentDir,
-        sessionId: followupRun.run.sessionId,
-      });
-      if (continuation.action === "continue") {
-        const queued = enqueueFollowupRun(
-          queueKey,
-          {
-            ...followupRun,
-            prompt: continuation.prompt,
-            summaryLine: `[Continuation ${continuation.state.turnsCompleted}/${continuation.state.maxTurns}]`,
-            enqueuedAt: Date.now(),
-          },
-          {
-            mode: "followup",
-            debounceMs: 0,
-            cap: 1,
-            dropPolicy: "new",
-          },
-          "none",
-        );
-        if (!queued) {
-          await finishContinuation({
-            agentDir: continuationAgentDir,
-            sessionId: followupRun.run.sessionId,
-            status: "blocked",
-            reason: "Unable to enqueue the next continuation turn safely.",
-          });
-          finalPayloads = [
-            ...finalPayloads,
-            {
-              text: "Continuation paused: another queued turn took precedence. Start a new bounded continuation when ready.",
-            },
-          ];
-        }
-      } else if (continuation.action === "terminal") {
-        finalPayloads = [...finalPayloads, { text: continuation.notice }];
-      }
+    const continuation = await scheduleContinuationTurn({
+      queueKey,
+      followupRun,
+    });
+    if (continuation.notice) {
+      finalPayloads = [...finalPayloads, { text: continuation.notice }];
     }
 
     return finalizeWithFollowup(
@@ -807,6 +794,19 @@ export async function runReplyAgent(params: {
       runFollowupTurn,
     );
   } catch (error) {
+    const continuationAgentDir = followupRun.run.agentDir?.trim();
+    if (continuationAgentDir) {
+      try {
+        await finishContinuation({
+          agentDir: continuationAgentDir,
+          sessionId: followupRun.run.sessionId,
+          status: "blocked",
+          reason: `Agent run failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      } catch {
+        // Preserve the original failure and never overwrite a terminal state.
+      }
+    }
     // Keep the followup queue moving even when an unexpected exception escapes
     // the run path; the caller still receives the original error.
     finalizeWithFollowup(undefined, queueKey, runFollowupTurn);

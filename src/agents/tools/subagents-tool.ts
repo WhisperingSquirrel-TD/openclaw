@@ -250,7 +250,7 @@ async function killSubagentRun(params: {
   });
   const sessionId = resolved.entry?.sessionId;
   const aborted = sessionId ? abortEmbeddedPiRun(sessionId) : false;
-  const cleared = clearSessionQueues([childSessionKey, sessionId]);
+  const cleared = await clearSessionQueues([childSessionKey, sessionId]);
   if (cleared.followupCleared > 0 || cleared.laneCleared > 0) {
     logVerbose(
       `subagents tool kill: cleared followups=${cleared.followupCleared} lane=${cleared.laneCleared} keys=${cleared.keys.join(",")}`,
@@ -625,7 +625,7 @@ export function createSubagentsTool(opts?: { agentSessionKey?: string }): AnyAge
         if (sessionId) {
           abortEmbeddedPiRun(sessionId);
         }
-        const cleared = clearSessionQueues([resolved.entry.childSessionKey, sessionId]);
+        const cleared = await clearSessionQueues([resolved.entry.childSessionKey, sessionId]);
         if (cleared.followupCleared > 0 || cleared.laneCleared > 0) {
           logVerbose(
             `subagents tool steer: cleared followups=${cleared.followupCleared} lane=${cleared.laneCleared} keys=${cleared.keys.join(",")}`,

@@ -30,6 +30,7 @@ describe("agent_loop tool", () => {
       agentDir,
       sessionId,
       sessionKey: "agent:main:telegram:owner",
+      trustedOwner: true,
     });
 
     await tool.execute("start", {

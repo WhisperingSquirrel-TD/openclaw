@@ -1,6 +1,8 @@
 import { getAcpSessionManager } from "../acp/control-plane/manager.js";
 import { ACP_SESSION_IDENTITY_RENDERER_VERSION } from "../acp/runtime/session-identifiers.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
+import { resolveAgentDir } from "../agents/agent-scope.js";
+import { resolveOpenClawAgentDir } from "../agents/agent-paths.js";
 import { loadModelCatalog } from "../agents/model-catalog.js";
 import {
   getModelRefStatus,
@@ -31,6 +33,7 @@ import {
   shouldWakeFromRestartSentinel,
 } from "./server-restart-sentinel.js";
 import { startGatewayMemoryBackend } from "./server-startup-memory.js";
+import { recoverContinuationQueues } from "../auto-reply/reply/continuation-recovery.js";
 
 const SESSION_LOCK_STALE_MS = 30 * 60 * 1000;
 
@@ -158,6 +161,24 @@ export async function startGatewaySidecars(params: {
     params.logChannels.info(
       "skipping channel start (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)",
     );
+  }
+
+  try {
+    const agentDirs = new Set<string>([resolveOpenClawAgentDir()]);
+    for (const agent of params.cfg.agents?.list ?? []) {
+      if (typeof agent.id === "string" && agent.id.trim()) {
+        agentDirs.add(resolveAgentDir(params.cfg, agent.id));
+      }
+    }
+    const recovered = await recoverContinuationQueues({
+      agentDirs,
+      onError: (message) => params.log.warn(message),
+    });
+    if (recovered > 0) {
+      params.log.warn(`recovered ${recovered} persisted continuation turn(s) after gateway startup`);
+    }
+  } catch (err) {
+    params.log.warn(`continuation recovery startup failed: ${String(err)}`);
   }
 
   if (params.cfg.hooks?.internal?.enabled) {

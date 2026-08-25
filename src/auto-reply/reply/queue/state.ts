@@ -1,3 +1,4 @@
+import { finishContinuation } from "../../../agents/continuation-loop.js";
 import { applyQueueRuntimeSettings } from "../../../utils/queue-helpers.js";
 import type { FollowupRun, QueueDropPolicy, QueueMode, QueueSettings } from "./types.js";
 
@@ -63,12 +64,27 @@ export function getFollowupQueue(key: string, settings: QueueSettings): Followup
   return created;
 }
 
-export function clearFollowupQueue(key: string): number {
+export async function clearFollowupQueue(key: string): Promise<number> {
   const cleaned = key.trim();
   const queue = getExistingFollowupQueue(cleaned);
   if (!queue) {
     return 0;
   }
+  await Promise.all(
+    queue.items.map(async (item) => {
+    const continuation = item.continuation;
+    const agentDir = item.run.agentDir?.trim();
+    if (!continuation || !agentDir) {
+      return;
+    }
+    await finishContinuation({
+      agentDir,
+      sessionId: item.run.sessionId,
+      status: "cancelled",
+      reason: "Owner cancelled queued continuation work.",
+    });
+    }),
+  );
   const cleared = queue.items.length + queue.droppedCount;
   queue.items.length = 0;
   queue.droppedCount = 0;

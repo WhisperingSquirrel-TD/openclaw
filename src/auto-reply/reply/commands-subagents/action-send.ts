@@ -69,7 +69,10 @@ export async function handleSubagentsSendAction(
       abortEmbeddedPiRun(targetSessionId);
     }
 
-    const cleared = clearSessionQueues([targetResolution.entry.childSessionKey, targetSessionId]);
+    const cleared = await clearSessionQueues([
+      targetResolution.entry.childSessionKey,
+      targetSessionId,
+    ]);
     if (cleared.followupCleared > 0 || cleared.laneCleared > 0) {
       logVerbose(
         `subagents steer: cleared followups=${cleared.followupCleared} lane=${cleared.laneCleared} keys=${cleared.keys.join(",")}`,

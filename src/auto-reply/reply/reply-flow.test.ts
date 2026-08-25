@@ -1319,7 +1319,7 @@ describe("followup queue drain restart after idle window", () => {
 
     // Clear queues (simulates session teardown) — should also clear the callback.
     const { clearSessionQueues } = await import("./queue.js");
-    clearSessionQueues([key]);
+    await clearSessionQueues([key]);
 
     // Enqueue after clear: should NOT auto-start a drain (callback is gone).
     enqueueFollowupRun(key, createRun({ prompt: "after-clear" }), settings);

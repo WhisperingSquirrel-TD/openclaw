@@ -32,6 +32,12 @@ function isRunAlreadyQueued(
   items: FollowupRun[],
   allowPromptFallback = false,
 ): boolean {
+  const continuationKey = run.continuation?.idempotencyKey;
+  if (continuationKey) {
+    return items.some(
+      (item) => item.continuation?.idempotencyKey === continuationKey,
+    );
+  }
   const hasSameRouting = (item: FollowupRun) =>
     item.originatingChannel === run.originatingChannel &&
     item.originatingTo === run.originatingTo &&
@@ -53,18 +59,25 @@ export function enqueueFollowupRun(
   run: FollowupRun,
   settings: QueueSettings,
   dedupeMode: QueueDedupeMode = "message-id",
+  options?: {
+    /** Do not let an internally scheduled continuation mutate user queue policy. */
+    preserveExistingSettings?: boolean;
+    /** The active continuation that is allowed to reserve its one successor slot. */
+    activeContinuationIdempotencyKey?: string;
+  },
 ): boolean {
-  const queue = getFollowupQueue(key, settings);
+  const queue =
+    options?.preserveExistingSettings ? getExistingFollowupQueue(key) ?? getFollowupQueue(key, settings) : getFollowupQueue(key, settings);
   const recentMessageIdKey = dedupeMode !== "none" ? buildRecentMessageIdKey(run, key) : undefined;
   if (recentMessageIdKey && RECENT_QUEUE_MESSAGE_IDS.peek(recentMessageIdKey)) {
     return false;
   }
 
   const dedupe =
-    dedupeMode === "none"
-      ? undefined
-      : (item: FollowupRun, items: FollowupRun[]) =>
-          isRunAlreadyQueued(item, items, dedupeMode === "prompt");
+    run.continuation?.idempotencyKey || dedupeMode !== "none"
+      ? (item: FollowupRun, items: FollowupRun[]) =>
+          isRunAlreadyQueued(item, items, dedupeMode === "prompt")
+      : undefined;
 
   // Deduplicate: skip if the same message is already queued.
   if (shouldSkipQueueItem({ item: run, items: queue.items, dedupe })) {
@@ -74,10 +87,21 @@ export function enqueueFollowupRun(
   queue.lastEnqueuedAt = Date.now();
   queue.lastRun = run.run;
 
-  const shouldEnqueue = applyQueueDropPolicy({
-    queue,
-    summarize: (item) => item.summaryLine?.trim() || item.prompt.trim(),
-  });
+  // A continuation schedules its successor while the drain still holds the
+  // current item at index zero. Let that one successor reserve a slot rather
+  // than treating the active item as queue pressure. Ordinary queue pressure
+  // still follows the configured policy.
+  const isSuccessorOfActiveContinuation =
+    Boolean(run.continuation) &&
+    queue.draining &&
+    queue.items.length === queue.cap &&
+    queue.items[0]?.continuation?.idempotencyKey === options?.activeContinuationIdempotencyKey;
+  const shouldEnqueue =
+    isSuccessorOfActiveContinuation ||
+    applyQueueDropPolicy({
+      queue,
+      summarize: (item) => item.summaryLine?.trim() || item.prompt.trim(),
+    });
   if (!shouldEnqueue) {
     return false;
   }
@@ -93,6 +117,12 @@ export function enqueueFollowupRun(
     kickFollowupDrainIfIdle(key);
   }
   return true;
+}
+
+export function isContinuationAlreadyQueued(key: string, idempotencyKey: string): boolean {
+  return getExistingFollowupQueue(key)?.items.some(
+    (item) => item.continuation?.idempotencyKey === idempotencyKey,
+  ) ?? false;
 }
 
 export function getFollowupQueueDepth(key: string): number {

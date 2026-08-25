@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { getAcpSessionManager } from "../../acp/control-plane/manager.js";
-import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { clearBootstrapSnapshot } from "../../agents/bootstrap-cache.js";
+import { cancelContinuationForSession } from "../../agents/continuation-loop.js";
 import { abortEmbeddedPiRun, waitForEmbeddedPiRunEnd } from "../../agents/pi-embedded.js";
 import { stopSubagentsForRequester } from "../../auto-reply/reply/abort.js";
 import { clearSessionQueues } from "../../auto-reply/reply/queue.js";
@@ -206,8 +207,15 @@ async function ensureSessionRuntimeCleanup(params: {
   if (params.sessionId) {
     queueKeys.add(params.sessionId);
   }
-  clearSessionQueues([...queueKeys]);
-  stopSubagentsForRequester({ cfg: params.cfg, requesterSessionKey: params.target.canonicalKey });
+  const agentId =
+    parseAgentSessionKey(params.target.canonicalKey)?.agentId ?? resolveDefaultAgentId(params.cfg);
+  await cancelContinuationForSession({
+    agentDir: resolveAgentDir(params.cfg, agentId),
+    sessionId: params.sessionId,
+    reason: "Session cleanup cancelled the continuation.",
+  });
+  await clearSessionQueues([...queueKeys]);
+  await stopSubagentsForRequester({ cfg: params.cfg, requesterSessionKey: params.target.canonicalKey });
   if (!params.sessionId) {
     clearBootstrapSnapshot(params.target.canonicalKey);
     await closeTrackedBrowserTabs();

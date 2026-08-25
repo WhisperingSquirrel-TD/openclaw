@@ -30,7 +30,7 @@ export async function handleSubagentsKillAction(
   }
 
   if (target === "all" || target === "*") {
-    stopSubagentsForRequester({
+    await stopSubagentsForRequester({
       cfg: params.cfg,
       requesterSessionKey: requesterKey,
     });
@@ -55,7 +55,7 @@ export async function handleSubagentsKillAction(
     abortEmbeddedPiRun(sessionId);
   }
 
-  const cleared = clearSessionQueues([childKey, sessionId]);
+  const cleared = await clearSessionQueues([childKey, sessionId]);
   if (cleared.followupCleared > 0 || cleared.laneCleared > 0) {
     logVerbose(
       `subagents kill: cleared followups=${cleared.followupCleared} lane=${cleared.laneCleared} keys=${cleared.keys.join(",")}`,
@@ -77,7 +77,7 @@ export async function handleSubagentsKillAction(
     reason: "killed",
   });
 
-  stopSubagentsForRequester({
+  await stopSubagentsForRequester({
     cfg: params.cfg,
     requesterSessionKey: childKey,
   });

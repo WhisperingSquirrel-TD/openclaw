@@ -1,5 +1,6 @@
 import { getAcpSessionManager } from "../../acp/control-plane/manager.js";
-import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { cancelContinuationForSession } from "../../agents/continuation-loop.js";
 import { abortEmbeddedPiRun } from "../../agents/pi-embedded.js";
 import {
   listSubagentRunsForRequester,
@@ -214,10 +215,10 @@ function normalizeRequesterSessionKey(
   return resolveInternalSessionKey({ key: cleaned, alias, mainKey });
 }
 
-export function stopSubagentsForRequester(params: {
+export async function stopSubagentsForRequester(params: {
   cfg: OpenClawConfig;
   requesterSessionKey?: string;
-}): { stopped: number } {
+}): Promise<{ stopped: number }> {
   const requesterKey = normalizeRequesterSessionKey(params.cfg, params.requesterSessionKey);
   if (!requesterKey) {
     return { stopped: 0 };
@@ -239,7 +240,7 @@ export function stopSubagentsForRequester(params: {
     seenChildKeys.add(childKey);
 
     if (!run.endedAt) {
-      const cleared = clearSessionQueues([childKey]);
+      const cleared = await clearSessionQueues([childKey]);
       const parsed = parseAgentSessionKey(childKey);
       const storePath = resolveStorePath(params.cfg.session?.store, { agentId: parsed?.agentId });
       let store = storeCache.get(storePath);
@@ -263,7 +264,7 @@ export function stopSubagentsForRequester(params: {
     }
 
     // Cascade: also stop any sub-sub-agents spawned by this child.
-    const cascadeResult = stopSubagentsForRequester({
+    const cascadeResult = await stopSubagentsForRequester({
       cfg: params.cfg,
       requesterSessionKey: childKey,
     });
@@ -333,7 +334,12 @@ export async function tryFastAbortFromMessage(params: {
     }
     const sessionId = entry?.sessionId;
     const aborted = sessionId ? abortEmbeddedPiRun(sessionId) : false;
-    const cleared = clearSessionQueues([resolvedTargetKey, sessionId]);
+    await cancelContinuationForSession({
+      agentDir: resolveAgentDir(cfg, agentId),
+      sessionId,
+      reason: "Owner interrupted the continuation.",
+    });
+    const cleared = await clearSessionQueues([resolvedTargetKey, sessionId]);
     if (cleared.followupCleared > 0 || cleared.laneCleared > 0) {
       logVerbose(
         `abort: cleared followups=${cleared.followupCleared} lane=${cleared.laneCleared} keys=${cleared.keys.join(",")}`,
@@ -373,13 +379,13 @@ export async function tryFastAbortFromMessage(params: {
     } else if (abortKey) {
       setAbortMemory(abortKey, true);
     }
-    const { stopped } = stopSubagentsForRequester({ cfg, requesterSessionKey });
+    const { stopped } = await stopSubagentsForRequester({ cfg, requesterSessionKey });
     return { handled: true, aborted, stoppedSubagents: stopped };
   }
 
   if (abortKey) {
     setAbortMemory(abortKey, true);
   }
-  const { stopped } = stopSubagentsForRequester({ cfg, requesterSessionKey });
+  const { stopped } = await stopSubagentsForRequester({ cfg, requesterSessionKey });
   return { handled: true, aborted: false, stoppedSubagents: stopped };
 }

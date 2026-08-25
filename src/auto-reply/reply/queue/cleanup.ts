@@ -9,7 +9,9 @@ export type ClearSessionQueueResult = {
   keys: string[];
 };
 
-export function clearSessionQueues(keys: Array<string | undefined>): ClearSessionQueueResult {
+export async function clearSessionQueues(
+  keys: Array<string | undefined>,
+): Promise<ClearSessionQueueResult> {
   const seen = new Set<string>();
   let followupCleared = 0;
   let laneCleared = 0;
@@ -22,7 +24,7 @@ export function clearSessionQueues(keys: Array<string | undefined>): ClearSessio
     }
     seen.add(cleaned);
     clearedKeys.push(cleaned);
-    followupCleared += clearFollowupQueue(cleaned);
+    followupCleared += await clearFollowupQueue(cleaned);
     clearFollowupDrainCallback(cleaned);
     laneCleared += clearCommandLane(resolveEmbeddedSessionLane(cleaned));
   }

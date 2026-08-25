@@ -30,6 +30,8 @@ export function createAgentLoopTool(params: {
   agentDir: string;
   sessionId: string;
   sessionKey?: string;
+  /** Must be set by the trusted ingress that exposes this controller. */
+  trustedOwner: true;
 }): AnyAgentTool {
   return {
     name: "agent_loop",
