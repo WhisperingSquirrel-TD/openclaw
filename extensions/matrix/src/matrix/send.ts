@@ -91,7 +91,7 @@ export async function sendMessageMatrix(
           buffer: media.buffer,
           contentType: media.contentType,
           fileName: media.fileName,
-          kind: media.kind,
+          kind: media.kind ?? "document",
         });
         const baseMsgType = resolveMatrixMsgType(media.contentType, media.fileName);
         const { useVoice } = resolveMatrixVoiceDecision({

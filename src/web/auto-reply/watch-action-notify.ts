@@ -4,7 +4,7 @@ import { logVerbose } from "../../globals.js";
 import { sendMessageTelegram } from "../../telegram/send.js";
 import type { TelegramInlineButtons } from "../../telegram/button-types.js";
 import type { ClassifiedAction } from "./watch-action-classifier.js";
-import { generateActionId, storeAction } from "./watch-action-store.js";
+import { generateActionId, storeAction, type ActionType } from "./watch-action-store.js";
 
 const ACTION_TYPE_EMOJI: Record<string, string> = {
   shopping: "\u{1F6D2}",
@@ -24,8 +24,7 @@ const ACTION_TYPE_LABEL: Record<string, string> = {
   other: "Action",
 };
 
-function buildActionButtons(actionId: string, actionType: string): TelegramInlineButtons {
-  const buttons: TelegramInlineButtons = [];
+function buildActionButtons(actionId: string, actionType: ActionType): TelegramInlineButtons {
   const row1: Array<{ text: string; callback_data: string }> = [];
 
   if (actionType === "shopping") {
@@ -39,8 +38,7 @@ function buildActionButtons(actionId: string, actionType: string): TelegramInlin
   }
 
   row1.push({ text: "Ignore", callback_data: `wa_act_ign_${actionId}` });
-  buttons.push(row1);
-  return buttons;
+  return [row1];
 }
 
 function buildActionMessage(action: ClassifiedAction): string {

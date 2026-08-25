@@ -883,7 +883,7 @@ async function dispatchDiscordComponentEvent(params: {
         normalizeEntry: (entry) => {
           const normalized = normalizeDiscordAllowList([entry], ["discord:", "user:", "pk:"]);
           const candidate = normalized?.ids.values().next().value;
-          return typeof candidate === "string" && /^\d+$/.test(candidate) ? candidate : undefined;
+          return typeof candidate === "string" && /^\d+$/.test(candidate) ? candidate : "";
         },
       })
     : null;

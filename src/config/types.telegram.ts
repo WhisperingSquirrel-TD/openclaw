@@ -130,6 +130,12 @@ export type TelegramAccountConfig = {
   timeoutSeconds?: number;
   /** Retry policy for outbound Telegram API calls. */
   retry?: OutboundRetryConfig;
+  /** Maximum outbound messages per minute for this account. */
+  maxMessagesPerMinute?: number;
+  /** Maximum outbound messages per hour for this account. */
+  maxMessagesPerHour?: number;
+  /** Whether messages exceeding the outbound rate limit are queued or dropped. */
+  rateLimitOverflow?: "queue" | "drop";
   /** Network transport overrides for Telegram. */
   network?: TelegramNetworkConfig;
   proxy?: string;

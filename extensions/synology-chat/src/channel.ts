@@ -297,6 +297,7 @@ export function createSynologyChatPlugin() {
           path: account.webhookPath,
           pluginId: CHANNEL_ID,
           accountId: account.accountId,
+          auth: "plugin",
           log: (msg: string) => log?.info?.(msg),
           handler,
         });

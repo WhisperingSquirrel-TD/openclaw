@@ -1,0 +1,1 @@
+export { stripMentionsForCommand } from "../../../../../src/web/auto-reply/monitor/commands.js";

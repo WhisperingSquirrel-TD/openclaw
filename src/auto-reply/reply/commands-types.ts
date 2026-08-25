@@ -9,7 +9,7 @@ import type { InlineDirectives } from "./directive-handling.js";
 
 export type CommandContext = {
   surface: string;
-  channel: string;
+  channel: ChannelId;
   channelId?: ChannelId;
   ownerList: string[];
   senderIsOwner: boolean;
@@ -24,8 +24,14 @@ export type CommandContext = {
   resetHookTriggered?: boolean;
 };
 
+export type CommandMessageContext = MsgContext & {
+  BodyStripped?: string;
+};
+
 export type HandleCommandsParams = {
-  ctx: MsgContext;
+  ctx: CommandMessageContext;
+  /** Original inbound context, kept in sync when commands modify the dispatch body. */
+  rootCtx?: CommandMessageContext;
   cfg: OpenClawConfig;
   command: CommandContext;
   agentId?: string;

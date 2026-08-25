@@ -76,7 +76,9 @@ function formatAttachmentSummaryPlaceholder(contentTypes: Array<string | undefin
   return `[${parts.join(" + ")} attached]`;
 }
 
-export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
+export function createSignalEventHandler(
+  deps: SignalEventHandlerDeps,
+): (event: { event?: string; data?: string }) => Promise<void> {
   type SignalInboundEntry = {
     senderName: string;
     senderDisplay: string;
@@ -215,7 +217,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
               const pinnedOwner = resolvePinnedMainDmOwnerFromAllowlist({
                 dmScope: deps.cfg.session?.dmScope,
                 allowFrom: deps.allowFrom,
-                normalizeEntry: normalizeSignalAllowRecipient,
+                normalizeEntry: (entry) => normalizeSignalAllowRecipient(entry) ?? "",
               });
               if (!pinnedOwner) {
                 return undefined;
@@ -339,7 +341,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         hasMedia: Boolean(entry.mediaPath || entry.mediaType || entry.mediaPaths?.length),
       });
     },
-    onFlush: async (entries) => {
+    onFlush: async (entries): Promise<void> => {
       const last = entries.at(-1);
       if (!last) {
         return;
@@ -448,7 +450,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     return true;
   }
 
-  return async (event: { event?: string; data?: string }) => {
+  return async (event: { event?: string; data?: string }): Promise<void> => {
     if (event.event !== "receive" || !event.data) {
       return;
     }

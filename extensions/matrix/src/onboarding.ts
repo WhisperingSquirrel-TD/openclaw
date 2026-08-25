@@ -174,7 +174,8 @@ const dmPolicy: ChannelOnboardingDmPolicy = {
   allowFromKey: "channels.matrix.dm.allowFrom",
   getCurrent: (cfg) => (cfg as CoreConfig).channels?.matrix?.dm?.policy ?? "pairing",
   setPolicy: (cfg, policy) => setMatrixDmPolicy(cfg as CoreConfig, policy),
-  promptAllowFrom: promptMatrixAllowFrom,
+  promptAllowFrom: async ({ cfg, prompter }) =>
+    await promptMatrixAllowFrom({ cfg: cfg as CoreConfig, prompter }),
 };
 
 export const matrixOnboardingAdapter: ChannelOnboardingAdapter = {

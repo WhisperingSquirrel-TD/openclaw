@@ -14,6 +14,14 @@ export type WhatsAppActionConfig = {
   polls?: boolean;
 };
 
+export type WhatsAppWatchActionsConfig = {
+  enabled?: boolean;
+  activeHoursStart?: number;
+  activeHoursEnd?: number;
+  intervalMinutes?: number;
+  model?: string;
+};
+
 export type WhatsAppGroupConfig = {
   requireMention?: boolean;
   tools?: GroupToolPolicyConfig;
@@ -36,6 +44,8 @@ export type WhatsAppAckReactionConfig = {
 };
 
 type WhatsAppSharedConfig = {
+  /** Periodically classify watched WhatsApp conversations for actionable items. */
+  watchActions?: WhatsAppWatchActionsConfig;
   /** Whether the WhatsApp channel is enabled. */
   enabled?: boolean;
   /** Direct message access policy (default: pairing). */
@@ -76,6 +86,12 @@ type WhatsAppSharedConfig = {
   ackReaction?: WhatsAppAckReactionConfig;
   /** Debounce window (ms) for batching rapid consecutive messages from the same sender (0 to disable). */
   debounceMs?: number;
+  /** Maximum outbound messages per minute for this account. */
+  maxMessagesPerMinute?: number;
+  /** Maximum outbound messages per hour for this account. */
+  maxMessagesPerHour?: number;
+  /** Whether messages exceeding the outbound rate limit are queued or dropped. */
+  rateLimitOverflow?: "queue" | "drop";
   /** Heartbeat visibility settings. */
   heartbeat?: ChannelHeartbeatVisibilityConfig;
 };

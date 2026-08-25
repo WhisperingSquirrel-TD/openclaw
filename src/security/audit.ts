@@ -84,6 +84,8 @@ export type SecurityAuditReport = {
 
 export type SecurityAuditOptions = {
   config: OpenClawConfig;
+  /** Original unresolved config, when audit consumers need source values. */
+  sourceConfig?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   deep?: boolean;

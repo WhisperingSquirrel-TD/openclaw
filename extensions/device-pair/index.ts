@@ -2,6 +2,7 @@ import os from "node:os";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import {
   approveDevicePairing,
+  normalizeResolvedSecretInputString,
   listDevicePairing,
   resolveGatewayBindUrl,
   runPluginCommandWithTimeout,
@@ -187,13 +188,19 @@ function resolveAuth(cfg: OpenClawPluginApi["config"]): ResolveAuthResult {
     pickFirstDefined([
       process.env.OPENCLAW_GATEWAY_TOKEN,
       process.env.CLAWDBOT_GATEWAY_TOKEN,
-      cfg.gateway?.auth?.token,
+      normalizeResolvedSecretInputString({
+        value: cfg.gateway?.auth?.token,
+        path: "gateway.auth.token",
+      }),
     ]) ?? undefined;
   const password =
     pickFirstDefined([
       process.env.OPENCLAW_GATEWAY_PASSWORD,
       process.env.CLAWDBOT_GATEWAY_PASSWORD,
-      cfg.gateway?.auth?.password,
+      normalizeResolvedSecretInputString({
+        value: cfg.gateway?.auth?.password,
+        path: "gateway.auth.password",
+      }),
     ]) ?? undefined;
 
   if (mode === "token" || mode === "password") {

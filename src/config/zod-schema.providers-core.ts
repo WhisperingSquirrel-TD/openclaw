@@ -182,6 +182,9 @@ export const TelegramAccountSchemaBase = z
     mediaMaxMb: z.number().positive().optional(),
     timeoutSeconds: z.number().int().positive().optional(),
     retry: RetryConfigSchema,
+    maxMessagesPerMinute: z.number().int().positive().optional(),
+    maxMessagesPerHour: z.number().int().positive().optional(),
+    rateLimitOverflow: z.enum(["queue", "drop"]).optional(),
     network: z
       .object({
         autoSelectFamily: z.boolean().optional(),
@@ -447,6 +450,9 @@ export const DiscordAccountSchema = z
     maxLinesPerMessage: z.number().int().positive().optional(),
     mediaMaxMb: z.number().positive().optional(),
     retry: RetryConfigSchema,
+    maxMessagesPerMinute: z.number().int().positive().optional(),
+    maxMessagesPerHour: z.number().int().positive().optional(),
+    rateLimitOverflow: z.enum(["queue", "drop"]).optional(),
     actions: z
       .object({
         reactions: z.boolean().optional(),

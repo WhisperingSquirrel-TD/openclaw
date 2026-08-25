@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 const { resolvePluginToolsMock } = vi.hoisted(() => ({
-  resolvePluginToolsMock: vi.fn(() => []),
+  resolvePluginToolsMock: vi.fn<(params: unknown) => unknown[]>(() => []),
 }));
 
 vi.mock("../plugins/tools.js", async (importOriginal) => {

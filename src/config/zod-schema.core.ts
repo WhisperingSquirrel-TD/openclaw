@@ -361,6 +361,7 @@ export const TtsAutoSchema = z.enum(["off", "always", "inbound", "tagged"]);
 export const TtsConfigSchema = z
   .object({
     auto: TtsAutoSchema.optional(),
+    autoTriggerLength: z.number().int().nonnegative().optional(),
     enabled: z.boolean().optional(),
     mode: TtsModeSchema.optional(),
     provider: TtsProviderSchema.optional(),

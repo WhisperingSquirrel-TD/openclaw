@@ -28,6 +28,8 @@ export type TtsModelOverrideConfig = {
 export type TtsConfig = {
   /** Auto-TTS mode (preferred). */
   auto?: TtsAutoMode;
+  /** Minimum response length before automatic TTS is applied. */
+  autoTriggerLength?: number;
   /** Legacy: enable auto-TTS when `auto` is not set. */
   enabled?: boolean;
   /** Apply TTS to final replies only or to all replies (tool/block/final). */

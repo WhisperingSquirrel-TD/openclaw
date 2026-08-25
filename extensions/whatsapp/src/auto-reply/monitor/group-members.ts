@@ -1,0 +1,1 @@
+export { noteGroupMember } from "../../../../../src/web/auto-reply/monitor/group-members.js";

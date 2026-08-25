@@ -1,0 +1,1 @@
+export { resolveTelegramFetch } from "../../../src/telegram/fetch.js";

@@ -141,14 +141,13 @@ export async function emitResetCommandHooks(params: {
 }
 
 function applyAcpResetTailContext(ctx: HandleCommandsParams["ctx"], resetTail: string): void {
-  const mutableCtx = ctx as Record<string, unknown>;
-  mutableCtx.Body = resetTail;
-  mutableCtx.RawBody = resetTail;
-  mutableCtx.CommandBody = resetTail;
-  mutableCtx.BodyForCommands = resetTail;
-  mutableCtx.BodyForAgent = resetTail;
-  mutableCtx.BodyStripped = resetTail;
-  mutableCtx.AcpDispatchTailAfterReset = true;
+  ctx.Body = resetTail;
+  ctx.RawBody = resetTail;
+  ctx.CommandBody = resetTail;
+  ctx.BodyForCommands = resetTail;
+  ctx.BodyForAgent = resetTail;
+  ctx.BodyStripped = resetTail;
+  ctx.AcpDispatchTailAfterReset = true;
 }
 
 function resolveSessionEntryForHookSessionKey(

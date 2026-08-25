@@ -93,7 +93,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     const pinnedMainDmOwner = resolvePinnedMainDmOwnerFromAllowlist({
       dmScope: cfg.session?.dmScope,
       allowFrom: ctx.allowFrom,
-      normalizeEntry: normalizeSlackAllowOwnerEntry,
+      normalizeEntry: (entry) => normalizeSlackAllowOwnerEntry(entry) ?? "",
     });
     const senderRecipient = message.user?.trim().toLowerCase();
     const skipMainUpdate =

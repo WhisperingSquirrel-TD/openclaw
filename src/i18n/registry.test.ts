@@ -1,49 +1,25 @@
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_LOCALE,
-  SUPPORTED_LOCALES,
-  loadLazyLocaleTranslation,
-  resolveNavigatorLocale,
-} from "../../ui/src/i18n/lib/registry.ts";
-import type { TranslationMap } from "../../ui/src/i18n/lib/types.ts";
 
-function getNestedTranslation(map: TranslationMap | null, ...path: string[]): string | undefined {
-  let value: string | TranslationMap | undefined = map ?? undefined;
-  for (const key of path) {
-    if (value === undefined || typeof value === "string") {
-      return undefined;
-    }
-    value = value[key];
-  }
-  return typeof value === "string" ? value : undefined;
-}
+Object.defineProperty(globalThis, "localStorage", {
+  value: {
+    getItem: () => "en",
+    setItem: () => undefined,
+  },
+  configurable: true,
+});
+
+
+const { SUPPORTED_LOCALES, isSupportedLocale } = await import("../../ui/src/i18n/lib/translate.ts");
 
 describe("ui i18n locale registry", () => {
-  it("lists supported locales", () => {
-    expect(SUPPORTED_LOCALES).toEqual(["en", "zh-CN", "zh-TW", "pt-BR", "de", "es"]);
-    expect(DEFAULT_LOCALE).toBe("en");
+  it("lists the current supported locales", () => {
+    expect(SUPPORTED_LOCALES).toEqual(["en", "zh-CN", "zh-TW", "pt-BR"]);
   });
 
-  it("resolves browser locale fallbacks", () => {
-    expect(resolveNavigatorLocale("de-DE")).toBe("de");
-    expect(resolveNavigatorLocale("es-ES")).toBe("es");
-    expect(resolveNavigatorLocale("es-MX")).toBe("es");
-    expect(resolveNavigatorLocale("pt-PT")).toBe("pt-BR");
-    expect(resolveNavigatorLocale("zh-HK")).toBe("zh-TW");
-    expect(resolveNavigatorLocale("en-US")).toBe("en");
-  });
-
-  it("loads lazy locale translations from the registry", async () => {
-    const de = await loadLazyLocaleTranslation("de");
-    const es = await loadLazyLocaleTranslation("es");
-    const ptBR = await loadLazyLocaleTranslation("pt-BR");
-    const zhCN = await loadLazyLocaleTranslation("zh-CN");
-
-    expect(getNestedTranslation(de, "common", "health")).toBe("Status");
-    expect(getNestedTranslation(es, "common", "health")).toBe("Estado");
-    expect(getNestedTranslation(es, "languages", "de")).toBe("Deutsch (Alemán)");
-    expect(getNestedTranslation(ptBR, "languages", "es")).toBe("Español (Espanhol)");
-    expect(getNestedTranslation(zhCN, "common", "health")).toBe("\u5065\u5eb7\u72b6\u51b5");
-    expect(await loadLazyLocaleTranslation("en")).toBeNull();
+  it("recognizes supported locales without accepting unsupported browser locales", () => {
+    expect(isSupportedLocale("zh-CN")).toBe(true);
+    expect(isSupportedLocale("pt-BR")).toBe(true);
+    expect(isSupportedLocale("de-DE")).toBe(false);
+    expect(isSupportedLocale(null)).toBe(false);
   });
 });

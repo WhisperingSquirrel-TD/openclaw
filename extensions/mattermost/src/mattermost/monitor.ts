@@ -261,7 +261,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         out.push({
           path: saved.path,
           contentType,
-          kind: core.media.mediaKindFromMime(contentType),
+          kind: core.media.mediaKindFromMime(contentType) ?? "document",
         });
       } catch (err) {
         logger.debug?.(`mattermost: failed to download file ${fileId}: ${String(err)}`);

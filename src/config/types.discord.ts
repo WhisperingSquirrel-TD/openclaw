@@ -274,6 +274,12 @@ export type DiscordAccountConfig = {
   dms?: Record<string, DmConfig>;
   /** Retry policy for outbound Discord API calls. */
   retry?: OutboundRetryConfig;
+  /** Maximum outbound messages per minute for this account. */
+  maxMessagesPerMinute?: number;
+  /** Maximum outbound messages per hour for this account. */
+  maxMessagesPerHour?: number;
+  /** Whether messages exceeding the outbound rate limit are queued or dropped. */
+  rateLimitOverflow?: "queue" | "drop";
   /** Per-action tool gating (default: true for all). */
   actions?: DiscordActionConfig;
   /** Control reply threading when reply tags are present (off|first|all). */

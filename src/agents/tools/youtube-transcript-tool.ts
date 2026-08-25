@@ -26,7 +26,7 @@ import {
   writeCache,
 } from "./web-shared.js";
 
-type TranscriptResponse = { text: string; duration: number; offset: number; lang: string };
+type TranscriptResponse = { text: string; duration: number; offset: number; lang?: string };
 
 // ---------------------------------------------------------------------------
 // Constants

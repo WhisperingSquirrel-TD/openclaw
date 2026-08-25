@@ -134,6 +134,14 @@ export type AgentDefaultsConfig = {
   bootstrapMaxChars?: number;
   /** Max total chars across all injected bootstrap files (default: 150000). */
   bootstrapTotalMaxChars?: number;
+  /** When to inject an agent-visible bootstrap truncation warning. */
+  bootstrapPromptTruncationWarning?: "off" | "once" | "always";
+  /** Optional PDF-capable model and fallbacks (provider/model). */
+  pdfModel?: AgentModelConfig;
+  /** Maximum PDF file size in megabytes for the PDF tool. */
+  pdfMaxBytesMb?: number;
+  /** Maximum PDF pages processed by the PDF tool. */
+  pdfMaxPages?: number;
   /** Optional IANA timezone for the user (used in system prompt; defaults to host timezone). */
   userTimezone?: string;
   /** Time format in system prompt: auto (OS preference), 12-hour, or 24-hour. */
@@ -237,6 +245,8 @@ export type AgentDefaultsConfig = {
     ackMaxChars?: number;
     /** Suppress tool error warning payloads during heartbeat runs. */
     suppressToolErrorWarnings?: boolean;
+    /** Use a lightweight bootstrap context for heartbeat runs. */
+    lightContext?: boolean;
     /**
      * When enabled, deliver the model's reasoning payload for heartbeat runs (when available)
      * as a separate message prefixed with `Reasoning:` (same as `/reasoning on`).
@@ -281,6 +291,14 @@ export type AgentDefaultsConfig = {
 };
 
 export type AgentCompactionMode = "default" | "safeguard";
+export type AgentCompactionIdentifierPolicy = "strict" | "off" | "custom";
+
+export type AgentCompactionQualityGuardConfig = {
+  /** Enable compaction summary quality audits and regeneration retries. */
+  enabled?: boolean;
+  /** Maximum regeneration retries after a failed quality audit. */
+  maxRetries?: number;
+};
 
 export type AgentCompactionConfig = {
   /** Compaction summarization mode. */
@@ -289,12 +307,22 @@ export type AgentCompactionConfig = {
   reserveTokens?: number;
   /** Pi keepRecentTokens budget used for cut-point selection. */
   keepRecentTokens?: number;
+  /** Preserve this many most-recent user/assistant turns verbatim. */
+  recentTurnsPreserve?: number;
+  /** Identifier-preservation instruction policy for compaction summaries. */
+  identifierPolicy?: AgentCompactionIdentifierPolicy;
+  /** Custom identifier-preservation instructions when identifierPolicy is "custom". */
+  identifierInstructions?: string;
+  /** Optional quality-audit retries for safeguard compaction summaries. */
+  qualityGuard?: AgentCompactionQualityGuardConfig;
   /** Minimum reserve tokens enforced for Pi compaction (0 disables the floor). */
   reserveTokensFloor?: number;
   /** Max share of context window for history during safeguard pruning (0.1–0.9, default 0.5). */
   maxHistoryShare?: number;
   /** Pre-compaction memory flush (agentic turn). Default: enabled. */
   memoryFlush?: AgentCompactionMemoryFlushConfig;
+  /** H2/H3 section names from AGENTS.md to inject after compaction. */
+  postCompactionSections?: string[];
 };
 
 export type AgentCompactionMemoryFlushConfig = {
@@ -302,6 +330,8 @@ export type AgentCompactionMemoryFlushConfig = {
   enabled?: boolean;
   /** Run the memory flush when context is within this many tokens of the compaction threshold. */
   softThresholdTokens?: number;
+  /** Force a memory flush when transcript size reaches this byte threshold. */
+  forceFlushTranscriptBytes?: number | string;
   /** User prompt used for the memory flush turn (NO_REPLY is enforced if missing). */
   prompt?: string;
   /** System prompt appended for the memory flush turn. */

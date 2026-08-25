@@ -68,6 +68,9 @@ const WhatsAppSharedSchema = z.object({
   groups: WhatsAppGroupsSchema,
   ackReaction: WhatsAppAckReactionSchema,
   debounceMs: z.number().int().nonnegative().optional().default(0),
+  maxMessagesPerMinute: z.number().int().positive().optional(),
+  maxMessagesPerHour: z.number().int().positive().optional(),
+  rateLimitOverflow: z.enum(["queue", "drop"]).optional(),
   heartbeat: ChannelHeartbeatVisibilitySchema,
 });
 

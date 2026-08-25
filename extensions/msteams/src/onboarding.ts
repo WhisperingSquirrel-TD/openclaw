@@ -11,6 +11,7 @@ import {
   DEFAULT_ACCOUNT_ID,
   formatDocsLink,
   mergeAllowFromEntries,
+  normalizeResolvedSecretInputString,
   promptChannelAccessConfig,
 } from "openclaw/plugin-sdk";
 import {
@@ -241,9 +242,18 @@ export const msteamsOnboardingAdapter: ChannelOnboardingAdapter = {
   configure: async ({ cfg, prompter }) => {
     const resolved = resolveMSTeamsCredentials(cfg.channels?.msteams);
     const hasConfigCreds = Boolean(
-      cfg.channels?.msteams?.appId?.trim() &&
-      cfg.channels?.msteams?.appPassword?.trim() &&
-      cfg.channels?.msteams?.tenantId?.trim(),
+      normalizeResolvedSecretInputString({
+        value: cfg.channels?.msteams?.appId,
+        path: "channels.msteams.appId",
+      }) &&
+        normalizeResolvedSecretInputString({
+          value: cfg.channels?.msteams?.appPassword,
+          path: "channels.msteams.appPassword",
+        }) &&
+        normalizeResolvedSecretInputString({
+          value: cfg.channels?.msteams?.tenantId,
+          path: "channels.msteams.tenantId",
+        }),
     );
     const canUseEnv = Boolean(
       !hasConfigCreds &&

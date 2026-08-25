@@ -36,6 +36,10 @@ export const AgentDefaultsSchema = z
     skipBootstrap: z.boolean().optional(),
     bootstrapMaxChars: z.number().int().positive().optional(),
     bootstrapTotalMaxChars: z.number().int().positive().optional(),
+    bootstrapPromptTruncationWarning: z.enum(["off", "once", "always"]).optional(),
+    pdfModel: AgentModelSchema.optional(),
+    pdfMaxBytesMb: z.number().positive().optional(),
+    pdfMaxPages: z.number().int().positive().optional(),
     userTimezone: z.string().optional(),
     timeFormat: z.union([z.literal("auto"), z.literal("12"), z.literal("24")]).optional(),
     envelopeTimezone: z.string().optional(),
@@ -82,12 +86,26 @@ export const AgentDefaultsSchema = z
         mode: z.union([z.literal("default"), z.literal("safeguard")]).optional(),
         reserveTokens: z.number().int().nonnegative().optional(),
         keepRecentTokens: z.number().int().positive().optional(),
+        recentTurnsPreserve: z.number().int().min(0).max(12).optional(),
+        identifierPolicy: z.enum(["strict", "off", "custom"]).optional(),
+        identifierInstructions: z.string().optional(),
+        qualityGuard: z
+          .object({
+            enabled: z.boolean().optional(),
+            maxRetries: z.number().int().nonnegative().optional(),
+          })
+          .strict()
+          .optional(),
         reserveTokensFloor: z.number().int().nonnegative().optional(),
         maxHistoryShare: z.number().min(0.1).max(0.9).optional(),
+        postCompactionSections: z.array(z.string()).optional(),
         memoryFlush: z
           .object({
             enabled: z.boolean().optional(),
             softThresholdTokens: z.number().int().nonnegative().optional(),
+            forceFlushTranscriptBytes: z
+              .union([z.number().int().nonnegative(), z.string()])
+              .optional(),
             prompt: z.string().optional(),
             systemPrompt: z.string().optional(),
           })

@@ -1,0 +1,1 @@
+export { checkInboundAccessControl } from "../../../../src/web/inbound/access-control.js";

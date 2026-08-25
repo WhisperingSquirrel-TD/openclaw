@@ -1,0 +1,1 @@
+export { makeProxyFetch } from "../../../src/telegram/proxy.js";

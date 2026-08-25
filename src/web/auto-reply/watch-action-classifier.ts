@@ -111,19 +111,17 @@ const CHEAP_MODELS: Record<string, string> = {
 };
 
 function resolveCheapModel(cfg: OpenClawConfig): { provider: string; modelId: string } | null {
-  const watchActions = (cfg as Record<string, unknown>).channels as Record<string, unknown> | undefined;
-  const waConfig = watchActions?.whatsapp as Record<string, unknown> | undefined;
-  const actionsCfg = waConfig?.watchActions as Record<string, unknown> | undefined;
-
-  if (actionsCfg?.model && typeof actionsCfg.model === "string") {
-    const parts = actionsCfg.model.split("/");
+  const configuredModel = cfg.channels?.whatsapp?.watchActions?.model;
+  if (configuredModel) {
+    const parts = configuredModel.split("/");
     if (parts.length === 2) {
       return { provider: parts[0], modelId: parts[1] };
     }
   }
 
   const defaults = cfg.agents?.defaults;
-  const primaryModel = defaults?.model?.primary;
+  const primaryModel =
+    typeof defaults?.model === "object" ? defaults.model.primary : defaults?.model;
   if (primaryModel && typeof primaryModel === "string") {
     const parts = primaryModel.split("/");
     if (parts.length >= 2) {
@@ -137,6 +135,37 @@ function resolveCheapModel(cfg: OpenClawConfig): { provider: string; modelId: st
   }
 
   return null;
+}
+
+function isActionType(value: unknown): value is ActionType {
+  return (
+    typeof value === "string" &&
+    ["shopping", "calendar", "task", "reminder", "urgent", "other"].includes(value)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function parseClassificationResponse(value: unknown): Array<{
+  actionType: ActionType;
+  summary: string;
+  messageIndex: number;
+}> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+    const { actionType, summary, messageIndex } = item;
+    if (!isActionType(actionType) || typeof summary !== "string" || typeof messageIndex !== "number") {
+      return [];
+    }
+    return [{ actionType, summary, messageIndex }];
+  });
 }
 
 export async function classifyActions(
@@ -164,6 +193,10 @@ export async function classifyActions(
   let apiKey: string;
   try {
     const auth = await resolveApiKeyForProvider({ provider, cfg });
+    if (!auth.apiKey) {
+      logInfo(`watch-action-classifier: no API key for ${provider}`);
+      return [];
+    }
     apiKey = auth.apiKey;
   } catch (err) {
     logInfo(`watch-action-classifier: no API key for ${provider}: ${String(err)}`);
@@ -171,23 +204,19 @@ export async function classifyActions(
   }
 
   const model = resolved.model;
-  if (!model.apiKey) {
-    (model as Record<string, unknown>).apiKey = apiKey;
-  }
-
   const prompt = buildClassificationPrompt(candidates, contextMessages);
 
   try {
-    const context = [
-      { role: "system" as const, content: CLASSIFICATION_SYSTEM_PROMPT },
-      { role: "user" as const, content: prompt },
-    ];
+    const context = {
+      systemPrompt: CLASSIFICATION_SYSTEM_PROMPT,
+      messages: [{ role: "user" as const, content: prompt, timestamp: Date.now() }],
+    };
 
     let responseText = "";
-    const stream = streamSimple(model, context, { maxTokens: 1024 });
+    const stream = streamSimple(model, context, { apiKey, maxTokens: 1024 });
     for await (const event of stream) {
-      if (event.type === "text") {
-        responseText += event.text;
+      if (event.type === "text_delta") {
+        responseText += event.delta;
       }
     }
 
@@ -198,26 +227,17 @@ export async function classifyActions(
       return [];
     }
 
-    const parsed: Array<{
-      actionType: string;
-      summary: string;
-      messageIndex: number;
-    }> = JSON.parse(jsonMatch[0]);
-
-    if (!Array.isArray(parsed) || parsed.length === 0) return [];
+    const parsed = parseClassificationResponse(JSON.parse(jsonMatch[0]));
+    if (parsed.length === 0) return [];
 
     const results: ClassifiedAction[] = [];
     for (const item of parsed) {
       const idx = item.messageIndex;
       if (typeof idx !== "number" || idx < 0 || idx >= candidates.length) continue;
       const candidate = candidates[idx];
-      const validTypes: ActionType[] = ["shopping", "calendar", "task", "reminder", "urgent", "other"];
-      const actionType: ActionType = validTypes.includes(item.actionType as ActionType)
-        ? (item.actionType as ActionType)
-        : "other";
       results.push({
-        actionType,
-        summary: String(item.summary).slice(0, 200),
+        actionType: item.actionType,
+        summary: item.summary.slice(0, 200),
         originalMessage: redactPii(candidate.body.slice(0, 150)),
         senderName: candidate.senderName ? redactPii(candidate.senderName) : undefined,
         chatName: candidate.chatName ? redactPii(candidate.chatName) : undefined,

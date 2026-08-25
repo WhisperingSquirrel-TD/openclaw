@@ -139,6 +139,7 @@ export type ResolvedTtsConfig = {
 type TtsUserPrefs = {
   tts?: {
     auto?: TtsAutoMode;
+    autoTriggerLength?: number;
     enabled?: boolean;
     provider?: TtsProvider;
     maxLength?: number;

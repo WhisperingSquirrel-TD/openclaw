@@ -86,7 +86,7 @@ export function createDiscordMessageHandler(
         ),
       });
     },
-    onFlush: async (entries) => {
+    onFlush: async (entries): Promise<void> => {
       const last = entries.at(-1);
       if (!last) {
         return;

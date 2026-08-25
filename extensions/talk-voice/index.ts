@@ -1,4 +1,7 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import {
+  normalizeResolvedSecretInputString,
+  type OpenClawPluginApi,
+} from "openclaw/plugin-sdk";
 
 type ElevenLabsVoice = {
   voice_id: string;
@@ -84,7 +87,10 @@ export default function register(api: OpenClawPluginApi) {
       const action = (tokens[0] ?? "status").toLowerCase();
 
       const cfg = api.runtime.config.loadConfig();
-      const apiKey = (cfg.talk?.apiKey ?? "").trim();
+      const apiKey = normalizeResolvedSecretInputString({
+        value: cfg.talk?.apiKey,
+        path: "talk.apiKey",
+      });
       if (!apiKey) {
         return {
           text:

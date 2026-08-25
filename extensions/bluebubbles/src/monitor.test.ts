@@ -103,6 +103,8 @@ function createMockRuntime(): PluginRuntime {
     system: {
       enqueueSystemEvent:
         mockEnqueueSystemEvent as unknown as PluginRuntime["system"]["enqueueSystemEvent"],
+      requestHeartbeatNow:
+        vi.fn() as unknown as PluginRuntime["system"]["requestHeartbeatNow"],
       runCommandWithTimeout: vi.fn() as unknown as PluginRuntime["system"]["runCommandWithTimeout"],
       formatNativeDependencyHint: vi.fn(
         () => "",
@@ -119,6 +121,14 @@ function createMockRuntime(): PluginRuntime {
     },
     tts: {
       textToSpeechTelephony: vi.fn() as unknown as PluginRuntime["tts"]["textToSpeechTelephony"],
+    },
+    stt: {
+      transcribeAudioFile: vi.fn() as unknown as PluginRuntime["stt"]["transcribeAudioFile"],
+    },
+    events: {
+      onAgentEvent: vi.fn() as unknown as PluginRuntime["events"]["onAgentEvent"],
+      onSessionTranscriptUpdate:
+        vi.fn() as unknown as PluginRuntime["events"]["onSessionTranscriptUpdate"],
     },
     tools: {
       createMemoryGetTool: vi.fn() as unknown as PluginRuntime["tools"]["createMemoryGetTool"],
@@ -191,6 +201,8 @@ function createMockRuntime(): PluginRuntime {
           mockResolveEnvelopeFormatOptions as unknown as PluginRuntime["channel"]["reply"]["resolveEnvelopeFormatOptions"],
       },
       routing: {
+        buildAgentSessionKey:
+          vi.fn() as unknown as PluginRuntime["channel"]["routing"]["buildAgentSessionKey"],
         resolveAgentRoute:
           mockResolveAgentRoute as unknown as PluginRuntime["channel"]["routing"]["resolveAgentRoute"],
       },
@@ -287,6 +299,7 @@ function createMockRuntime(): PluginRuntime {
         () => "/tmp/openclaw",
       ) as unknown as PluginRuntime["state"]["resolveStateDir"],
     },
+    subagent: {} as PluginRuntime["subagent"],
   };
 }
 

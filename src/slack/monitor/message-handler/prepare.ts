@@ -733,7 +733,7 @@ export async function prepareSlackMessage(params: {
     ? resolvePinnedMainDmOwnerFromAllowlist({
         dmScope: cfg.session?.dmScope,
         allowFrom: ctx.allowFrom,
-        normalizeEntry: normalizeSlackAllowOwnerEntry,
+        normalizeEntry: (entry) => normalizeSlackAllowOwnerEntry(entry) ?? "",
       })
     : null;
 

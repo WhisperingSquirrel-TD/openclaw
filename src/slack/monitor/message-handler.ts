@@ -102,7 +102,7 @@ export function createSlackMessageHandler(params: {
     channel: "slack",
     buildKey: (entry) => buildSlackDebounceKey(entry.message, ctx.accountId),
     shouldDebounce: (entry) => shouldDebounceSlackMessage(entry.message, ctx.cfg),
-    onFlush: async (entries) => {
+    onFlush: async (entries): Promise<void> => {
       const last = entries.at(-1);
       if (!last) {
         return;
@@ -206,7 +206,7 @@ export function createSlackMessageHandler(params: {
     return true;
   };
 
-  return async (message, opts) => {
+  return async (message, opts): Promise<void> => {
     if (opts.source === "message" && message.type !== "message") {
       return;
     }
