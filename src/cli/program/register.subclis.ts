@@ -290,6 +290,15 @@ const entries: SubCliEntry[] = [
     },
   },
   {
+    name: "skilzvolt",
+    description: "Connect OpenClaw to SkilzVolt via OAuth",
+    hasSubcommands: true,
+    register: async (program) => {
+      const mod = await import("../skilzvolt-cli.js");
+      mod.registerSkilzVoltCli(program);
+    },
+  },
+  {
     name: "update",
     description: "Update OpenClaw and inspect update channel status",
     hasSubcommands: true,

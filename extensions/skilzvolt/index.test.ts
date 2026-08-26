@@ -1,9 +1,24 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi, OpenClawPluginToolFactory } from "../../src/plugins/types.js";
 import registerSkilzVolt from "./index.js";
 
 describe("SkilzVolt plugin registration", () => {
-  it("does not expose either native tool to non-owner senders", () => {
+  beforeEach(() => {
+    // The catalogue bootstrap call happens inside before_prompt_build; stub fetch so tests never
+    // hit the real network and instead exercise the explicit degraded-mode reporting path.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network disabled in test");
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("does not expose either native tool to non-owner senders", async () => {
     const factories: OpenClawPluginToolFactory[] = [];
     const hooks: Array<{
       name: string;
@@ -37,9 +52,15 @@ describe("SkilzVolt plugin registration", () => {
     ]);
 
     const promptHook = hooks.find((hook) => hook.name === "before_prompt_build");
-    expect(promptHook?.handler({}, { agentId: "main" })).toMatchObject({
+    const mainResult = (await promptHook?.handler({}, { agentId: "main" })) as
+      | { appendSystemContext: string }
+      | undefined;
+    expect(mainResult).toMatchObject({
       appendSystemContext: expect.stringContaining("authoritative"),
     });
-    expect(promptHook?.handler({}, { agentId: "other" })).toBeUndefined();
+    // Catalogue fetch fails (network stubbed): reports an explicit degraded state, never stale
+    // or guessed data.
+    expect(mainResult?.appendSystemContext).toContain("unavailable");
+    expect(await promptHook?.handler({}, { agentId: "other" })).toBeUndefined();
   });
 });

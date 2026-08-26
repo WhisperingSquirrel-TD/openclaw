@@ -26,7 +26,7 @@ const liveTools = [
 
 describe("SkilzVoltClient", () => {
   it("allowlists every published contract tool and no arbitrary tool", async () => {
-    expect(SKILZVOLT_ALLOWED_TOOLS).toHaveLength(17);
+    expect(SKILZVOLT_ALLOWED_TOOLS).toHaveLength(18);
     const tools = SKILZVOLT_ALLOWED_TOOLS.map((name) => ({
       name,
       inputSchema: { type: "object", properties: {} },
@@ -35,7 +35,8 @@ describe("SkilzVoltClient", () => {
       const body = JSON.parse(String(init?.body)) as { id?: number; method: string };
       if (body.method === "initialize") return rpc(body.id!, { protocolVersion: "2025-06-18" });
       if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
-      if (body.method === "tools/list") return rpc(body.id!, { tools: [...tools, { name: "nope" }] });
+      if (body.method === "tools/list")
+        return rpc(body.id!, { tools: [...tools, { name: "nope" }] });
       return rpc(body.id!, { structuredContent: { page: 1 }, content: [] });
     });
     const client = new SkilzVoltClient({
@@ -46,7 +47,9 @@ describe("SkilzVoltClient", () => {
     });
 
     expect((await client.listTools()).map((tool) => tool.name)).toEqual(SKILZVOLT_ALLOWED_TOOLS);
-    await expect(client.callTool("skills_export_all", { cursor: "opaque", limit: 1 })).resolves.toEqual({
+    await expect(
+      client.callTool("skills_export_all", { cursor: "opaque", limit: 1 }),
+    ).resolves.toEqual({
       content: [],
       structuredContent: { page: 1 },
       data: { page: 1 },
@@ -253,5 +256,34 @@ describe("SkilzVoltClient", () => {
     });
     expect((await client.listTools()).map((tool) => tool.name)).toContain("connection_diagnostic");
     expect(toolListCalls).toBe(2);
+  });
+
+  it("awaits an async getBearerToken and fails clearly when it resolves to nothing", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { id?: number; method: string };
+      if (body.method === "initialize") return rpc(body.id!, { protocolVersion: "2025-06-18" });
+      if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+      return rpc(body.id!, {
+        tools: [{ name: "workspaces_list" }, { name: "skills_search" }, { name: "skills_get" }],
+      });
+    });
+    const resolvedToken = new SkilzVoltClient({
+      connectionKeyEnv: "TEST_SKILZVOLT_KEY",
+      allowProposals: true,
+      fetchImpl: fetchImpl as typeof fetch,
+      getBearerToken: () => Promise.resolve("svk_async_token"),
+    });
+    await resolvedToken.listTools();
+    expect(fetchImpl.mock.calls[0]?.[1]?.headers).toMatchObject({
+      authorization: "Bearer svk_async_token",
+    });
+
+    const missingToken = new SkilzVoltClient({
+      connectionKeyEnv: "TEST_SKILZVOLT_KEY",
+      allowProposals: true,
+      fetchImpl: fetchImpl as typeof fetch,
+      getBearerToken: () => Promise.resolve(undefined),
+    });
+    await expect(missingToken.listTools()).rejects.toMatchObject({ kind: "auth" });
   });
 });

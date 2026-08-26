@@ -4,6 +4,7 @@ export const SKILZVOLT_READ_TOOLS = [
   "search",
   "fetch",
   "workspaces_list",
+  "skills_catalogue",
   "skills_search",
   "skills_get",
   "connection_diagnostic",
@@ -59,20 +60,18 @@ export type SkilzVoltClientOptions = {
   fetchImpl?: FetchLike;
   timeoutMs?: number;
   maxResponseBytes?: number;
-  getBearerToken?: () => string | undefined;
+  /**
+   * Resolves the current bearer token. Async so the caller (core, not this extension) can
+   * silently refresh an OAuth-issued access token before it is used. Falls back to reading
+   * `connectionKeyEnv` directly when not supplied, for backwards compatibility.
+   */
+  getBearerToken?: () => string | undefined | Promise<string | undefined>;
   subscribeToNotifications?: boolean;
 };
 
-const REQUIRED_TOOLS = new Set([
-  "workspaces_list",
-  "skills_search",
-  "skills_get",
-]);
+const REQUIRED_TOOLS = new Set(["workspaces_list", "skills_search", "skills_get"]);
 const ALLOWED_TOOL_SET = new Set<string>(SKILZVOLT_ALLOWED_TOOLS);
-const PROPOSAL_TOOL_SET = new Set<string>([
-  ...SKILZVOLT_PROPOSAL_TOOLS,
-  "skills_migration_submit",
-]);
+const PROPOSAL_TOOL_SET = new Set<string>([...SKILZVOLT_PROPOSAL_TOOLS, "skills_migration_submit"]);
 
 function redact(value: string, secret?: string): string {
   let redacted = value;
@@ -207,7 +206,7 @@ export class SkilzVoltClient {
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
-  private readonly getBearerToken: () => string | undefined;
+  private readonly getBearerToken: () => string | undefined | Promise<string | undefined>;
   private sessionId?: string;
   private protocolVersion = "2025-06-18";
   private initialized = false;
@@ -223,11 +222,11 @@ export class SkilzVoltClient {
       options.getBearerToken ?? (() => process.env[this.options.connectionKeyEnv]?.trim());
   }
 
-  private bearerToken(): string {
-    const token = this.getBearerToken();
+  private async bearerToken(): Promise<string> {
+    const token = await this.getBearerToken();
     if (!token) {
       throw new SkilzVoltError(
-        `SkilzVolt is not connected. Set ${this.options.connectionKeyEnv} in the private OpenClaw environment, then restart the gateway.`,
+        `SkilzVolt is not connected. Connect it with the SkilzVolt OAuth login command, or set ${this.options.connectionKeyEnv} in the private OpenClaw environment, then restart the gateway.`,
         "auth",
       );
     }
@@ -241,7 +240,7 @@ export class SkilzVoltClient {
     signal?: AbortSignal,
   ): Promise<unknown> {
     const id = notification ? undefined : ++this.requestId;
-    const bearerToken = this.bearerToken();
+    const bearerToken = await this.bearerToken();
     const controller = new AbortController();
     const onAbort = () => controller.abort(signal?.reason);
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -313,8 +312,7 @@ export class SkilzVoltClient {
           (candidate) =>
             candidate &&
             typeof candidate === "object" &&
-            (candidate as Record<string, unknown>).method ===
-              "notifications/tools/list_changed",
+            (candidate as Record<string, unknown>).method === "notifications/tools/list_changed",
         )
       ) {
         this.tools = undefined;
@@ -376,7 +374,7 @@ export class SkilzVoltClient {
         method: "GET",
         headers: {
           accept: "text/event-stream",
-          authorization: `Bearer ${this.bearerToken()}`,
+          authorization: `Bearer ${await this.bearerToken()}`,
           "mcp-session-id": this.sessionId,
           "mcp-protocol-version": this.protocolVersion,
         },
@@ -396,8 +394,7 @@ export class SkilzVoltClient {
           if (
             payload &&
             typeof payload === "object" &&
-            (payload as Record<string, unknown>).method ===
-              "notifications/tools/list_changed"
+            (payload as Record<string, unknown>).method === "notifications/tools/list_changed"
           ) {
             this.tools = undefined;
           }

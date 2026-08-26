@@ -9,7 +9,7 @@
       "connectionKeyEnv": {
         "type": "string",
         "default": "SKILZVOLT_CONNECTION_KEY",
-        "description": "Environment variable containing the private SkilzVolt bearer connection key."
+        "description": "Legacy fallback: environment variable containing a static SkilzVolt bearer connection key, used only when no `openclaw skilzvolt login` OAuth session is connected."
       },
       "allowProposals": {
         "type": "boolean",
