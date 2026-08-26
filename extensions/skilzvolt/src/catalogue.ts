@@ -23,6 +23,9 @@ type CatalogueSnapshot =
       entries: SkilzVoltCatalogueEntry[];
       lines: string[];
       fetchedAt: number;
+      // Server-declared freshness window (confirmed field, 2026-08-26: top-level
+      // `snapshot_expires_at`, "when applicable"). Absent when SkilzVolt doesn't send one.
+      expiresAt?: number;
     }
   | { ok: false; reason: string; fetchedAt: number };
 
@@ -33,9 +36,25 @@ export type SkilzVoltCatalogueResult =
 // SkilzVolt's own catalogue may be large; this bounds pagination in case of a cursor loop bug on
 // either side rather than hanging bootstrap indefinitely.
 const MAX_PAGES = 50;
-// Re-fetch periodically rather than on every prompt build, but never serve data past this age as
-// current without at least attempting a revision check.
+// Fallback re-fetch interval when SkilzVolt doesn't declare a snapshot_expires_at: re-fetch
+// periodically rather than on every prompt build, but never serve data past this age as current
+// without at least attempting a revision check. A server-declared expiry (see `expiresAt` above)
+// always takes precedence over this fixed guess when present.
 const CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** Parses a server-declared expiry timestamp; invalid/absent values fall back to the fixed TTL. */
+function parseExpiresAt(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+function isSnapshotFresh(snapshot: CatalogueSnapshot): boolean {
+  if (snapshot.ok && typeof snapshot.expiresAt === "number") {
+    return Date.now() < snapshot.expiresAt;
+  }
+  return Date.now() - snapshot.fetchedAt < CACHE_TTL_MS;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -83,6 +102,10 @@ function parseEntry(raw: unknown): SkilzVoltCatalogueEntry {
     readString(record, ["home_workspace_name", "homeWorkspaceName"]) ??
     readString(record, ["home_workspace_slug", "homeWorkspaceSlug"]) ??
     readString(workspace, ["name", "slug"]);
+  // `source` (confirmed field, always "skilzvolt" today) is deliberately not read or validated:
+  // this parser only ever runs on responses from the skilzvolt_catalogue tool call, so the field
+  // carries no decision this code needs to make. Revisit if SkilzVolt ever multiplexes other
+  // sources through the same tool.
   return {
     skillId,
     workspaceId,
@@ -112,7 +135,7 @@ export class SkilzVoltCatalogue {
   constructor(private readonly client: SkilzVoltClient) {}
 
   async getLines(signal?: AbortSignal): Promise<SkilzVoltCatalogueResult> {
-    const isFresh = this.snapshot && Date.now() - this.snapshot.fetchedAt < CACHE_TTL_MS;
+    const isFresh = this.snapshot ? isSnapshotFresh(this.snapshot) : false;
     if (!isFresh) {
       await this.refresh(signal);
     }
@@ -137,6 +160,7 @@ export class SkilzVoltCatalogue {
       const entries: SkilzVoltCatalogueEntry[] = [];
       let cursor: string | undefined;
       let revision: string | undefined;
+      let expiresAtRaw: string | undefined;
       let unchanged = false;
       for (let page = 0; page < MAX_PAGES; page += 1) {
         const args: Record<string, unknown> = {};
@@ -161,6 +185,8 @@ export class SkilzVoltCatalogue {
           );
         }
         revision = readString(data, ["revision", "catalogue_revision"]) ?? revision;
+        expiresAtRaw =
+          readString(data, ["snapshot_expires_at", "snapshotExpiresAt"]) ?? expiresAtRaw;
         if (page === 0 && data.unchanged === true) {
           unchanged = true;
           break;
@@ -200,7 +226,11 @@ export class SkilzVoltCatalogue {
             "contract_drift",
           );
         }
-        this.snapshot = { ...this.snapshot, fetchedAt: Date.now() };
+        this.snapshot = {
+          ...this.snapshot,
+          fetchedAt: Date.now(),
+          expiresAt: parseExpiresAt(expiresAtRaw) ?? this.snapshot.expiresAt,
+        };
         return;
       }
 
@@ -210,6 +240,7 @@ export class SkilzVoltCatalogue {
         entries,
         lines: entries.map(toCompactLine),
         fetchedAt: Date.now(),
+        expiresAt: parseExpiresAt(expiresAtRaw),
       };
     } catch (error) {
       this.snapshot = {

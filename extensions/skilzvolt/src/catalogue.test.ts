@@ -219,4 +219,70 @@ describe("SkilzVoltCatalogue", () => {
     const result = await catalogue.getLines();
     expect(result.ok).toBe(false);
   });
+
+  it("treats a past snapshot_expires_at as immediately stale, overriding the default cache window", async () => {
+    let calls = 0;
+    const client = makeClient(() => {
+      calls += 1;
+      return {
+        revision: "rev-1",
+        // Already expired by the time this response is read, even though the fixed 5-minute
+        // fallback TTL would normally still consider it fresh.
+        snapshot_expires_at: new Date(Date.now() - 1000).toISOString(),
+        skills: [{ skill_id: "s1", home_workspace_id: "ws-1", name: "one", description: "First" }],
+      };
+    });
+    const catalogue = new SkilzVoltCatalogue(client);
+    await catalogue.getLines();
+    await catalogue.getLines();
+    expect(calls).toBe(2);
+  });
+
+  it("honors a snapshot_expires_at further out than the default cache window", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const client = makeClient(() => {
+        calls += 1;
+        return {
+          revision: "rev-1",
+          snapshot_expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          skills: [
+            { skill_id: "s1", home_workspace_id: "ws-1", name: "one", description: "First" },
+          ],
+        };
+      });
+      const catalogue = new SkilzVoltCatalogue(client);
+      await catalogue.getLines();
+      // Past the default 5-minute TTL, but still inside the server-declared 10-minute window.
+      vi.advanceTimersByTime(6 * 60 * 1000);
+      await catalogue.getLines();
+      expect(calls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to the default cache window when snapshot_expires_at is absent", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const client = makeClient(() => {
+        calls += 1;
+        return {
+          revision: "rev-1",
+          skills: [
+            { skill_id: "s1", home_workspace_id: "ws-1", name: "one", description: "First" },
+          ],
+        };
+      });
+      const catalogue = new SkilzVoltCatalogue(client);
+      await catalogue.getLines();
+      vi.advanceTimersByTime(6 * 60 * 1000);
+      await catalogue.getLines();
+      expect(calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
