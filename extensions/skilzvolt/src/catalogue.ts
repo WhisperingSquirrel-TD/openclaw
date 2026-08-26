@@ -62,20 +62,31 @@ function parseEntry(raw: unknown): SkilzVoltCatalogueEntry {
   if (!record) {
     throw new SkilzVoltError("SkilzVolt catalogue entry was not a JSON object", "contract_drift");
   }
+  // Confirmed live contract (2026-08-26): SkilzVolt puts workspace context in flat
+  // home_workspace_id/home_workspace_name/home_workspace_slug fields on the entry itself, not a
+  // nested `workspace` object. Keep the nested-object shape as a fallback (it's what our
+  // original, unverified assumption and existing tests used) so a future schema change back
+  // toward it doesn't require another emergency fix, without weakening the check below.
   const workspace = asRecord(record.workspace);
   const skillId = readString(record, ["skill_id", "skillId", "id"]);
   const name = readString(record, ["name"]);
-  const workspaceId = readString(workspace, ["workspace_id", "workspaceId", "id"]);
+  const workspaceId =
+    readString(record, ["home_workspace_id", "homeWorkspaceId"]) ??
+    readString(workspace, ["workspace_id", "workspaceId", "id"]);
   if (!skillId || !name || !workspaceId) {
     throw new SkilzVoltError(
       "SkilzVolt catalogue entry is missing a canonical skill_id, name, or workspace_id",
       "contract_drift",
     );
   }
+  const workspaceName =
+    readString(record, ["home_workspace_name", "homeWorkspaceName"]) ??
+    readString(record, ["home_workspace_slug", "homeWorkspaceSlug"]) ??
+    readString(workspace, ["name", "slug"]);
   return {
     skillId,
     workspaceId,
-    workspaceName: readString(workspace, ["name", "slug"]),
+    workspaceName,
     name,
     description: readString(record, ["description"]) ?? "",
     updatedAt: readString(record, ["updated_at", "updatedAt"]),
