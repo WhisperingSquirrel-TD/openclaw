@@ -258,7 +258,12 @@ if [ ! -f "$_A2UI_BUNDLE" ]; then
 fi
 
 rm -rf dist 2>/dev/null || true
-pnpm run build || fail "Build failed — check for TypeScript errors"
+# tsc --noEmit on this codebase can exceed Node's default V8 old-space ceiling (~2GB) and abort
+# with an out-of-memory error even when the Pi has several GB of RAM free — the crash is a heap
+# limit, not a physical memory shortage. Give the build step more headroom; a caller-set
+# NODE_OPTIONS is preserved and only widened if it doesn't already raise the heap size.
+NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}" pnpm run build \
+    || fail "Build failed — check for TypeScript errors"
 COMMIT_SHORT=$(cd ~/openclaw && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 info "Build complete (commit: $COMMIT_SHORT)"
 
