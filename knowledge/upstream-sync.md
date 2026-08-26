@@ -37,6 +37,27 @@ Fork base: `d911b02` (2026-02-27). Last synced: **2026-03-08** (upstream commit 
 - Key upstream changes: Gemini 3.1 Flash Lite, exec approval refactoring (`exec-host-shared.ts`), `createConnectedChannelStatusPatch`, `normalizeDeviceMetadataForPolicy`, MCP bootstrap improvements, CLI restart fixes
 - Build tool changed from `tsc` to `tsdown` (esbuild bundler) — `dist/` now contains bundled JS, not 1:1 transpiled files
 
+## Review branches from the Pi's own assistant — decide, don't accumulate
+
+The Pi's live L1 assistant has git write access to this repo and can author and push its own
+branches (pattern: `review/<topic>-wip-<date>`, authored by "L1 Assistant"). When one shows up:
+
+- **Diff it against `main`, not just read the commit message.** Check `git merge-base main <branch>`
+  — if the branch's base predates later refactor commits that already landed on `main`, its diff
+  will look like it's *reverting* those refactors as well as adding new code. That's a strong
+  signal the branch is stale relative to `main`, not a parallel design worth reconciling.
+  - **`review/skilzvolt-tool-contract-oauth-wip-20260826` (decided 2026-08-26, deleted from
+    GitHub):** an incomplete second SkilzVolt OAuth implementation via a generic
+    `getMcpConnection`/`OpenClawPluginMcpConnection` plugin-registry capability. Diverged from an
+    older `main` commit, had a missing implementation file (only a test existed for
+    `registry.mcp-connection.ts`), real `tsc` errors, and was self-marked "not activated." The
+    generic opaque-MCP-connection idea had no second consumer beyond SkilzVolt and duplicated the
+    already-shipped, tested `main` bridge (`extensions/skilzvolt/src/client.ts` `listTools`/
+    `callTool`) — not worth extracting. Deleted outright rather than kept for reference.
+- If a branch like this turns out to hold something genuinely reusable, extract just that piece
+  into a normal task on `main` and then delete the branch — don't leave the WIP branch sitting on
+  GitHub as the record of the idea.
+
 ## Merge details for conflict files
 
 The 2026-03-08 sync had 5 files carrying both upstream refactors and our security customizations. Upstream was used as the base and our customizations re-applied. On any future sync, preserve these per file (full feature behaviour lives in [Security & control](./security.md) and [WhatsApp watch mode](./whatsapp.md)):
