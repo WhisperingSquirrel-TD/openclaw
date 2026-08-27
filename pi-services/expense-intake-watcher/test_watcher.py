@@ -49,6 +49,33 @@ class MicrosoftInvoiceReferenceTests(unittest.TestCase):
 
 
 class CentralMirrorExpenseHandoffTests(unittest.TestCase):
+    def test_low_value_email_does_not_rewrite_monitored_ledger(self) -> None:
+        entry = WATCHER.MailEntry(
+            account="microsoft", section="inbox", mailbox_path=Path("fixture.md"),
+            subject="Monthly newsletter", party="newsletter@example.com",
+            date_str="2026-08-27T10:00:00Z", message_id="newsletter-1", body_preview="General news only.",
+        )
+        with patch.object(WATCHER, "upsert_monitored") as upsert, patch.object(WATCHER, "remove_monitored") as remove:
+            state, summary = WATCHER.default_state(), {"reviewed": 0, "not_needed": 0}
+            WATCHER.process_email_entry(state, entry, summary)
+        self.assertEqual(summary["reviewed"], 1)
+        self.assertEqual(summary["not_needed"], 1)
+        self.assertEqual(state["item_states"][WATCHER.mail_key(entry)]["status"], "not_needed")
+        upsert.assert_not_called()
+        remove.assert_not_called()
+
+    def test_low_value_whatsapp_does_not_rewrite_monitored_ledger(self) -> None:
+        entry = WATCHER.WhatsAppEntry(
+            timestamp="2026-08-27 10:00", contact="A group contact", text="Good morning!", raw_line="fixture", group="Networking",
+        )
+        with patch.object(WATCHER, "upsert_monitored") as upsert, patch.object(WATCHER, "remove_monitored") as remove:
+            state, summary = WATCHER.default_state(), {"not_needed": 0}
+            WATCHER.process_whatsapp_entry(state, entry, summary)
+        self.assertEqual(summary["not_needed"], 1)
+        self.assertEqual(state["item_states"][entry.key]["status"], "not_needed")
+        upsert.assert_not_called()
+        remove.assert_not_called()
+
     def test_external_only_expense_event_gets_canonical_blocker_and_proof_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -73,6 +100,9 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
                 state, summary = WATCHER.default_state(), {}
                 with patch.object(WATCHER, 'capture_sqlite_candidate') as capture:
+                    capture.return_value.outcome = "captured"
+                    capture.return_value.expense_id = "pending:obcn-42"
+                    capture.return_value.blocker = None
                     WATCHER.process_mirror_expense_events(state, summary)
                     WATCHER.process_mirror_expense_events(state, summary)  # replay must be idempotent
                 self.assertEqual(summary["mirror_blocked"], 1)
