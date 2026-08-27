@@ -1297,10 +1297,24 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
     base_payload = email_monitored_payload(entry, 'trigger_received', None, refs, flags=flags)
 
     summary['reviewed'] += 1
+    material = materially_important_email(entry, flags)
+    # Most visible mail is low-value context. Persisting three complete
+    # monitored-ledger rewrites per suppressed item made the worker I/O-bound
+    # and could consume its bounded runtime before any expense receipt work.
+    # Keep its lifecycle in the worker's atomically saved state, but reserve the
+    # monitored-item ledger for consequential or expense-bearing evidence.
+    if 'EXPENSE' not in flags and not material:
+        summary['not_needed'] += 1
+        if key not in scanned:
+            scanned.add(key)
+            state['scanned_non_candidates'] = sorted(scanned)
+        advance_item_lifecycle(state, key, 'email', 'not_needed', 'No routed signal detected in mirror')
+        return
+
     advance_item_lifecycle(state, key, 'email', 'trigger_received', ','.join(flags))
     upsert_monitored(key, lifecycle_payload(base_payload, 'trigger_received'))
 
-    if 'IGNORE' in flags and not materially_important_email(entry, flags):
+    if 'IGNORE' in flags and not material:
         remove_monitored(key)
         summary['not_needed'] += 1
         if key not in scanned:
@@ -1359,6 +1373,21 @@ def process_whatsapp_entry(state: dict[str, Any], entry: WhatsAppEntry, summary:
     key = entry.key
     scanned = set(state.get('scanned_non_candidates', []))
     flags = classify_whatsapp_flags(entry)
+    material = materially_important_whatsapp(entry, flags)
+    direct_thread_context = entry.is_direct and (not entry.group) and (not entry.is_me or entry.direct_thread_contact)
+    # As with email, low-signal messages and direct-thread context do not merit
+    # repeated full monitored-ledger rewrites. Thread-level reconciliation below
+    # retains direct-context behaviour; only consequential group/expense items
+    # enter the shared monitored ledger.
+    if 'EXPENSE' not in flags and (not material or direct_thread_context):
+        if key not in scanned:
+            scanned.add(key)
+            state['scanned_non_candidates'] = sorted(scanned)
+        summary['not_needed'] += 1
+        detail = ('Direct-thread non-expense signals are reconciled at thread level with Me: context'
+                  if direct_thread_context else 'No strong routed signal detected in WhatsApp recent feed')
+        advance_item_lifecycle(state, key, 'whatsapp', 'not_needed', detail)
+        return
     base_payload = whatsapp_monitored_payload(entry, 'trigger_received', None, flags=flags)
 
     advance_item_lifecycle(state, key, 'whatsapp', 'trigger_received', ','.join(flags))
