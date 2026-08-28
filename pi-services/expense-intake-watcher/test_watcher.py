@@ -73,6 +73,9 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
                 state, summary = WATCHER.default_state(), {}
                 with patch.object(WATCHER, 'capture_sqlite_candidate') as capture:
+                    capture.return_value.outcome = "captured"
+                    capture.return_value.expense_id = "pending:obcn-42"
+                    capture.return_value.blocker = None
                     WATCHER.process_mirror_expense_events(state, summary)
                     WATCHER.process_mirror_expense_events(state, summary)  # replay must be idempotent
                 self.assertEqual(summary["mirror_blocked"], 1)
@@ -162,6 +165,111 @@ class RuntimeStatePruningTests(unittest.TestCase):
         self.assertEqual(state["scanned_non_candidates"], ["live"])
         self.assertEqual(set(state["item_states"]), {"live"})
         self.assertEqual(len(state["item_states"]["live"]["history"]), WATCHER.MAX_LIFECYCLE_HISTORY)
+
+
+class MonitoredLedgerReconciliationTests(unittest.TestCase):
+    def test_visible_non_material_email_cannot_leave_active_monitored_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            monitored = Path(tmp) / "monitored.json"
+            entry = WATCHER.MailEntry(
+                account="gmail",
+                section="inbox",
+                mailbox_path=Path("/tmp/GMAIL_INBOX.md"),
+                subject="Quick hello",
+                party="friend@example.com",
+                date_str="Fri, 28 Aug 2026 09:00:00 +0000",
+                message_id="low-signal-email",
+                body_preview="Just checking in.",
+            )
+            monitored.write_text(json.dumps({
+                "items": [{
+                    "id": WATCHER.mail_key(entry),
+                    "surface": "gmail_inbox",
+                    "closure_state": "routed",
+                    "management_relevance": "needs_management",
+                }]
+            }), encoding="utf-8")
+            old_monitored = WATCHER.MONITORED_FILE
+            try:
+                WATCHER.MONITORED_FILE = monitored
+                state, summary = WATCHER.default_state(), {}
+                WATCHER.reconcile_monitored_items(state, [entry], [], summary)
+                self.assertEqual(json.loads(monitored.read_text(encoding="utf-8"))["items"], [])
+                self.assertEqual(state["item_states"][WATCHER.mail_key(entry)]["status"], "not_needed")
+                self.assertEqual(summary["reconciled"], 1)
+            finally:
+                WATCHER.MONITORED_FILE = old_monitored
+
+    def test_superseded_direct_inbound_is_removed_after_later_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            monitored = Path(tmp) / "monitored.json"
+            now = WATCHER.datetime.now(WATCHER.timezone.utc).replace(microsecond=0)
+            inbound = WATCHER.WhatsAppEntry(
+                timestamp=(now - WATCHER.timedelta(hours=2)).isoformat(),
+                contact="Lauren",
+                text="Can you send the details?",
+                raw_line="",
+            )
+            reply = WATCHER.WhatsAppEntry(
+                timestamp=(now - WATCHER.timedelta(hours=1)).isoformat(),
+                contact="Me",
+                text="Sounds good.",
+                raw_line="",
+                direct_thread_contact="Lauren",
+            )
+            monitored.write_text(json.dumps({
+                "items": [WATCHER.whatsapp_monitored_payload(
+                    inbound, "routed", "Waiting for a reply", flags=["FOLLOW_UP"]
+                )]
+            }), encoding="utf-8")
+            old_monitored = WATCHER.MONITORED_FILE
+            try:
+                WATCHER.MONITORED_FILE = monitored
+                state, summary = WATCHER.default_state(), {}
+                WATCHER.reconcile_monitored_items(state, [], [inbound, reply], summary)
+                self.assertEqual(json.loads(monitored.read_text(encoding="utf-8"))["items"], [])
+                self.assertEqual(state["item_states"][inbound.key]["detail"], "Superseded by newer direct-thread context")
+            finally:
+                WATCHER.MONITORED_FILE = old_monitored
+
+    def test_direct_thread_retains_only_newest_canonical_item_without_recapture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            monitored = Path(tmp) / "monitored.json"
+            now = WATCHER.datetime.now(WATCHER.timezone.utc).replace(microsecond=0)
+            older = WATCHER.WhatsAppEntry(
+                timestamp=(now - WATCHER.timedelta(hours=2)).isoformat(),
+                contact="Lauren",
+                text="Can you send the details?",
+                raw_line="",
+            )
+            newer = WATCHER.WhatsAppEntry(
+                timestamp=(now - WATCHER.timedelta(hours=1)).isoformat(),
+                contact="Lauren",
+                text="Could you confirm what time?",
+                raw_line="",
+            )
+            monitored.write_text(json.dumps({
+                "items": [
+                    WATCHER.whatsapp_monitored_payload(older, "routed", "Waiting", flags=["FOLLOW_UP"]),
+                    WATCHER.whatsapp_monitored_payload(newer, "routed", "Waiting", flags=["FOLLOW_UP"]),
+                ]
+            }), encoding="utf-8")
+            old_monitored = WATCHER.MONITORED_FILE
+            try:
+                WATCHER.MONITORED_FILE = monitored
+                with (
+                    patch.object(WATCHER, "capture_sqlite_candidate") as capture,
+                    patch.object(WATCHER, "run_reader") as reader,
+                ):
+                    WATCHER.reconcile_monitored_items(
+                        WATCHER.default_state(), [], [newer, older], {}
+                    )
+                capture.assert_not_called()
+                reader.assert_not_called()
+                items = json.loads(monitored.read_text(encoding="utf-8"))["items"]
+                self.assertEqual([item["id"] for item in items], [newer.key])
+            finally:
+                WATCHER.MONITORED_FILE = old_monitored
 
 
 if __name__ == "__main__":
