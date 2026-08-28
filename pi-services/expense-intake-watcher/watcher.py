@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import mimetypes
 import re
@@ -14,7 +15,21 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
-FINANCE_CODE_ROOT = Path('/home/tomdean88/pi-services/seer-finance')
+def _finance_code_root() -> Path:
+    """Resolve finance source without requiring a specific Pi home directory."""
+    explicit = os.environ.get('SEER_FINANCE_CODE_ROOT')
+    candidates = [
+        Path(explicit) if explicit else None,
+        Path(__file__).resolve().parent.parent / 'seer-finance',
+        Path('/home/tomdean88/pi-services/seer-finance'),  # legacy compatibility only
+    ]
+    for candidate in candidates:
+        if candidate and (candidate / 'seer_finance').is_dir():
+            return candidate
+    raise RuntimeError('seer_finance source is unavailable; set SEER_FINANCE_CODE_ROOT')
+
+
+FINANCE_CODE_ROOT = _finance_code_root()
 if str(FINANCE_CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(FINANCE_CODE_ROOT))
 
@@ -1156,6 +1171,118 @@ def outbound_follow_up_signal(entry: WhatsAppEntry) -> bool:
     return any(p.search(text.lower()) for p in WHATSAPP_FOLLOWUP_PATTERNS)
 
 
+def canonical_direct_whatsapp_keys(entries: list[WhatsAppEntry], *, now: datetime | None = None) -> set[str]:
+    """Return the only direct-thread entries that may remain actionable.
+
+    Per-entry processing intentionally avoids rewriting low-signal monitored
+    rows.  The thread-level view is the authority for deciding whether an
+    older inbound ask is still actionable after later context appears.
+    """
+    threads: dict[str, list[WhatsAppEntry]] = {}
+    for entry in entries:
+        if not entry.is_direct or (entry.is_me and not entry.direct_thread_contact):
+            continue
+        threads.setdefault(entry.thread_key, []).append(entry)
+
+    current_time = now or datetime.now(timezone.utc)
+    canonical_keys: set[str] = set()
+    for thread_entries in threads.values():
+        ordered = sorted(thread_entries, key=lambda entry: entry.timestamp_dt)
+        latest = ordered[-1]
+        if latest.timestamp_dt < current_time - WHATSAPP_STALE_THREAD_WINDOW:
+            continue
+
+        latest_actionable_inbound = next(
+            (
+                entry for entry in reversed(ordered)
+                if not entry.is_me and materially_important_whatsapp(entry, classify_whatsapp_flags(entry))
+            ),
+            None,
+        )
+        if latest_actionable_inbound is latest:
+            if latest.timestamp_dt >= current_time - WHATSAPP_UNANSWERED_INBOUND_WINDOW:
+                canonical_keys.add(latest.key)
+            continue
+
+        if latest.is_me and outbound_follow_up_signal(latest):
+            has_later_inbound = any(
+                not entry.is_me and entry.timestamp_dt > latest.timestamp_dt
+                for entry in ordered
+            )
+            if not has_later_inbound and latest.timestamp_dt >= current_time - WHATSAPP_HANGING_OUTBOUND_WINDOW:
+                canonical_keys.add(latest.key)
+
+    return canonical_keys
+
+
+def reconcile_monitored_items(
+    state: dict[str, Any],
+    email_entries: list[MailEntry],
+    whatsapp_entries: list[WhatsAppEntry],
+    summary: dict[str, int],
+) -> None:
+    """Prune active monitored rows against the final visible source state.
+
+    This is deliberately separate from the source processors.  Capture and
+    receipt handling must run exactly as before; this pass only removes stale
+    action rows that an early return did not replace.
+    """
+    email_by_key = {mail_key(entry): entry for entry in email_entries}
+    direct_thread_keys = {
+        entry.thread_key
+        for entry in whatsapp_entries
+        if entry.is_direct and (not entry.is_me or entry.direct_thread_contact)
+    }
+    canonical_whatsapp_keys = canonical_direct_whatsapp_keys(whatsapp_entries)
+    terminal_states = {'processed', 'closed', 'not_needed'}
+    changed = False
+    pruned = 0
+    doc = load_monitored()
+    retained_items: list[dict[str, Any]] = []
+
+    for item in doc.get('items', []):
+        item_id = str(item.get('id') or '')
+        closure_state = item.get('closure_state')
+        item_flags = {str(flag).upper() for flag in (item.get('flags') or [])}
+        should_prune = False
+        detail = None
+        route = None
+
+        email_entry = email_by_key.get(item_id)
+        if email_entry and not materially_important_email(email_entry, classify_email_flags(email_entry)):
+            if closure_state not in terminal_states:
+                should_prune = True
+                detail = 'Visible email is no longer materially actionable'
+                route = 'email'
+
+        if (
+            not should_prune
+            and item_id.startswith('whatsapp:')
+            and str(item.get('thread_key') or '').startswith('direct:')
+            and item.get('thread_key') in direct_thread_keys
+            and item_id not in canonical_whatsapp_keys
+            and closure_state not in terminal_states
+            and 'EXPENSE' not in item_flags
+        ):
+            should_prune = True
+            detail = 'Superseded by newer direct-thread context'
+            route = 'whatsapp'
+
+        if should_prune:
+            changed = True
+            pruned += 1
+            advance_item_lifecycle(state, item_id, route or 'watch', 'not_needed', detail)
+            continue
+        retained_items.append(item)
+
+    if changed:
+        doc['items'] = retained_items
+        doc['last_updated'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        save_json(MONITORED_FILE, doc)
+    if pruned:
+        summary['reconciled'] = summary.get('reconciled', 0) + pruned
+
+
 def prune_whatsapp_artifacts(entries: list[WhatsAppEntry]) -> None:
     live_keys = {entry.key for entry in entries}
     live_direct_thread_keys = {entry.thread_key for entry in entries if entry.is_direct and (not entry.is_me or entry.direct_thread_contact)}
@@ -1238,54 +1365,41 @@ def process_whatsapp_threads(state: dict[str, Any], entries: list[WhatsAppEntry]
         threads.setdefault(entry.thread_key, []).append(entry)
 
     now = datetime.now(timezone.utc)
+    canonical_keys = canonical_direct_whatsapp_keys(entries, now=now)
     for thread_key, thread_entries in threads.items():
-        latest = latest_thread_entry(thread_entries)
-        if not latest or latest.timestamp_dt < now - WHATSAPP_STALE_THREAD_WINDOW:
+        latest = latest_thread_entry(sorted(thread_entries, key=lambda entry: entry.timestamp_dt))
+        if not latest or latest.key not in canonical_keys:
             continue
 
-        latest_inbound = next((entry for entry in reversed(thread_entries) if not entry.is_me), None)
-        latest_outbound = next((entry for entry in reversed(thread_entries) if entry.is_me), None)
-        latest_actionable_inbound = next(
-            (
-                entry for entry in reversed(thread_entries)
-                if not entry.is_me and materially_important_whatsapp(entry, classify_whatsapp_flags(entry))
-            ),
-            None,
-        )
-
-        if latest_actionable_inbound and latest is latest_actionable_inbound:
-            if latest.timestamp_dt >= now - WHATSAPP_UNANSWERED_INBOUND_WINDOW:
-                flags = classify_whatsapp_flags(latest)
-                if 'EXPENSE' not in flags:
-                    summary['material_non_expense'] += 1
-                    upsert_monitored(
-                        latest.key,
-                        whatsapp_monitored_payload(
-                            latest,
-                            'routed',
-                            'Latest actionable inbound in direct thread has no later visible Me: reply yet',
-                            flags=sorted(set(flags + ['OUTBOUND_CONTEXT'])),
-                            evidence_refs=['WHATSAPP_RECENT.md', 'memory/monitored-items-state.json'],
-                        ),
-                    )
-                    advance_item_lifecycle(state, latest.key, 'whatsapp', 'routed', 'Direct thread still waiting on Tom reply')
-            continue
-
-        if latest and latest.is_me and outbound_follow_up_signal(latest):
-            has_later_inbound = any((not entry.is_me and entry.timestamp_dt > latest.timestamp_dt) for entry in thread_entries)
-            if not has_later_inbound and latest.timestamp_dt >= now - WHATSAPP_HANGING_OUTBOUND_WINDOW:
+        if not latest.is_me:
+            flags = classify_whatsapp_flags(latest)
+            if 'EXPENSE' not in flags:
                 summary['material_non_expense'] += 1
                 upsert_monitored(
                     latest.key,
                     whatsapp_monitored_payload(
                         latest,
                         'routed',
-                        'Tom sent the latest direct follow-up/chase and there is no later visible reply yet',
-                        flags=['FOLLOW_UP', 'OUTBOUND_CONTEXT'],
+                        'Latest actionable inbound in direct thread has no later visible Me: reply yet',
+                        flags=sorted(set(flags + ['OUTBOUND_CONTEXT'])),
                         evidence_refs=['WHATSAPP_RECENT.md', 'memory/monitored-items-state.json'],
                     ),
                 )
-                advance_item_lifecycle(state, latest.key, 'whatsapp', 'routed', 'Direct thread may need chase tracking')
+                advance_item_lifecycle(state, latest.key, 'whatsapp', 'routed', 'Direct thread still waiting on Tom reply')
+            continue
+
+        summary['material_non_expense'] += 1
+        upsert_monitored(
+            latest.key,
+            whatsapp_monitored_payload(
+                latest,
+                'routed',
+                'Tom sent the latest direct follow-up/chase and there is no later visible reply yet',
+                flags=['FOLLOW_UP', 'OUTBOUND_CONTEXT'],
+                evidence_refs=['WHATSAPP_RECENT.md', 'memory/monitored-items-state.json'],
+            ),
+        )
+        advance_item_lifecycle(state, latest.key, 'whatsapp', 'routed', 'Direct thread may need chase tracking')
 
 
 def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[str, int]) -> None:
@@ -1717,6 +1831,7 @@ def main() -> None:
     for entry in whatsapp_entries:
         process_whatsapp_entry(state, entry, summary)
     process_whatsapp_threads(state, whatsapp_entries, summary)
+    reconcile_monitored_items(state, email_entries, whatsapp_entries, summary)
     process_mirror_expense_events(state, summary)
     replay_states = process_expense_sqlite_replay(summary)
     summary['replay_blocked'] = sum(1 for result in replay_states if result.get('state') == 'blocked')

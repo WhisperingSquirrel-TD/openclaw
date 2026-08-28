@@ -1,0 +1,22 @@
+[
+  {
+    "txn_id": "example-income-001",
+    "date": "2026-01-10",
+    "direction": "income",
+    "amount_pence": 125000,
+    "description": "Example consulting invoice",
+    "counterparty": "Example Customer Ltd",
+    "category": "sales",
+    "source_ref": "example:invoice:001"
+  },
+  {
+    "txn_id": "example-expense-001",
+    "date": "2026-01-11",
+    "direction": "expense",
+    "amount_pence": 2499,
+    "description": "Example software subscription",
+    "counterparty": "Example Software Ltd",
+    "category": "software",
+    "source_ref": "example:receipt:001"
+  }
+]
