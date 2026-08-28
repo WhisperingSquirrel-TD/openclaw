@@ -259,6 +259,52 @@ class MonitoredLedgerReconciliationTests(unittest.TestCase):
             finally:
                 WATCHER.MONITORED_FILE = old_monitored
 
+    def test_outbound_acknowledgement_does_not_prune_blocked_direct_expense(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            monitored = Path(tmp) / "monitored.json"
+            now = WATCHER.datetime.now(WATCHER.timezone.utc).replace(microsecond=0)
+            expense = WATCHER.WhatsAppEntry(
+                timestamp=(now - WATCHER.timedelta(hours=2)).isoformat(),
+                contact="Supplier",
+                text="I paid £42 for the client taxi receipt",
+                raw_line="",
+            )
+            acknowledgement = WATCHER.WhatsAppEntry(
+                timestamp=(now - WATCHER.timedelta(hours=1)).isoformat(),
+                contact="Me",
+                text="Thanks",
+                raw_line="",
+                direct_thread_contact="Supplier",
+            )
+            blocked = WATCHER.whatsapp_monitored_payload(
+                expense,
+                "blocked",
+                "Captured in SQLite; WhatsApp expense signal needs explicit "
+                "business/payment/evidence review before finance posting",
+                flags=["EXPENSE"],
+            )
+            monitored.write_text(json.dumps({"items": [blocked]}), encoding="utf-8")
+            old_monitored = WATCHER.MONITORED_FILE
+            try:
+                WATCHER.MONITORED_FILE = monitored
+                state, summary = WATCHER.default_state(), {}
+                with (
+                    patch.object(WATCHER, "capture_sqlite_candidate") as capture,
+                    patch.object(WATCHER, "run_reader") as reader,
+                ):
+                    WATCHER.reconcile_monitored_items(
+                        state, [], [expense, acknowledgement], summary
+                    )
+                capture.assert_not_called()
+                reader.assert_not_called()
+                items = json.loads(monitored.read_text(encoding="utf-8"))["items"]
+                self.assertEqual([item["id"] for item in items], [expense.key])
+                self.assertEqual(items[0]["closure_state"], "blocked")
+                self.assertNotIn(expense.key, state["item_states"])
+                self.assertNotIn("reconciled", summary)
+            finally:
+                WATCHER.MONITORED_FILE = old_monitored
+
     def test_direct_thread_retains_only_newest_canonical_item_without_recapture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             monitored = Path(tmp) / "monitored.json"
