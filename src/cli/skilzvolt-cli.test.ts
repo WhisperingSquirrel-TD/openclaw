@@ -10,11 +10,23 @@ import { describe, expect, it, vi } from "vitest";
 const loginSkilzVolt = vi.fn(async (_ctx: Record<string, unknown>) => {});
 const logoutSkilzVolt = vi.fn(() => true);
 const getSkilzVoltStatus = vi.fn(() => ({ connected: false, reason: "not connected" }) as const);
+const pollSkilzVoltUserCount = vi.fn(async () => ({
+  ok: true as const,
+  total: 438,
+  sinceLast: 12,
+  acknowledgementSucceeded: true as const,
+  checkedAt: "2026-08-28T12:00:00.000Z",
+  checkedAtEuropeLondon: "28 Aug 2026, 13:00:00 BST",
+}));
 
 vi.mock("../integrations/skilzvolt/connection.js", () => ({
   loginSkilzVolt,
   logoutSkilzVolt,
   getSkilzVoltStatus,
+}));
+
+vi.mock("../integrations/skilzvolt/user-count.js", () => ({
+  pollSkilzVoltUserCount,
 }));
 
 vi.mock("../commands/onboard-helpers.js", () => ({
@@ -75,5 +87,11 @@ describe("registerSkilzVoltCli", () => {
     const program = buildProgram();
     await program.parseAsync(["node", "openclaw", "skilzvolt", "logout"]);
     expect(logoutSkilzVolt).toHaveBeenCalledWith();
+  });
+
+  it("supports machine-readable aggregate user-count polling", async () => {
+    const program = buildProgram();
+    await program.parseAsync(["node", "openclaw", "skilzvolt", "user-count", "--json"]);
+    expect(pollSkilzVoltUserCount).toHaveBeenCalledTimes(1);
   });
 });

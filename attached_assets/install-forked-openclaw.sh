@@ -1127,7 +1127,9 @@ fi
 # ---------------------------------------------------------------------------
 # System health check
 # Runs at 06:55 daily — BEFORE the morning briefing active-hours window (07:00).
-# Checks all cron logs and feed files for staleness / errors.
+# Checks all cron logs and feed files for staleness / errors. It also invokes
+# `openclaw skilzvolt user-count`, which reuses the existing encrypted OAuth
+# connection and records only aggregate signup counts.
 # Writes SYSTEM_HEALTH.md to the workspace — L1 reads it during morning briefing
 # and prepends ⚙️ SYSTEM HEALTH section only when there are issues to report.
 # ---------------------------------------------------------------------------

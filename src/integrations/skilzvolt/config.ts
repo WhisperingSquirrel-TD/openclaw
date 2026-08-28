@@ -5,6 +5,8 @@
  * extension re-exports the endpoint from here instead of duplicating the literal.
  */
 export const SKILZVOLT_RESOURCE_URL = "https://app.skilzvolt.com/mcp";
+export const SKILZVOLT_USER_COUNT_URL = "https://app.skilzvolt.com/api/openclaw/user-count";
+export const SKILZVOLT_USER_COUNT_ACK_URL = "https://app.skilzvolt.com/api/openclaw/user-count/ack";
 
 export const SKILZVOLT_OAUTH_CALLBACK_HOST = "127.0.0.1";
 export const SKILZVOLT_OAUTH_CALLBACK_PORT = 51823;

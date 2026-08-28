@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import tempfile
 from pathlib import Path
 from unittest import TestCase, main
 from unittest.mock import patch
@@ -65,6 +67,73 @@ class HealthCheckTests(TestCase):
             self.assertEqual(run.call_count, 4)
         finally:
             state.unlink(missing_ok=True)
+
+    def test_skilzvolt_user_count_writes_aggregate_only_report(self):
+        result = {
+            "ok": True,
+            "total": 438,
+            "sinceLast": 12,
+            "acknowledgementSucceeded": True,
+            "checkedAt": "2026-08-28T12:00:00.000Z",
+            "checkedAtEuropeLondon": "28 Aug 2026, 13:00:00 BST",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report = Path(temp_dir) / "SKILZVOLT_USER_COUNT.md"
+            with patch.object(health, "SKILZVOLT_USER_COUNT_REPORT", report), \
+                 patch.object(health, "_run", return_value=(0, json.dumps(result), "")):
+                issues, info = health.check_skilzvolt_user_count()
+            self.assertEqual(issues, [])
+            self.assertIn("438 total registered users", info[0])
+            content = report.read_text()
+            self.assertIn("Total registered users: 438", content)
+            self.assertIn("New signups since the last acknowledged check: 12", content)
+            self.assertIn("Acknowledgement succeeded: yes", content)
+            self.assertNotIn("delivery_ref", content)
+
+    def test_skilzvolt_user_count_surfaces_failed_ack_for_retry(self):
+        result = {
+            "ok": False,
+            "kind": "ack",
+            "recorded": True,
+            "total": 438,
+            "sinceLast": 12,
+            "acknowledgementSucceeded": False,
+            "checkedAt": "2026-08-28T12:00:00.000Z",
+            "checkedAtEuropeLondon": "28 Aug 2026, 13:00:00 BST",
+            "message": "SkilzVolt user-count acknowledgement failed; retrying the same snapshot later.",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report = Path(temp_dir) / "SKILZVOLT_USER_COUNT.md"
+            with patch.object(health, "SKILZVOLT_USER_COUNT_REPORT", report), \
+                 patch.object(health, "_run", return_value=(1, json.dumps(result), "")):
+                issues, info = health.check_skilzvolt_user_count()
+            self.assertEqual(info, [])
+            self.assertIn(
+                "SkilzVolt user count: snapshot recorded but acknowledgement failed — retry pending",
+                issues,
+            )
+            self.assertIn("Acknowledgement succeeded: no", report.read_text())
+
+    def test_skilzvolt_user_count_maps_unauthorised_connection(self):
+        result = {
+            "ok": False,
+            "kind": "auth",
+            "acknowledgementSucceeded": False,
+            "message": (
+                "The existing SkilzVolt monitoring connection is missing, expired, "
+                "revoked, or not authorised."
+            ),
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report = Path(temp_dir) / "SKILZVOLT_USER_COUNT.md"
+            with patch.object(health, "SKILZVOLT_USER_COUNT_REPORT", report), \
+                 patch.object(health, "_run", return_value=(1, json.dumps(result), "")):
+                issues, _ = health.check_skilzvolt_user_count()
+            self.assertIn(
+                "SkilzVolt user count: existing monitoring connection is missing, expired, "
+                "revoked, or not authorised",
+                issues,
+            )
 
 
 if __name__ == "__main__":

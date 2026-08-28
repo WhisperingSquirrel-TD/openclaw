@@ -99,6 +99,7 @@ OPENCLAW_CLI = os.environ.get(
 )
 REPORT_POLLER_STATE = OPENCLAW / "integrations/stackstone/report-poller-state.json"
 ENQUIRY_POLLER_STATE = OPENCLAW / "integrations/stackstone/enquiry-poller-state.json"
+SKILZVOLT_USER_COUNT_REPORT = WORKSPACE / "SKILZVOLT_USER_COUNT.md"
 
 # Cron health is collected deterministically here rather than by the delivery
 # agent, whose tool response would otherwise include every job payload.
@@ -655,6 +656,92 @@ def check_stackstone_report_poller_state() -> list[str]:
     return issues
 
 
+def _write_skilzvolt_user_count_report(result: dict | None) -> None:
+    """Write only the count monitor's aggregate result; never persist user records."""
+    lines = [
+        "# SkilzVolt User Count",
+        f"_Check time (Europe/London): {(result or {}).get('checkedAtEuropeLondon', 'unknown')}_",
+        "",
+    ]
+    if result and isinstance(result.get("total"), int) and isinstance(result.get("sinceLast"), int):
+        lines.extend(
+            [
+                f"- Total registered users: {result['total']}",
+                f"- New signups since the last acknowledged check: {result['sinceLast']}",
+                f"- Acknowledgement succeeded: {'yes' if result.get('acknowledgementSucceeded') is True else 'no'}",
+            ]
+        )
+    else:
+        lines.append("- Aggregate user count unavailable.")
+    if result and result.get("message"):
+        lines.extend(["", f"- Status: {result['message']}"])
+    write_output("\n".join(lines) + "\n", SKILZVOLT_USER_COUNT_REPORT)
+
+
+def check_skilzvolt_user_count() -> tuple[list[str], list[str]]:
+    """Poll the existing SkilzVolt connection through the core CLI.
+
+    The CLI owns OAuth credential access. Health check only consumes its bounded,
+    aggregate-only JSON result and never handles a database credential directly.
+    """
+    issues: list[str] = []
+    info: list[str] = []
+    rc, out, err = _run([OPENCLAW_CLI, "skilzvolt", "user-count", "--json"])
+    result = None
+    for line in reversed((out or "").splitlines()):
+        try:
+            candidate = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict):
+            result = candidate
+            break
+
+    try:
+        _write_skilzvolt_user_count_report(result)
+    except Exception as exc:
+        issues.append(f"SkilzVolt user count: aggregate report could not be written ({exc})")
+        return issues, info
+
+    if result is None:
+        issues.append(
+            f"SkilzVolt user count: monitor command returned no aggregate result (exit {rc})"
+        )
+        return issues, info
+
+    if result.get("ok") is True and result.get("acknowledgementSucceeded") is True:
+        info.append(
+            "SkilzVolt user count: "
+            f"{result.get('total')} total registered users; "
+            f"{result.get('sinceLast')} new since last acknowledged check; acknowledgement succeeded"
+        )
+        return issues, info
+
+    kind = result.get("kind")
+    if kind in {"auth", "permission", "not_connected"}:
+        issues.append(
+            "SkilzVolt user count: existing monitoring connection is missing, expired, "
+            "revoked, or not authorised"
+        )
+    elif kind == "record" and result.get("acknowledgementSucceeded") is True:
+        issues.append(
+            "SkilzVolt user count: acknowledgement succeeded but its local status could not be recorded"
+        )
+    elif kind == "record":
+        issues.append(
+            "SkilzVolt user count: aggregate result could not be recorded; delivery was not acknowledged"
+        )
+    elif result.get("recorded") is True:
+        issues.append(
+            "SkilzVolt user count: snapshot recorded but acknowledgement failed — retry pending"
+        )
+    else:
+        issues.append(
+            f"SkilzVolt user count: monitor failed — {result.get('message', 'retry pending')}"
+        )
+    return issues, info
+
+
 def check_critical_cron_health() -> list[str]:
     """Check only the small named cron allowlist via the local Gateway CLI.
 
@@ -773,6 +860,7 @@ def main() -> None:
     exp_issues  = check_expense_watcher_health()
     enq_issues  = check_enquiry_pipeline()
     report_issues = check_stackstone_report_poller_state()
+    user_count_issues, user_count_info = check_skilzvolt_user_count()
     cron_issues = check_critical_cron_health()
     rem_issues  = check_reminder_failures()
     git_issues, git_info  = check_github_sync()
@@ -785,6 +873,7 @@ def main() -> None:
     issues.extend(exp_issues)
     issues.extend(enq_issues)
     issues.extend(report_issues)
+    issues.extend(user_count_issues)
     issues.extend(cron_issues)
     issues.extend(rem_issues)
     issues.extend(git_issues)
@@ -792,6 +881,7 @@ def main() -> None:
     issues.extend(spb_issues)
     info.extend(git_info)
     info.extend(ghb_info)
+    info.extend(user_count_info)
     if sp_details.get("result_shape") != "healthy":
         info.extend(spb_info)
 
