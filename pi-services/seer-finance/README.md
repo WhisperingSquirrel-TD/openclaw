@@ -25,3 +25,7 @@ PYTHONPATH=. python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 The Pi-only watcher integration test is intentionally excluded because it imports a separate runtime by absolute host path. It belongs with the watcher system, not this portable source package.
+
+## Proposed integration decision (review only)
+
+SQLite `finance_transactions` should become the canonical accounting/P&L input after an approved cutover. It is populated exactly once through the reviewed-expense bridge; `transactions.json` remains legacy import/evidence only, not a competing P&L source. `sqlite_loader.load_finance_transactions` is a read-only deterministic projection from the immutable SQLite rows. This branch performs no cutover, migration or production database action.

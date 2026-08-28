@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import mimetypes
 import re
@@ -14,7 +15,21 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
-FINANCE_CODE_ROOT = Path('/home/tomdean88/pi-services/seer-finance')
+def _finance_code_root() -> Path:
+    """Resolve finance source without requiring a specific Pi home directory."""
+    explicit = os.environ.get('SEER_FINANCE_CODE_ROOT')
+    candidates = [
+        Path(explicit) if explicit else None,
+        Path(__file__).resolve().parent.parent / 'seer-finance',
+        Path('/home/tomdean88/pi-services/seer-finance'),  # legacy compatibility only
+    ]
+    for candidate in candidates:
+        if candidate and (candidate / 'seer_finance').is_dir():
+            return candidate
+    raise RuntimeError('seer_finance source is unavailable; set SEER_FINANCE_CODE_ROOT')
+
+
+FINANCE_CODE_ROOT = _finance_code_root()
 if str(FINANCE_CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(FINANCE_CODE_ROOT))
 
