@@ -1,0 +1,19 @@
+# Never version finance data, runtime state, credentials or local environments.
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+transactions.json
+data/
+runtime/
+archive/
+backups/
+source-evidence/
+reconciliation-reports/
+restore-verification/
+receipts/
+attachments/
