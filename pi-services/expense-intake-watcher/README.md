@@ -76,7 +76,7 @@ with the exact downstream outcome preserved beneath that state.
 - priority contacts are now treated more narrowly: only real asks/logistics/questions should surface, not generic chatter, acknowledgements, or media
 - noisy group/pod/broadcast traffic is suppressed more aggressively, especially link-dumps, generic greetings, and media floods in known low-signal groups
 - recency weighting is intentionally conservative: stale/resolved direct chatter should drop out instead of being repeatedly re-surfaced as action
-- a final reconciliation pass re-derives current email materiality and direct-thread canonical state, pruning active stale/superseded monitored rows without repeating expense capture or receipt work
+- a final reconciliation pass re-derives current email materiality and direct-thread canonical state, pruning active stale/superseded conversational rows while retaining blocked expense rows for finance/evidence resolution, without repeating expense capture or receipt work
 - stale WhatsApp blocked/classified/routed artifacts are pruned from both the monitored ledger and pending-expense rows when the originating live signal is no longer present/actionable
 
 ## Current limits
