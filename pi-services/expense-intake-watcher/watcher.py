@@ -1243,6 +1243,7 @@ def reconcile_monitored_items(
     for item in doc.get('items', []):
         item_id = str(item.get('id') or '')
         closure_state = item.get('closure_state')
+        item_flags = {str(flag).upper() for flag in (item.get('flags') or [])}
         should_prune = False
         detail = None
         route = None
@@ -1261,6 +1262,7 @@ def reconcile_monitored_items(
             and item.get('thread_key') in direct_thread_keys
             and item_id not in canonical_whatsapp_keys
             and closure_state not in terminal_states
+            and 'EXPENSE' not in item_flags
         ):
             should_prune = True
             detail = 'Superseded by newer direct-thread context'
