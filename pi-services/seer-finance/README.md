@@ -9,7 +9,7 @@ This is **not** a production deployment and does not contain live financial data
 ## P&L/figure review
 
 ```bash
-PYTHONPATH=. python3 -m seer_finance.ledger.cli examples/transactions.example.json --json --estimate-ct
+PYTHONPATH=. python3 -m seer_finance.ledger.cli --legacy-transactions examples/transactions.example.json --json --estimate-ct
 ```
 
 All money is integer pence. The output provides turnover, allowable/disallowable expenditure, capital additions, non-trading movements, and profit before capital allowances.
