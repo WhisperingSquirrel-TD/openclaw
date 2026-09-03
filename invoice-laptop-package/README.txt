@@ -30,10 +30,10 @@ The tool intentionally does not contain Microsoft credentials and cannot upload
 directly to SharePoint. It displays the correct destination path for manual
 upload. The current invoice destination is:
 
-  /Accounts/Croyde Medical/Finance/03/09/2026 - Invoice - INV-082.pdf
+  /Accounts/Croyde Medical/Finance/2026-09-03 - Invoice - INV-082.pdf
 
-If the SharePoint library requires a different date naming convention, edit the
-displayed invoice date before printing or rename the PDF during upload.
+The tool converts a displayed UK date such as 03/09/2026 into the safe filename
+date 2026-09-03 so the slashes do not create unintended subfolders.
 
 SAFETY NOTES
 ------------
