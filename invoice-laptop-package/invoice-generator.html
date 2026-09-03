@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stackstone Invoice Generator</title>
+  <style>
+    :root {
+      --ink: #24313a;
+      --muted: #687680;
+      --paper: #ffffff;
+      --canvas: #edf2f1;
+      --teal: #0f5d62;
+      --teal-dark: #0a4549;
+      --gold: #c48b32;
+      --line: #dbe4e4;
+      --soft: #f5f8f7;
+      --danger: #a7473e;
+      --shadow: 0 18px 55px rgba(24, 45, 49, .12);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: "Segoe UI", Arial, sans-serif;
+      line-height: 1.45;
+    }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .app-header {
+      background: linear-gradient(135deg, var(--teal-dark), var(--teal));
+      color: #fff;
+      padding: 22px clamp(18px, 4vw, 56px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .brand-mark {
+      width: 42px; height: 42px; border: 2px solid rgba(255,255,255,.75);
+      border-radius: 10px; display: grid; place-items: center;
+      font-weight: 800; letter-spacing: -.06em;
+    }
+    .brand h1 { margin: 0; font-size: 20px; letter-spacing: .02em; }
+    .brand p { margin: 2px 0 0; color: rgba(255,255,255,.72); font-size: 12px; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn {
+      border: 1px solid transparent; border-radius: 7px; padding: 9px 13px;
+      font-weight: 700; font-size: 13px;
+    }
+    .btn-primary { background: #fff; color: var(--teal-dark); }
+    .btn-secondary { background: rgba(255,255,255,.1); color: #fff; border-color: rgba(255,255,255,.35); }
+    .btn-light { background: var(--soft); color: var(--teal-dark); border-color: var(--line); }
+    .btn-danger { background: #fff5f4; color: var(--danger); border-color: #e8c9c6; }
+    .btn:hover { filter: brightness(.97); transform: translateY(-1px); }
+
+    .layout {
+      max-width: 1500px; margin: 0 auto; padding: 28px clamp(14px, 3vw, 42px);
+      display: grid; grid-template-columns: minmax(320px, 510px) minmax(0, 1fr);
+      gap: 28px; align-items: start;
+    }
+    .panel {
+      background: var(--paper); border: 1px solid var(--line); border-radius: 12px;
+      box-shadow: 0 5px 20px rgba(24,45,49,.05);
+    }
+    .editor { padding: 22px; }
+    .section { padding: 0 0 20px; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
+    .section:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+    .section h2 { margin: 0 0 5px; font-size: 16px; color: var(--teal-dark); }
+    .section > p { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+    .field { display: grid; gap: 5px; margin-bottom: 11px; }
+    .field label { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .035em; }
+    .field input, .field textarea {
+      width: 100%; border: 1px solid #cbd8d8; border-radius: 6px; padding: 9px 10px;
+      color: var(--ink); background: #fff; outline: none;
+    }
+    .field textarea { min-height: 66px; resize: vertical; }
+    .field input:focus, .field textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(15,93,98,.1); }
+    .hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .line-item-head, .line-item {
+      display: grid; grid-template-columns: 1.7fr .55fr .8fr .8fr 32px; gap: 6px; align-items: end;
+    }
+    .line-item-head { color: var(--muted); font-size: 10px; font-weight: 700; margin: 4px 0 6px; }
+    .line-item { margin-bottom: 8px; }
+    .line-item input { min-width: 0; padding: 8px 7px; border: 1px solid #cbd8d8; border-radius: 5px; }
+    .remove-line { height: 34px; width: 32px; padding: 0; border: 1px solid #e8c9c6; border-radius: 5px; background: #fff5f4; color: var(--danger); font-weight: 800; }
+    .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .sharepoint-box {
+      background: #f7f3ea; border: 1px solid #e7d8b9; border-radius: 8px; padding: 12px;
+      font-size: 12px; color: #644c24;
+    }
+    .sharepoint-box strong { display: block; margin-bottom: 4px; color: #483719; }
+    .path { word-break: break-word; font-family: Consolas, monospace; font-size: 11px; }
+    .status { min-height: 18px; color: var(--muted); font-size: 11px; margin-top: 10px; }
+
+    .preview-wrap { min-width: 0; }
+    .preview-note {
+      color: var(--muted); font-size: 12px; margin: 0 0 10px;
+      display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    }
+    .invoice-page {
+      background: var(--paper); box-shadow: var(--shadow); max-width: 850px; min-height: 1100px;
+      margin: 0 auto; padding: 54px 62px; border-radius: 3px;
+    }
+    .invoice-top { display: flex; justify-content: space-between; gap: 30px; align-items: flex-start; }
+    .invoice-brand { color: var(--teal); font-size: 21px; font-weight: 800; letter-spacing: .01em; }
+    .invoice-brand small { display: block; color: var(--muted); font-weight: 500; font-size: 11px; margin-top: 4px; }
+    .invoice-title { text-align: right; }
+    .invoice-title h2 { margin: 0; color: var(--teal-dark); font-size: 34px; letter-spacing: .12em; }
+    .invoice-title .ref { color: var(--gold); font-weight: 800; margin-top: 5px; }
+    .gold-rule { height: 4px; background: var(--gold); margin: 25px 0 28px; }
+    .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 35px; margin-bottom: 28px; }
+    .eyebrow { color: var(--gold); font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 7px; }
+    .party-name { font-weight: 800; font-size: 16px; margin-bottom: 4px; }
+    .party-text { color: var(--muted); font-size: 12px; white-space: pre-line; }
+    .meta {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+      background: var(--soft); padding: 14px; border-radius: 7px; margin-bottom: 30px;
+    }
+    .meta strong { display: block; color: var(--teal-dark); font-size: 11px; margin-top: 3px; }
+    .meta span { color: var(--muted); font-size: 11px; }
+    .invoice-table { width: 100%; border-collapse: collapse; margin-bottom: 22px; }
+    .invoice-table th {
+      text-align: left; color: var(--teal-dark); border-bottom: 2px solid var(--teal);
+      padding: 9px 7px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    }
+    .invoice-table td { border-bottom: 1px solid var(--line); padding: 12px 7px; font-size: 12px; }
+    .num { text-align: right; white-space: nowrap; }
+    .totals { margin-left: auto; width: min(310px, 100%); }
+    .total-row { display: flex; justify-content: space-between; padding: 8px 0; color: var(--muted); font-size: 12px; }
+    .total-row.grand { color: var(--teal-dark); border-top: 2px solid var(--gold); font-size: 17px; font-weight: 800; padding-top: 12px; }
+    .payment-box { margin-top: 42px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .payment-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .payment-cell { border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+    .payment-cell label { display: block; color: var(--muted); font-size: 10px; margin-bottom: 3px; }
+    .payment-cell strong { color: var(--ink); font-size: 12px; }
+    .invoice-footer { margin-top: 48px; color: var(--muted); font-size: 10px; text-align: center; }
+    .warning {
+      display: none; background: #fff6df; border: 1px solid #e7d8b9; color: #745622;
+      padding: 9px 11px; border-radius: 6px; font-size: 11px; margin-bottom: 14px;
+    }
+    .warning.visible { display: block; }
+
+    @media (max-width: 1050px) {
+      .layout { grid-template-columns: 1fr; }
+      .preview-wrap { order: -1; }
+      .invoice-page { min-height: auto; }
+    }
+    @media (max-width: 650px) {
+      .grid-2, .parties, .meta, .payment-grid { grid-template-columns: 1fr; }
+      .invoice-page { padding: 30px 22px; }
+      .invoice-top { gap: 15px; }
+      .invoice-title h2 { font-size: 25px; }
+      .invoice-table { font-size: 10px; }
+      .line-item-head, .line-item { grid-template-columns: 1.45fr .5fr .75fr .75fr 28px; gap: 3px; }
+    }
+    @media print {
+      body { background: #fff; }
+      .app-header, .editor, .preview-note { display: none !important; }
+      .layout { display: block; padding: 0; }
+      .invoice-page { box-shadow: none; max-width: none; min-height: 0; padding: 20mm 18mm; }
+      @page { size: A4; margin: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-mark">SC</div>
+      <div>
+        <h1>Stackstone Invoice Generator</h1>
+        <p>Offline Windows-friendly invoice preparation</p>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button class="btn btn-secondary" id="new-invoice">New invoice</button>
+      <button class="btn btn-secondary" id="save-json">Save draft JSON</button>
+      <button class="btn btn-secondary" id="load-json-button">Load draft JSON</button>
+      <button class="btn btn-primary" id="print-invoice">Print / Save PDF</button>
+      <input id="load-json" type="file" accept=".json,application/json" hidden>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel editor">
+      <div class="section">
+        <h2>Seller</h2>
+        <p>These defaults are prefilled for SEER Innovations Ltd and can be edited.</p>
+        <div class="field"><label>REGISTERED BUSINESS NAME</label><input data-field="business.registered_name"></div>
+        <div class="field"><label>TRADING NAME</label><input data-field="business.trading_name"></div>
+        <div class="grid-2">
+          <div class="field"><label>COMPANY NUMBER</label><input data-field="business.company_number"></div>
+          <div class="field"><label>PHONE</label><input data-field="business.phone"></div>
+        </div>
+        <div class="field"><label>REGISTERED ADDRESS — one line per line break</label><textarea data-field="business.address"></textarea></div>
+        <div class="field"><label>BILLING EMAIL</label><input data-field="business.email" type="email"></div>
+      </div>
+
+      <div class="section">
+        <h2>Client</h2>
+        <div class="field"><label>CLIENT / COMPANY NAME</label><input data-field="client.name"></div>
+        <div class="field"><label>CLIENT ADDRESS</label><textarea data-field="client.address"></textarea></div>
+        <div class="grid-2">
+          <div class="field"><label>CLIENT EMAIL</label><input data-field="client.email" type="email"></div>
+          <div class="field"><label>CLIENT PHONE</label><input data-field="client.phone"></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Invoice details</h2>
+        <div class="grid-2">
+          <div class="field"><label>INVOICE REFERENCE</label><input data-field="invoice.reference"></div>
+          <div class="field"><label>AMOUNT DUE (£)</label><input data-field="invoice.amount_due" inputmode="decimal"></div>
+          <div class="field"><label>ISSUE DATE</label><input data-field="invoice.issue_date" placeholder="DD/MM/YYYY"></div>
+          <div class="field"><label>DUE DATE</label><input data-field="invoice.due_date" placeholder="DD/MM/YYYY"></div>
+        </div>
+        <div class="warning" id="tax-warning">A tax/VAT rate is set. Check the calculation and your legal invoice requirements before using this invoice.</div>
+        <div class="grid-2">
+          <div class="field"><label>TAX / VAT RATE (%)</label><input data-field="tax_rate" inputmode="decimal"></div>
+          <div class="field"><label>TAX / VAT NOTE (OPTIONAL)</label><input data-field="tax_note" placeholder="For example: VAT exempt"></div>
+        </div>
+        <div class="field"><label>NOTES (OPTIONAL)</label><textarea data-field="notes" placeholder="Payment or service notes"></textarea></div>
+      </div>
+
+      <div class="section">
+        <h2>Line items</h2>
+        <p>Amounts are in pounds. Add as many service lines as needed.</p>
+        <div class="line-item-head"><span>Description</span><span>Qty</span><span>Unit cost</span><span>Amount</span><span></span></div>
+        <div id="line-items"></div>
+        <button class="btn btn-light" id="add-line">+ Add line item</button>
+      </div>
+
+      <div class="section">
+        <h2>Payment details</h2>
+        <div class="grid-2">
+          <div class="field"><label>ACCOUNT NAME</label><input data-field="payment.account_name"></div>
+          <div class="field"><label>ACCOUNT NUMBER</label><input data-field="payment.account_number"></div>
+        </div>
+        <div class="field"><label>SORT CODE</label><input data-field="payment.sort_code"></div>
+      </div>
+
+      <div class="sharepoint-box">
+        <strong>SharePoint delivery</strong>
+        This offline file cannot upload directly to SharePoint. After printing the PDF, upload it manually to:
+        <div class="path" id="sharepoint-path"></div>
+        <div class="form-actions" style="margin-top:9px">
+          <button class="btn btn-light" id="copy-path">Copy SharePoint path</button>
+        </div>
+      </div>
+      <div class="status" id="status"></div>
+    </section>
+
+    <section class="preview-wrap">
+      <p class="preview-note">
+        <span>Review the invoice below, then choose <strong>Print / Save PDF</strong>.</span>
+        <span>Works offline — no credentials or network connection required.</span>
+      </p>
+      <article class="invoice-page" id="invoice-preview"></article>
+    </section>
+  </main>
+
+  <script>
+    "use strict";
+
+    const initialState = {
+      business: {
+        registered_name: "SEER Innovations Ltd",
+        trading_name: "Stackstone Consulting",
+        company_number: "17100455",
+        address: "21 St John's Road\nAbingdon\nOX14 2HA",
+        email: "Tom@stackstoneconsulting.co.uk",
+        phone: "+44 7894 241 276"
+      },
+      client: {
+        name: "Croyde Medical",
+        address: "Unit 4A GBP1 Grove Business Park\nDownsview Road\nWantage\nOxfordshire\nOX12 9FA",
+        email: "accounts@croydemedical.co.uk",
+        phone: "01367241194"
+      },
+      invoice: {
+        reference: "INV-082",
+        amount_due: "3500.00",
+        issue_date: "03/09/2026",
+        due_date: "04/09/2026"
+      },
+      payment: {
+        account_name: "SEER Innovations Ltd",
+        account_number: "30855597",
+        sort_code: "04-06-05"
+      },
+      line_items: [
+        { description: "Draw down - 5 days (part 1)", qty: "1", unit_cost: "3500.00", amount: "3500.00" }
+      ],
+      tax_rate: "0",
+      tax_note: "",
+      notes: ""
+    };
+
+    let state = clone(initialState);
+    const gbp = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
+
+    function clone(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, character => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[character]));
+    }
+
+    function moneyValue(value) {
+      const cleaned = String(value ?? "").replace(/[£,\s]/g, "");
+      const parsed = Number(cleaned);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function money(value) {
+      return gbp.format(moneyValue(value));
+    }
+
+    function setPath(object, path, value) {
+      const parts = path.split(".");
+      let cursor = object;
+      parts.slice(0, -1).forEach(part => {
+        cursor[part] = cursor[part] || {};
+        cursor = cursor[part];
+      });
+      cursor[parts[parts.length - 1]] = value;
+    }
+
+    function getPath(object, path) {
+      return path.split(".").reduce((cursor, part) => cursor?.[part], object) ?? "";
+    }
+
+    function deriveTotals() {
+      const subtotal = state.line_items.reduce((sum, item) => {
+        const amount = moneyValue(item.amount);
+        return sum + (amount || moneyValue(item.qty) * moneyValue(item.unit_cost));
+      }, 0);
+      const taxRate = Math.max(0, moneyValue(state.tax_rate));
+      const tax = subtotal * taxRate / 100;
+      const total = subtotal + tax;
+      return { subtotal, taxRate, tax, total };
+    }
+
+    function syncAmount(index) {
+      const item = state.line_items[index];
+      const computed = moneyValue(item.qty) * moneyValue(item.unit_cost);
+      if (item.qty !== "" && item.unit_cost !== "") item.amount = computed.toFixed(2);
+    }
+
+    function renderFields() {
+      document.querySelectorAll("[data-field]").forEach(input => {
+        input.value = getPath(state, input.dataset.field);
+      });
+    }
+
+    function renderLineItems() {
+      const container = document.getElementById("line-items");
+      container.innerHTML = state.line_items.map((item, index) => `
+        <div class="line-item" data-line="${index}">
+          <input data-line-field="description" value="${escapeHtml(item.description)}" aria-label="Description">
+          <input data-line-field="qty" value="${escapeHtml(item.qty)}" inputmode="decimal" aria-label="Quantity">
+          <input data-line-field="unit_cost" value="${escapeHtml(item.unit_cost)}" inputmode="decimal" aria-label="Unit cost">
+          <input data-line-field="amount" value="${escapeHtml(item.amount)}" inputmode="decimal" aria-label="Amount">
+          <button class="remove-line" data-remove-line="${index}" title="Remove line item" aria-label="Remove line item">×</button>
+        </div>
+      `).join("");
+    }
+
+    function sharePointPath() {
+      const client = (state.client.name || "Client").trim();
+      const rawDate = (state.invoice.issue_date || "date").trim();
+      const dateParts = rawDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      const date = dateParts ? `${dateParts[3]}-${dateParts[2]}-${dateParts[1]}` : rawDate.replace(/[\\/]/g, "-");
+      const reference = (state.invoice.reference || "invoice").trim();
+      return `/Accounts/${client}/Finance/${date} - Invoice - ${reference}.pdf`;
+    }
+
+    function renderPreview() {
+      const totals = deriveTotals();
+      const lines = state.line_items.map(item => {
+        const amount = moneyValue(item.amount) || moneyValue(item.qty) * moneyValue(item.unit_cost);
+        return `
+          <tr>
+            <td>${escapeHtml(item.description)}</td>
+            <td class="num">${escapeHtml(item.qty)}</td>
+            <td class="num">${money(item.unit_cost)}</td>
+            <td class="num">${money(amount)}</td>
+          </tr>
+        `;
+      }).join("");
+
+      const taxRow = totals.taxRate > 0
+        ? `<div class="total-row"><span>VAT / tax (${escapeHtml(state.tax_rate)}%)</span><strong>${money(totals.tax)}</strong></div>`
+        : "";
+      const taxNote = state.tax_note ? `<div style="margin-top:8px;color:#745622;font-size:11px">${escapeHtml(state.tax_note)}</div>` : "";
+      const notes = state.notes ? `<div style="margin-top:18px;color:#687680;font-size:11px"><strong>Notes:</strong> ${escapeHtml(state.notes)}</div>` : "";
+
+      document.getElementById("invoice-preview").innerHTML = `
+        <div class="invoice-top">
+          <div class="invoice-brand">
+            ${escapeHtml(state.business.trading_name || state.business.registered_name)}
+            <small>${escapeHtml(state.business.registered_name)}</small>
+          </div>
+          <div class="invoice-title">
+            <h2>INVOICE</h2>
+            <div class="ref">${escapeHtml(state.invoice.reference)}</div>
+          </div>
+        </div>
+        <div class="gold-rule"></div>
+        <div class="parties">
+          <div>
+            <div class="eyebrow">From</div>
+            <div class="party-name">${escapeHtml(state.business.registered_name)}</div>
+            <div class="party-text">${escapeHtml(state.business.address)}
+${escapeHtml(state.business.email)}
+${escapeHtml(state.business.phone)}
+Company no. - ${escapeHtml(state.business.company_number)}</div>
+          </div>
+          <div>
+            <div class="eyebrow">Bill to</div>
+            <div class="party-name">${escapeHtml(state.client.name)}</div>
+            <div class="party-text">${escapeHtml(state.client.address)}
+${escapeHtml(state.client.email)}${state.client.phone ? "\n" + escapeHtml(state.client.phone) : ""}</div>
+          </div>
+        </div>
+        <div class="meta">
+          <div><span>Reference</span><strong>${escapeHtml(state.invoice.reference)}</strong></div>
+          <div><span>Issue date</span><strong>${escapeHtml(state.invoice.issue_date)}</strong></div>
+          <div><span>Due date</span><strong>${escapeHtml(state.invoice.due_date)}</strong></div>
+        </div>
+        <table class="invoice-table">
+          <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Amount</th></tr></thead>
+          <tbody>${lines || `<tr><td colspan="4">No line items added</td></tr>`}</tbody>
+        </table>
+        <div class="totals">
+          <div class="total-row"><span>Subtotal</span><strong>${money(totals.subtotal)}</strong></div>
+          ${taxRow}
+          <div class="total-row grand"><span>Total</span><strong>${money(totals.total)}</strong></div>
+        </div>
+        ${taxNote}
+        ${notes}
+        <div class="payment-box">
+          <div class="eyebrow">Payment methods</div>
+          <div class="payment-grid">
+            <div class="payment-cell"><label>Account name</label><strong>${escapeHtml(state.payment.account_name)}</strong></div>
+            <div class="payment-cell"><label>Account number</label><strong>${escapeHtml(state.payment.account_number)}</strong></div>
+            <div class="payment-cell"><label>Sort code</label><strong>${escapeHtml(state.payment.sort_code)}</strong></div>
+          </div>
+        </div>
+        <div class="invoice-footer">
+          ${escapeHtml(state.business.trading_name || state.business.registered_name)} · ${escapeHtml(state.business.email)}
+        </div>
+      `;
+      document.getElementById("sharepoint-path").textContent = sharePointPath();
+      document.getElementById("tax-warning").classList.toggle("visible", totals.taxRate > 0);
+    }
+
+    function saveLocal() {
+      try {
+        localStorage.setItem("stackstone-invoice-draft", JSON.stringify(state));
+        document.getElementById("status").textContent = "Draft saved locally in this browser.";
+      } catch {
+        document.getElementById("status").textContent = "Local browser save was unavailable; use Save draft JSON instead.";
+      }
+    }
+
+    function download(filename, content, type) {
+      const blob = new Blob([content], { type });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function safeFilename() {
+      return (state.invoice.reference || "invoice").replace(/[^a-z0-9_.-]+/gi, "-");
+    }
+
+    function newInvoice() {
+      state = clone(initialState);
+      state.client = { name: "", address: "", email: "", phone: "" };
+      state.invoice = { reference: "", amount_due: "", issue_date: new Date().toLocaleDateString("en-GB"), due_date: "" };
+      state.line_items = [{ description: "", qty: "1", unit_cost: "", amount: "" }];
+      state.tax_rate = "0";
+      state.tax_note = "";
+      state.notes = "";
+      renderAll();
+      document.getElementById("status").textContent = "New invoice form ready. Enter a unique reference before saving.";
+    }
+
+    function renderAll() {
+      renderFields();
+      renderLineItems();
+      renderPreview();
+    }
+
+    document.addEventListener("input", event => {
+      const input = event.target;
+      if (input.matches("[data-field]")) {
+        setPath(state, input.dataset.field, input.value);
+        renderPreview();
+        saveLocal();
+      }
+      if (input.matches("[data-line-field]")) {
+        const row = input.closest("[data-line]");
+        const index = Number(row.dataset.line);
+        state.line_items[index][input.dataset.lineField] = input.value;
+        if (input.dataset.lineField === "qty" || input.dataset.lineField === "unit_cost") syncAmount(index);
+        renderPreview();
+        saveLocal();
+      }
+    });
+
+    document.getElementById("add-line").addEventListener("click", () => {
+      state.line_items.push({ description: "", qty: "1", unit_cost: "", amount: "" });
+      renderLineItems();
+      renderPreview();
+    });
+
+    document.getElementById("line-items").addEventListener("click", event => {
+      const button = event.target.closest("[data-remove-line]");
+      if (!button) return;
+      if (state.line_items.length === 1) {
+        state.line_items[0] = { description: "", qty: "1", unit_cost: "", amount: "" };
+      } else {
+        state.line_items.splice(Number(button.dataset.removeLine), 1);
+      }
+      renderLineItems();
+      renderPreview();
+      saveLocal();
+    });
+
+    document.getElementById("print-invoice").addEventListener("click", () => window.print());
+    document.getElementById("new-invoice").addEventListener("click", () => {
+      if (confirm("Start a new invoice? The current invoice remains available through Save draft JSON if needed.")) newInvoice();
+    });
+    document.getElementById("save-json").addEventListener("click", () => {
+      download(`${safeFilename() || "invoice"}-draft.json`, JSON.stringify(state, null, 2), "application/json");
+      document.getElementById("status").textContent = "Draft JSON downloaded.";
+    });
+    document.getElementById("load-json-button").addEventListener("click", () => document.getElementById("load-json").click());
+    document.getElementById("load-json").addEventListener("change", event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const loaded = JSON.parse(reader.result);
+          state = { ...clone(initialState), ...loaded };
+          renderAll();
+          document.getElementById("status").textContent = "Draft JSON loaded.";
+        } catch {
+          document.getElementById("status").textContent = "Could not load that JSON file.";
+        }
+        event.target.value = "";
+      };
+      reader.readAsText(file);
+    });
+    document.getElementById("copy-path").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(sharePointPath());
+        document.getElementById("status").textContent = "SharePoint path copied.";
+      } catch {
+        document.getElementById("status").textContent = "Copy was blocked by the browser; select the path manually.";
+      }
+    });
+
+    try {
+      const saved = localStorage.getItem("stackstone-invoice-draft");
+      if (saved) state = { ...clone(initialState), ...JSON.parse(saved) };
+    } catch { /* The prefilled invoice remains the fallback. */ }
+    renderAll();
+  </script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+{
+  "business": {
+    "registered_name": "SEER Innovations Ltd",
+    "trading_name": "Stackstone Consulting",
+    "company_number": "17100455",
+    "address": "21 St John's Road\nAbingdon\nOX14 2HA",
+    "email": "Tom@stackstoneconsulting.co.uk",
+    "phone": "+44 7894 241 276"
+  },
+  "client": {
+    "name": "Croyde Medical",
+    "address": "Unit 4A GBP1 Grove Business Park\nDownsview Road\nWantage\nOxfordshire\nOX12 9FA",
+    "email": "accounts@croydemedical.co.uk",
+    "phone": "01367241194"
+  },
+  "invoice": {
+    "reference": "INV-082",
+    "amount_due": "3500.00",
+    "issue_date": "03/09/2026",
+    "due_date": "04/09/2026"
+  },
+  "payment": {
+    "account_name": "SEER Innovations Ltd",
+    "account_number": "30855597",
+    "sort_code": "04-06-05"
+  },
+  "line_items": [
+    {
+      "description": "Draw down - 5 days (part 1)",
+      "qty": "1",
+      "unit_cost": "3500.00",
+      "amount": "3500.00"
+    }
+  ],
+  "tax_rate": "0",
+  "tax_note": "",
+  "notes": ""
+}
