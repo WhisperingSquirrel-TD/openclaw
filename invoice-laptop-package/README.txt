@@ -3,6 +3,8 @@ STACKSTONE INVOICE GENERATOR — WINDOWS PACKAGE
 
 This is a self-contained offline invoice-preparation tool. It does not need
 Python, Node, a server, credentials, or an internet connection.
+The invoice preview follows the supplied Stackstone PDF using the supplied
+Stackstone logo and charcoal/gold visual system.
 
 QUICK START
 -----------
@@ -18,6 +20,9 @@ The starting data is the Croyde Medical invoice:
   Issue date: 03/09/2026
   Due date: 04/09/2026
   Total: £3,500.00
+
+The ZIP also includes stackstone-logo.png, the cropped copy of the supplied
+Stackstone horizontal logo used by the generator and invoice preview.
 
 For a new invoice, click "New invoice". Enter a new, unique invoice reference.
 The seller and payment details remain prefilled, while client and invoice fields

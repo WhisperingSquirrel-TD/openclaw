@@ -4,19 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Stackstone Invoice Generator</title>
+  <link rel="icon" type="image/png" href="stackstone-logo.png">
   <style>
     :root {
-      --ink: #24313a;
-      --muted: #687680;
+      --ink: #3d3a38;
+      --muted: #6f6c68;
       --paper: #ffffff;
-      --canvas: #edf2f1;
-      --teal: #0f5d62;
-      --teal-dark: #0a4549;
-      --gold: #c48b32;
-      --line: #dbe4e4;
-      --soft: #f5f8f7;
+      --canvas: #f2f2ef;
+      --charcoal: #3e3b39;
+      --gold: #c7954b;
+      --line: #d8d5d1;
+      --soft: #f5f4f1;
       --danger: #a7473e;
-      --shadow: 0 18px 55px rgba(24, 45, 49, .12);
+      --shadow: 0 18px 55px rgba(61, 58, 56, .12);
     }
 
     * { box-sizing: border-box; }
@@ -30,31 +30,28 @@
     button, input, textarea { font: inherit; }
     button { cursor: pointer; }
     .app-header {
-      background: linear-gradient(135deg, var(--teal-dark), var(--teal));
-      color: #fff;
-      padding: 22px clamp(18px, 4vw, 56px);
+      background: var(--paper);
+      color: var(--ink);
+      padding: 16px clamp(18px, 4vw, 56px);
+      border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 18px;
       flex-wrap: wrap;
     }
-    .brand { display: flex; align-items: center; gap: 13px; }
-    .brand-mark {
-      width: 42px; height: 42px; border: 2px solid rgba(255,255,255,.75);
-      border-radius: 10px; display: grid; place-items: center;
-      font-weight: 800; letter-spacing: -.06em;
-    }
-    .brand h1 { margin: 0; font-size: 20px; letter-spacing: .02em; }
-    .brand p { margin: 2px 0 0; color: rgba(255,255,255,.72); font-size: 12px; }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-logo { width: 154px; height: auto; display: block; }
+    .brand h1 { margin: 0; color: var(--charcoal); font-size: 16px; letter-spacing: .03em; }
+    .brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
     .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
     .btn {
       border: 1px solid transparent; border-radius: 7px; padding: 9px 13px;
       font-weight: 700; font-size: 13px;
     }
-    .btn-primary { background: #fff; color: var(--teal-dark); }
-    .btn-secondary { background: rgba(255,255,255,.1); color: #fff; border-color: rgba(255,255,255,.35); }
-    .btn-light { background: var(--soft); color: var(--teal-dark); border-color: var(--line); }
+    .btn-primary { background: var(--charcoal); color: #fff; }
+    .btn-secondary { background: #fff; color: var(--charcoal); border-color: #bdb9b5; }
+    .btn-light { background: var(--soft); color: var(--charcoal); border-color: var(--line); }
     .btn-danger { background: #fff5f4; color: var(--danger); border-color: #e8c9c6; }
     .btn:hover { filter: brightness(.97); transform: translateY(-1px); }
 
@@ -65,12 +62,12 @@
     }
     .panel {
       background: var(--paper); border: 1px solid var(--line); border-radius: 12px;
-      box-shadow: 0 5px 20px rgba(24,45,49,.05);
+      box-shadow: 0 5px 20px rgba(61,58,56,.05);
     }
     .editor { padding: 22px; }
     .section { padding: 0 0 20px; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
     .section:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
-    .section h2 { margin: 0 0 5px; font-size: 16px; color: var(--teal-dark); }
+    .section h2 { margin: 0 0 5px; font-size: 16px; color: var(--charcoal); }
     .section > p { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
     .field { display: grid; gap: 5px; margin-bottom: 11px; }
@@ -80,7 +77,7 @@
       color: var(--ink); background: #fff; outline: none;
     }
     .field textarea { min-height: 66px; resize: vertical; }
-    .field input:focus, .field textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(15,93,98,.1); }
+    .field input:focus, .field textarea:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(199,149,75,.14); }
     .hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
     .line-item-head, .line-item {
       display: grid; grid-template-columns: 1.7fr .55fr .8fr .8fr 32px; gap: 6px; align-items: end;
@@ -105,41 +102,46 @@
     }
     .invoice-page {
       background: var(--paper); box-shadow: var(--shadow); max-width: 850px; min-height: 1100px;
-      margin: 0 auto; padding: 54px 62px; border-radius: 3px;
+      margin: 0 auto; padding: 28px 42px 42px; border-radius: 3px;
     }
-    .invoice-top { display: flex; justify-content: space-between; gap: 30px; align-items: flex-start; }
-    .invoice-brand { color: var(--teal); font-size: 21px; font-weight: 800; letter-spacing: .01em; }
-    .invoice-brand small { display: block; color: var(--muted); font-weight: 500; font-size: 11px; margin-top: 4px; }
-    .invoice-title { text-align: right; }
-    .invoice-title h2 { margin: 0; color: var(--teal-dark); font-size: 34px; letter-spacing: .12em; }
-    .invoice-title .ref { color: var(--gold); font-weight: 800; margin-top: 5px; }
-    .gold-rule { height: 4px; background: var(--gold); margin: 25px 0 28px; }
-    .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 35px; margin-bottom: 28px; }
+    .document-kicker { display: grid; grid-template-columns: 1fr 1fr 1fr; color: var(--ink); font-size: 10px; margin-bottom: 25px; }
+    .document-kicker span:nth-child(2) { text-align: center; }
+    .document-kicker span:last-child { text-align: right; }
+    .invoice-top { display: flex; align-items: flex-start; margin-bottom: 20px; }
+    .invoice-logo { width: 132px; height: auto; display: block; }
+    .seller-details { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-bottom: 26px; }
+    .seller-details > div { min-width: 0; }
+    .detail-label { color: var(--charcoal); font-size: 10px; font-weight: 700; margin-bottom: 4px; }
+    .detail-text { color: var(--ink); font-size: 10px; white-space: pre-line; line-height: 1.4; }
+    .invoice-card { background: #f5f4f2; border: 1px solid #d4d1cd; border-radius: 8px; padding: 12px 13px 13px; margin-bottom: 16px; }
+    .invoice-card h2 { margin: 0 0 10px; color: var(--charcoal); font-size: 22px; letter-spacing: .02em; }
     .eyebrow { color: var(--gold); font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 7px; }
-    .party-name { font-weight: 800; font-size: 16px; margin-bottom: 4px; }
-    .party-text { color: var(--muted); font-size: 12px; white-space: pre-line; }
+    .party-name { font-weight: 700; font-size: 11px; margin-bottom: 4px; }
+    .party-text { color: var(--ink); font-size: 10px; white-space: pre-line; line-height: 1.4; }
+    .to-card { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
     .meta {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-      background: var(--soft); padding: 14px; border-radius: 7px; margin-bottom: 30px;
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+      margin-bottom: 10px;
     }
-    .meta strong { display: block; color: var(--teal-dark); font-size: 11px; margin-top: 3px; }
-    .meta span { color: var(--muted); font-size: 11px; }
+    .meta > div { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 9px; min-height: 58px; }
+    .meta strong { display: block; color: var(--ink); font-size: 10px; margin-top: 4px; }
+    .meta span { color: var(--charcoal); font-size: 10px; font-weight: 700; }
     .invoice-table { width: 100%; border-collapse: collapse; margin-bottom: 22px; }
     .invoice-table th {
-      text-align: left; color: var(--teal-dark); border-bottom: 2px solid var(--teal);
-      padding: 9px 7px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+      text-align: left; color: #fff; background: var(--charcoal); border-bottom: 0;
+      padding: 8px 7px; font-size: 10px; text-transform: none; letter-spacing: 0;
     }
-    .invoice-table td { border-bottom: 1px solid var(--line); padding: 12px 7px; font-size: 12px; }
+    .invoice-table td { border: 1px solid var(--line); padding: 10px 7px; font-size: 10px; }
     .num { text-align: right; white-space: nowrap; }
     .totals { margin-left: auto; width: min(310px, 100%); }
     .total-row { display: flex; justify-content: space-between; padding: 8px 0; color: var(--muted); font-size: 12px; }
-    .total-row.grand { color: var(--teal-dark); border-top: 2px solid var(--gold); font-size: 17px; font-weight: 800; padding-top: 12px; }
-    .payment-box { margin-top: 42px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .total-row.grand { color: var(--charcoal); background: #f5f4f2; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; font-weight: 800; padding: 10px; }
+    .payment-box { margin-top: 38px; padding-top: 14px; border-top: 2px solid var(--gold); }
     .payment-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .payment-cell { border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
     .payment-cell label { display: block; color: var(--muted); font-size: 10px; margin-bottom: 3px; }
-    .payment-cell strong { color: var(--ink); font-size: 12px; }
-    .invoice-footer { margin-top: 48px; color: var(--muted); font-size: 10px; text-align: center; }
+    .payment-cell strong { color: var(--ink); font-size: 10px; }
+    .invoice-footer { margin-top: 48px; color: var(--muted); font-size: 9px; text-align: left; }
     .warning {
       display: none; background: #fff6df; border: 1px solid #e7d8b9; color: #745622;
       padding: 9px 11px; border-radius: 6px; font-size: 11px; margin-bottom: 14px;
@@ -163,7 +165,7 @@
       body { background: #fff; }
       .app-header, .editor, .preview-note { display: none !important; }
       .layout { display: block; padding: 0; }
-      .invoice-page { box-shadow: none; max-width: none; min-height: 0; padding: 20mm 18mm; }
+       .invoice-page { box-shadow: none; max-width: none; min-height: 0; padding: 7mm 10mm 10mm; }
       @page { size: A4; margin: 0; }
     }
   </style>
@@ -171,7 +173,7 @@
 <body>
   <header class="app-header">
     <div class="brand">
-      <div class="brand-mark">SC</div>
+      <img class="brand-logo" src="stackstone-logo.png" alt="Stackstone Consulting">
       <div>
         <h1>Stackstone Invoice Generator</h1>
         <p>Offline Windows-friendly invoice preparation</p>
@@ -403,38 +405,47 @@
       const taxNote = state.tax_note ? `<div style="margin-top:8px;color:#745622;font-size:11px">${escapeHtml(state.tax_note)}</div>` : "";
       const notes = state.notes ? `<div style="margin-top:18px;color:#687680;font-size:11px"><strong>Notes:</strong> ${escapeHtml(state.notes)}</div>` : "";
 
+      const generatedAt = new Date().toLocaleString("en-GB", {
+        day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false
+      });
       document.getElementById("invoice-preview").innerHTML = `
-        <div class="invoice-top">
-          <div class="invoice-brand">
-            ${escapeHtml(state.business.trading_name || state.business.registered_name)}
-            <small>${escapeHtml(state.business.registered_name)}</small>
-          </div>
-          <div class="invoice-title">
-            <h2>INVOICE</h2>
-            <div class="ref">${escapeHtml(state.invoice.reference)}</div>
-          </div>
+        <div class="document-kicker">
+          <span>${escapeHtml(generatedAt)}</span>
+          <span>Invoice</span>
+          <span></span>
         </div>
-        <div class="gold-rule"></div>
-        <div class="parties">
+        <div class="invoice-top">
+          <img class="invoice-logo" src="stackstone-logo.png" alt="Stackstone Consulting">
+        </div>
+        <div class="seller-details">
           <div>
-            <div class="eyebrow">From</div>
-            <div class="party-name">${escapeHtml(state.business.registered_name)}</div>
-            <div class="party-text">${escapeHtml(state.business.address)}
+            <div class="detail-label">Registered Business Name</div>
+            <div class="detail-text">${escapeHtml(state.business.registered_name)}
+${escapeHtml(state.business.address)}
+
 ${escapeHtml(state.business.email)}
 ${escapeHtml(state.business.phone)}
 Company no. - ${escapeHtml(state.business.company_number)}</div>
           </div>
           <div>
-            <div class="eyebrow">Bill to</div>
+            <div class="detail-label">Trading Name</div>
+            <div class="detail-text">${escapeHtml(state.business.trading_name)}</div>
+          </div>
+        </div>
+        <div class="invoice-card">
+          <h2>INVOICE</h2>
+          <div class="meta">
+            <div><span>Reference</span><strong>${escapeHtml(state.invoice.reference)}</strong></div>
+            <div><span>Amount due</span><strong>${money(state.invoice.amount_due || totals.total)}</strong></div>
+            <div><span>Due date</span><strong>${escapeHtml(state.invoice.due_date)}</strong></div>
+            <div><span>Issue date</span><strong>${escapeHtml(state.invoice.issue_date)}</strong></div>
+          </div>
+          <div class="to-card">
+            <div class="detail-label">To</div>
             <div class="party-name">${escapeHtml(state.client.name)}</div>
             <div class="party-text">${escapeHtml(state.client.address)}
 ${escapeHtml(state.client.email)}${state.client.phone ? "\n" + escapeHtml(state.client.phone) : ""}</div>
           </div>
-        </div>
-        <div class="meta">
-          <div><span>Reference</span><strong>${escapeHtml(state.invoice.reference)}</strong></div>
-          <div><span>Issue date</span><strong>${escapeHtml(state.invoice.issue_date)}</strong></div>
-          <div><span>Due date</span><strong>${escapeHtml(state.invoice.due_date)}</strong></div>
         </div>
         <table class="invoice-table">
           <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Amount</th></tr></thead>
