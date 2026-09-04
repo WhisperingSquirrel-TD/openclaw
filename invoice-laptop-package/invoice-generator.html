@@ -87,12 +87,6 @@
     .line-item input { min-width: 0; padding: 8px 7px; border: 1px solid #cbd8d8; border-radius: 5px; }
     .remove-line { height: 34px; width: 32px; padding: 0; border: 1px solid #e8c9c6; border-radius: 5px; background: #fff5f4; color: var(--danger); font-weight: 800; }
     .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .sharepoint-box {
-      background: #f7f3ea; border: 1px solid #e7d8b9; border-radius: 8px; padding: 12px;
-      font-size: 12px; color: #644c24;
-    }
-    .sharepoint-box strong { display: block; margin-bottom: 4px; color: #483719; }
-    .path { word-break: break-word; font-family: Consolas, monospace; font-size: 11px; }
     .status { min-height: 18px; color: var(--muted); font-size: 11px; margin-top: 10px; }
 
     .preview-wrap { min-width: 0; }
@@ -183,7 +177,7 @@
       <button class="btn btn-secondary" id="new-invoice">New invoice</button>
       <button class="btn btn-secondary" id="save-json">Save draft JSON</button>
       <button class="btn btn-secondary" id="load-json-button">Load draft JSON</button>
-      <button class="btn btn-primary" id="print-invoice">Print / Save PDF</button>
+      <button class="btn btn-primary" id="print-invoice">Print to PDF</button>
       <input id="load-json" type="file" accept=".json,application/json" hidden>
     </div>
   </header>
@@ -246,20 +240,12 @@
         <div class="field"><label>SORT CODE</label><input data-field="payment.sort_code"></div>
       </div>
 
-      <div class="sharepoint-box">
-        <strong>SharePoint delivery</strong>
-        This offline file cannot upload directly to SharePoint. After printing the PDF, upload it manually to:
-        <div class="path" id="sharepoint-path"></div>
-        <div class="form-actions" style="margin-top:9px">
-          <button class="btn btn-light" id="copy-path">Copy SharePoint path</button>
-        </div>
-      </div>
       <div class="status" id="status"></div>
     </section>
 
     <section class="preview-wrap">
       <p class="preview-note">
-        <span>Review the invoice below, then choose <strong>Print / Save PDF</strong>.</span>
+        <span>Review the invoice below, then choose <strong>Print to PDF</strong>.</span>
         <span>Works offline — no credentials or network connection required.</span>
       </p>
       <article class="invoice-page" id="invoice-preview"></article>
@@ -279,16 +265,16 @@
         phone: "+44 7894 241 276"
       },
       client: {
-        name: "Croyde Medical",
-        address: "Unit 4A GBP1 Grove Business Park\nDownsview Road\nWantage\nOxfordshire\nOX12 9FA",
-        email: "accounts@croydemedical.co.uk",
-        phone: "01367241194"
+        name: "",
+        address: "",
+        email: "",
+        phone: ""
       },
       invoice: {
-        reference: "INV-082",
-        amount_due: "3500.00",
-        issue_date: "03/09/2026",
-        due_date: "04/09/2026"
+        reference: "",
+        amount_due: "",
+        issue_date: new Date().toLocaleDateString("en-GB"),
+        due_date: ""
       },
       payment: {
         account_name: "SEER Innovations Ltd",
@@ -296,7 +282,7 @@
         sort_code: "04-06-05"
       },
       line_items: [
-        { description: "Draw down - 5 days (part 1)", qty: "1", unit_cost: "3500.00", amount: "3500.00" }
+        { description: "", qty: "1", unit_cost: "", amount: "" }
       ],
       tax_rate: "0",
       tax_note: "",
@@ -374,15 +360,6 @@
           <button class="remove-line" data-remove-line="${index}" title="Remove line item" aria-label="Remove line item">×</button>
         </div>
       `).join("");
-    }
-
-    function sharePointPath() {
-      const client = (state.client.name || "Client").trim();
-      const rawDate = (state.invoice.issue_date || "date").trim();
-      const dateParts = rawDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-      const date = dateParts ? `${dateParts[3]}-${dateParts[2]}-${dateParts[1]}` : rawDate.replace(/[\\/]/g, "-");
-      const reference = (state.invoice.reference || "invoice").trim();
-      return `/Accounts/${client}/Finance/${date} - Invoice - ${reference}.pdf`;
     }
 
     function renderPreview() {
@@ -470,13 +447,12 @@ ${escapeHtml(state.client.email)}${state.client.phone ? "\n" + escapeHtml(state.
           ${escapeHtml(state.business.trading_name || state.business.registered_name)} · ${escapeHtml(state.business.email)}
         </div>
       `;
-      document.getElementById("sharepoint-path").textContent = sharePointPath();
       document.getElementById("tax-warning").classList.toggle("visible", totals.taxRate > 0);
     }
 
     function saveLocal() {
       try {
-        localStorage.setItem("stackstone-invoice-draft", JSON.stringify(state));
+        localStorage.setItem("stackstone-invoice-draft-v2", JSON.stringify(state));
         document.getElementById("status").textContent = "Draft saved locally in this browser.";
       } catch {
         document.getElementById("status").textContent = "Local browser save was unavailable; use Save draft JSON instead.";
@@ -577,19 +553,10 @@ ${escapeHtml(state.client.email)}${state.client.phone ? "\n" + escapeHtml(state.
       };
       reader.readAsText(file);
     });
-    document.getElementById("copy-path").addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(sharePointPath());
-        document.getElementById("status").textContent = "SharePoint path copied.";
-      } catch {
-        document.getElementById("status").textContent = "Copy was blocked by the browser; select the path manually.";
-      }
-    });
-
     try {
-      const saved = localStorage.getItem("stackstone-invoice-draft");
+      const saved = localStorage.getItem("stackstone-invoice-draft-v2");
       if (saved) state = { ...clone(initialState), ...JSON.parse(saved) };
-    } catch { /* The prefilled invoice remains the fallback. */ }
+    } catch { /* The blank invoice template remains the fallback. */ }
     renderAll();
   </script>
 </body>

@@ -8,41 +8,27 @@ Stackstone logo and charcoal/gold visual system.
 
 QUICK START
 -----------
-1. Save this ZIP in SharePoint if you want it backed up or shared.
+1. Save this ZIP somewhere convenient.
 2. On a Windows laptop, extract the ZIP to a normal folder.
 3. Double-click invoice-generator.html.
-4. Review or edit the prefilled invoice.
-5. Click "Print / Save PDF", choose "Microsoft Print to PDF", and save the PDF.
-6. Upload the PDF manually to the displayed SharePoint path.
+4. Enter the client and invoice details. Your seller and payment details are
+   prefilled and can also be edited.
+5. Click "Print to PDF", choose "Microsoft Print to PDF", and save the PDF.
 
-The starting data is the Croyde Medical invoice:
-  Reference: INV-082
-  Issue date: 03/09/2026
-  Due date: 04/09/2026
-  Total: £3,500.00
+Choose the correct client folder and filename in the Windows save dialog. The
+generator does not assume a particular client, folder, or document system.
 
 The ZIP also includes stackstone-logo.png, the cropped copy of the supplied
 Stackstone horizontal logo used by the generator and invoice preview.
 
 For a new invoice, click "New invoice". Enter a new, unique invoice reference.
-The seller and payment details remain prefilled, while client and invoice fields
-are cleared. Use "Save draft JSON" to keep a portable editable backup and
-"Load draft JSON" to reopen one later.
-
-SHAREPOINT
-----------
-The tool intentionally does not contain Microsoft credentials and cannot upload
-directly to SharePoint. It displays the correct destination path for manual
-upload. The current invoice destination is:
-
-  /Accounts/Croyde Medical/Finance/2026-09-03 - Invoice - INV-082.pdf
-
-The tool converts a displayed UK date such as 03/09/2026 into the safe filename
-date 2026-09-03 so the slashes do not create unintended subfolders.
+Use "Save draft JSON" to keep a portable editable backup and "Load draft JSON"
+to reopen one later. The app opens as a blank, client-agnostic template.
 
 SAFETY NOTES
 ------------
-- "Print / Save PDF" creates a local PDF only.
+- "Print to PDF" creates a local PDF only; choose the final storage location
+  yourself in the Windows print dialog.
 - This package never sends an email.
 - This package never updates the invoice tracker.
 - This package never marks an invoice as sent.
