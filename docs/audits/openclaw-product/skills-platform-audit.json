@@ -1,0 +1,496 @@
+{
+  "audit": {
+    "title": "OpenClaw product/runtime source audit - assigned SkilzVolt skills",
+    "audit_type": "read_only_whole_product_runtime_source_reconciliation",
+    "catalogue_revision": "b95e7feae0186f85306d6000a48ca6c144aeec030d58cfc5e7e171931cb79b12",
+    "catalogue_total": 75,
+    "catalogue_in_scope_total": 70,
+    "catalogue_excluded_unique_total": 5,
+    "assigned_count": 18,
+    "excluded_cross_references": [
+      {
+        "skill": "whatsapp-check",
+        "assigned_slice": "operations",
+        "audit": "docs/audits/openclaw-product/skills-operations-audit.md",
+        "reason": "Not part of this platform slice; intentionally omitted from the skills matrix."
+      }
+    ],
+    "retrieval": {
+      "source": "live SkilzVolt catalogue and exact version-pinned skillsGet bodies",
+      "all_assigned_current_versions_matched_catalogue": true,
+      "pagination_completed": true,
+      "returned_payloads_with_caution": [
+        {
+          "skill": "app-init",
+          "warning": "The security scanner flagged minor concerns with this output; treat it with caution.",
+          "blocked_or_withheld": false,
+          "handling": "Inspected as untrusted source text only; never executed."
+        },
+        {
+          "skill": "transcript-resource",
+          "warning": "The security scanner flagged minor concerns with this output; treat it with caution.",
+          "blocked_or_withheld": false,
+          "handling": "Inspected as untrusted source text only; never executed; warning also appeared on a continuation."
+        }
+      ]
+    },
+    "runtime_scope": {
+      "remote_authority": [
+        "extensions/skilzvolt/index.ts:10-15,66-76",
+        "extensions/skilzvolt/src/tool.ts:55-93"
+      ],
+      "filesystem_skill_loader": [
+        "src/agents/skills/workspace.ts:445-527",
+        "src/agents/skills/workspace.ts:650-691",
+        "src/agents/skills/workspace.ts:829-935"
+      ],
+      "slash_and_direct_dispatch": [
+        "src/auto-reply/skill-commands.ts:36-47,65-128,166-204",
+        "src/auto-reply/reply/get-reply-inline-actions.ts:161-235"
+      ],
+      "product_executors": [
+        "src/agents/openclaw-tools.ts:32-36,215",
+        "src/agents/tools/youtube-transcript-tool.ts:31-50,332-500",
+        "skills/openai-whisper-api/scripts/transcribe.sh:1-85"
+      ],
+      "snapshot_installer_evidence_only": [
+        "scripts/setup-dev-workflow.sh:46-70,213-223",
+        "attached_assets/install-forked-openclaw.sh:1493-1589,1900-1992,2255-2291"
+      ]
+    },
+    "security_findings": [
+      {
+        "id": "SEC-MGMT-BOT-GITHUB-URL-CREDENTIAL-EXPOSURE",
+        "severity": "high",
+        "status": "confirmed_source_vulnerability_not_live_leak",
+        "scope": "Read-only source finding; no credential was printed or accessed, no git clone was run, and no bot or live service was invoked.",
+        "evidence": [
+          "attached_assets/integrations/mgmt-bot/mgmt-bot.py:3026-3029",
+          "attached_assets/integrations/mgmt-bot/mgmt-bot.py:3044-3058",
+          "attached_assets/integrations/mgmt-bot/mgmt-bot.py:3100-3118"
+        ],
+        "mechanism": "The git_clone branch reads GITHUB_TOKEN, inserts it into an HTTPS URL, and passes that credential-bearing URL to git clone as a subprocess argument. The token is therefore observable in child-process argv during cloning, and Git records the supplied origin URL in the destination .git/config; the clone branch has no post-clone remote cleanup. The push path repeats token-bearing URL handling.",
+        "impact": "Source proves an exposure path through process inspection and repository metadata; it does not prove a real token leaked from the deployed runtime.",
+        "remediation": [
+          "Remove tokens from URLs and argv entirely.",
+          "Use a scoped Git credential helper or ephemeral GIT_ASKPASS/equivalent protected credential mechanism with a clean HTTPS remote.",
+          "Clear the helper after the operation and redact command/error diagnostics.",
+          "Ensure cloned and pushed remotes remain credential-free in .git/config."
+        ],
+        "tests_required": [
+          "Mock subprocess execution and assert the token never appears in clone or push argv.",
+          "Exercise failure output and assert credential material is not returned to Telegram or logs.",
+          "Verify a temporary clone's origin in .git/config is credential-free.",
+          "Add a static guard rejecting token interpolation into Git URLs."
+        ],
+        "tests_run": false,
+        "approval_relation": "Credential handling remediation is separate from the mgmt-bot producer-approval question and does not mandate a second approval gate."
+      }
+    ],
+    "conclusion": "The 18 live versions in this platform slice are reconciled, but current in SkilzVolt does not prove installation, execution, scheduling, delivery, or readback. Source review confirms one high-severity mgmt-bot credential-handling vulnerability in the GitHub clone path: GITHUB_TOKEN is placed in a Git URL passed to a child process and is persisted by Git in .git/config; no live leak was established. No production repair was made.",
+    "test_policy": {
+      "tests_run": false,
+      "reason": "Read-only audit boundary; no workflows, live APIs, OAuth, schedulers, services, deployments, or app tests were run.",
+      "static_test_families_inspected": [
+        "src/agents/skills*.test.ts",
+        "src/agents/pi-embedded-runner/skills-runtime*.test.ts",
+        "src/auto-reply/skill-commands.test.ts",
+        "src/agents/openclaw-tools*.test.ts"
+      ],
+      "live_runtime_proof": false
+    }
+  },
+  "skills": [
+    {
+      "name": "app-plan",
+      "skill_id": "1015ea71-71bf-43d8-8190-7a0d1b147e20",
+      "version": "43f29223-92bb-40b7-a3c7-e6f98a5b4323",
+      "version_number": null,
+      "body_chars": 8295,
+      "trigger": "New app/project planning, scope clarification, or a build/test/deploy path; also external/client project setup.",
+      "invocation_wiring": "Manual prompt contract; generic filesystem prompt and slash-command discovery only; no command dispatch.",
+      "executor_owner": "Model/manual planner; user owns product intent and non-obvious scope; downstream app skills or named external agent execute.",
+      "input_evidence_contract": "Change, audience, code home, new-versus-patch, acceptance criteria, proof artifact, repo/update path, and control-plane/preview path.",
+      "approval_final_executor": "User approves scope/plan; planner cannot silently choose architecture, ownership, hosting, or operator workflow.",
+      "destination_readback": "Plan/spec/project control-plane record is required by the contract, but no product-owned plan store or readback module is present.",
+      "tests_gaps": "Generic skill-loader tests exist; no app-plan executor test, current-body installation proof, control-plane record, or plan receipt.",
+      "disposition": "not_product_runtime",
+      "evidence": [
+        "attached_assets/skills/app-plan/SKILL.md",
+        "src/agents/skills/workspace.ts:445-527,650-691,829-935",
+        "src/agents/skills*.test.ts"
+      ]
+    },
+    {
+      "name": "google-auth",
+      "skill_id": "27656d75-592b-45a7-9da5-7360a93f2fae",
+      "version": "d0dda1c9-8f0e-4ce8-a54d-5f8ed80629c7",
+      "version_number": null,
+      "body_chars": 2890,
+      "trigger": "Google Calendar/Gmail token missing, revoked, stale, or failing refresh; stale feed caused by auth.",
+      "invocation_wiring": "Manual skill route; installer deploys Google poller snapshots and user systemd services; no remote-body-to-service registration.",
+      "executor_owner": "Human completes Google consent; calendar/Gmail pollers refresh and write feeds; systemd owns restart.",
+      "input_evidence_contract": "Poller references/logs, credentials and token files, and the exact OAuth callback; fail closed if service/feed is not refreshed.",
+      "approval_final_executor": "Human OAuth consent; poller after service restart is final executor, not token creation alone.",
+      "destination_readback": "Calendar/Gmail tokens, generated calendar/mail feeds, service status, and logs.",
+      "tests_gaps": "No dedicated Google-auth test. Contract says phone-first and references an auth helper not found in checkout; poller source documents local-server/SSH-tunnel flow. Service/feed was not live-checked.",
+      "disposition": "contradiction",
+      "evidence": [
+        "skills/google-auth/SKILL.md:17-61",
+        "attached_assets/install-forked-openclaw.sh:1900-1992",
+        "attached_assets/integrations/google/poll-calendar-google.py:1-18,100-180",
+        "attached_assets/integrations/google/gmail_poll.py:1-52,116-148"
+      ]
+    },
+    {
+      "name": "app-init",
+      "skill_id": "34c233cf-0117-46da-b622-0034a7315341",
+      "version": "fb7362ae-c7d0-4ab2-b987-2c69e1d48aa2",
+      "version_number": null,
+      "body_chars": 5818,
+      "trigger": "Initialise/init a project, set up its repo, or say ready to start building; approved spec is prerequisite.",
+      "invocation_wiring": "Manual procedural contract; generic skill loader only; no repo or hosting adapter.",
+      "executor_owner": "Executing agent using approved repo/template/hosting route; user retains scope, template, ownership, and hosting approval.",
+      "input_evidence_contract": "Project/spec, GitHub owner, template, hosting and repository tokens, and raw repo/helper state; missing prerequisites stop.",
+      "approval_final_executor": "Prior spec approval plus repository/hosting success; agent stops on create, clone, or link failure.",
+      "destination_readback": "GitHub repo, local clone, env example, hosted-preview link, durable project note/spec/progress, initial commit/push evidence.",
+      "tests_gaps": "No app-init integration test or provider receipt; credentials and external provider state were not inspected.",
+      "disposition": "not_product_runtime",
+      "evidence": [
+        "attached_assets/skills/app-init/SKILL.md",
+        "scripts/setup-dev-workflow.sh:46-70",
+        "src/agents/skills/workspace.ts:445-527"
+      ]
+    },
+    {
+      "name": "codex-reauth",
+      "skill_id": "3d1fc1ae-55f6-4647-97e3-e7b872393f79",
+      "version": "5549ef1c-bef5-49cc-a9c8-2f8f46acaeab",
+      "version_number": null,
+      "body_chars": 4438,
+      "trigger": "Codex auth failure/expiry or an explicit /codex_reauth management-bot request.",
+      "invocation_wiring": "External Telegram mgmt-bot registers /codex-reauth and /codex_reauth; installer links the helper and service; not a native OpenClaw tool.",
+      "executor_owner": "Management bot starts Codex device auth, runs token-copy helper, and stops/starts gateway around the copy.",
+      "input_evidence_contract": "Device URL/code, Codex auth JSON, OpenClaw agent auth profiles, process/service status; helper supports both profile JSON shapes.",
+      "approval_final_executor": "Human completes device sign-in; bot verifies token equality, expiry, and active gateway.",
+      "destination_readback": "OpenClaw agent auth-profile files, Telegram result, gateway active state, and helper stdout.",
+      "tests_gaps": "No dedicated helper or mgmt-bot test; static source is strong but deployed bot, CLI, token, service, and user receipt are unverified.",
+      "disposition": "partially_aligned_unverified",
+      "evidence": [
+        "attached_assets/integrations/mgmt-bot/mgmt-bot.py:2165-2445,3278-3294",
+        "attached_assets/integrations/codex-reauth/reauth-copy-tokens.py:1-147",
+        "attached_assets/install-forked-openclaw.sh:1493-1589"
+      ]
+    },
+    {
+      "name": "transcript-resource",
+      "skill_id": "5e6d7973-ebb4-41db-8459-f1aad77c9032",
+      "version": "89d43799-5f3c-4e30-bd78-900f22a90d7a",
+      "version_number": null,
+      "body_chars": 16594,
+      "trigger": "Pasted transcript/notes, meeting/workshop/interview transcript, YouTube URL, or explicit save/store request.",
+      "invocation_wiring": "Manual contract prefers native YouTube capability then resource filing; native extraction is wired but retention and downstream updates are not one native module.",
+      "executor_owner": "Model/manual classifier and file writer; optional external CRM/SharePoint queue/processor.",
+      "input_evidence_contract": "Full raw text/URL; filename is only a clue; content and calendar corroboration establish date/entity/home; route overrides and ambiguity questions are mandatory.",
+      "approval_final_executor": "User clarifies material ambiguity; final completion requires full artifact retention and CRM plus SharePoint current-truth updates when applicable.",
+      "destination_readback": "Dated transcript Markdown, optional complete SharePoint queue item, CRM/current-truth paths, and proof log/state.",
+      "tests_gaps": "No dedicated filing test. Classification, raw preservation, queue-ID readback, CRM/SharePoint closure, and calendar corroboration are unproven. Older channel-poller reference conflicts with native-route ownership.",
+      "disposition": "partially_aligned_unverified",
+      "evidence": [
+        "SKILL:transcript-resource@89d43799-5f3c-4e30-bd78-900f22a90d7a",
+        "src/agents/openclaw-tools.ts:32-36,215",
+        "src/agents/tools/youtube-transcript-tool.ts:332-500",
+        "knowledge/integrations/youtube.md:6-44"
+      ]
+    },
+    {
+      "name": "mgmt-bot",
+      "skill_id": "6224a37c-6e69-4c05-acff-9730a165f7c4",
+      "version": "1d41f6e0-be0e-4c58-b6c9-3c7686f9033e",
+      "version_number": null,
+      "body_chars": 1821,
+      "trigger": "Explicit controlled dev command or management-bot request; distinguish Pi Telegram bot from local .dev-cmd workflow.",
+      "invocation_wiring": "Installer-wired/generated route: installer links the separate Telegram bot and generates a user systemd service; enable/restart is conditional on environment variables, and the .dev-cmd queue scanner runs every main-loop cycle. Live activation remains unverified.",
+      "executor_owner": "L1/model writes queue JSON; Python management bot validates and executes an allowlisted git/npm operation.",
+      "input_evidence_contract": "Queue file project/operation/args/message/timestamp; project path constrained to workspace/projects; operation allowlist.",
+      "approval_final_executor": "Skill requires Tom confirmation before queueing. The consumer has no visible approval field and executes a queued file it sees; this demonstrates executor behavior, not that the producer bypasses its approval contract. Producer confirmation and an end-to-end approval receipt are unproven; pause/resume is separate.",
+      "destination_readback": "Queue file consumed/deleted, Telegram result, and git/npm changes in project directory.",
+      "tests_gaps": "No mgmt-bot queue/approval or credential-argument test. The confirmed source credential-exposure path, active service, token, chat authorization, producer approval, queue receipt, and end-to-end approval behavior were not live-tested.",
+      "disposition": "unverified",
+      "evidence": [
+        "attached_assets/skills/mgmt-bot/SKILL.md",
+        "attached_assets/integrations/mgmt-bot/mgmt-bot.py:2929-3218,3368-3380",
+        "attached_assets/install-forked-openclaw.sh:1493-1589"
+      ]
+    },
+    {
+      "name": "app-deploy",
+      "skill_id": "6fc6533b-bdf3-44db-8f73-ac54762a0549",
+      "version": "48ded22f-8e1b-469a-85e9-d676413bb03e",
+      "version_number": null,
+      "body_chars": 1921,
+      "trigger": "Tested, preview-ready app with explicit user approval for deployment, restart, or merge.",
+      "invocation_wiring": "Manual contract through generic skill route; no deploy-provider adapter or command dispatch.",
+      "executor_owner": "Executing agent follows project deployment route; user explicitly approves real deploy/restart/merge.",
+      "input_evidence_contract": "Build/test pass, work branch, proof target, canonical repo/remote, provider status, and resulting deployment evidence.",
+      "approval_final_executor": "Explicit user sign-off; preview and production remain separate.",
+      "destination_readback": "Approved destination/provider, commit/branch, preview URL/status, and internal restart state.",
+      "tests_gaps": "No integration test or provider receipt; deployment intentionally not performed.",
+      "disposition": "not_product_runtime",
+      "evidence": [
+        "attached_assets/skills/app-deploy/SKILL.md",
+        "src/agents/skills/workspace.ts:829-935"
+      ]
+    },
+    {
+      "name": "skill-creator",
+      "skill_id": "73d82b7a-3ebd-455a-a7d4-953e2bcd02b4",
+      "version": "ca168418-ace9-4cd3-90fb-e29f33f70753",
+      "version_number": null,
+      "body_chars": 5313,
+      "trigger": "Create, update, restructure, or review a reusable skill; design an inbound operational skill.",
+      "invocation_wiring": "Generic prompt/slash discovery; no creator executor.",
+      "executor_owner": "User owns purpose/scope; agent authors and validates; portable publication uses governed SkilzVolt proposal.",
+      "input_evidence_contract": "Trigger, constraints, dependencies/resources, frontmatter, owning system, proof path, ambiguity gate, end-of-use review, discoverability, and no credentials.",
+      "approval_final_executor": "Portable skill must be SkilzVolt approved/current; local-only exception needs explicit platform dependency and verified runtime path.",
+      "destination_readback": "Canonical skill body/resources and SYSTEM_MAP route; current checkout lacks root SYSTEM_MAP.md.",
+      "tests_gaps": "No dedicated creator test. Live skill-creator's SharePoint-manifest gate conflicts with live skill-update's rejection of retired SharePoint authority; no proposal/readback was made.",
+      "disposition": "contradiction",
+      "evidence": [
+        "skills/skill-creator/SKILL.md:400-456",
+        "extensions/skilzvolt/index.ts:10-15,66-76",
+        "extensions/skilzvolt/src/tool.ts:55-93"
+      ]
+    },
+    {
+      "name": "app-test",
+      "skill_id": "86fd61b3-532e-4858-8dad-31a050208da2",
+      "version": "e677f15a-81e3-463f-b9d5-52cbd8e8e33c",
+      "version_number": null,
+      "body_chars": 3559,
+      "trigger": "Verify an implemented app before preview/deployment against acceptance criteria.",
+      "invocation_wiring": "Manual procedural contract; generic prompt/slash only; no test orchestrator.",
+      "executor_owner": "Project test runner/agent; user receives pass/fail and live-runtime boundary.",
+      "input_evidence_contract": "Acceptance criteria, proof target, current test output, integration/logging evidence, provider/preview/control-plane status.",
+      "approval_final_executor": "No mostly-working approval; sign-off requires identified run evidence and appropriate integration coverage.",
+      "destination_readback": "Test results/logs, preview/provider status, control-plane URL/action proof; no central receipt module.",
+      "tests_gaps": "No app-test executor or project receipt; this audit ran no app/workflow tests.",
+      "disposition": "not_product_runtime",
+      "evidence": [
+        "attached_assets/skills/app-test/SKILL.md",
+        "AGENTS.md:55-101",
+        "src/agents/skills*.test.ts"
+      ]
+    },
+    {
+      "name": "app-resume",
+      "skill_id": "a5de0b35-f06b-4cfe-9333-97e6b6854745",
+      "version": "7a228bfb-cc23-4185-b4b5-0919775c027e",
+      "version_number": null,
+      "body_chars": 3407,
+      "trigger": "Resume, pick up, continue, catch up, or ask where an existing project stands.",
+      "invocation_wiring": "Manual prompt contract; generic skill route; no project-specific resume module.",
+      "executor_owner": "Agent reads and summarizes; user decides whether to continue after orientation.",
+      "input_evidence_contract": "Spec, PROGRESS.md, recent git history, working tree, open decisions, tests/limitations, and next step; stop if project/spec missing.",
+      "approval_final_executor": "No code action before summary; user instruction required after orientation.",
+      "destination_readback": "Chat summary from read-only project sources; no durable resume receipt.",
+      "tests_gaps": "No test proves canonical project discovery or sequencing; no project was resumed here.",
+      "disposition": "not_product_runtime",
+      "evidence": [
+        "attached_assets/skills/app-resume/SKILL.md",
+        "src/agents/skills/workspace.ts:650-691"
+      ]
+    },
+    {
+      "name": "skill-update",
+      "skill_id": "a811ec8b-e4d2-465f-9d9b-0891816cad80",
+      "version": "d0917130-51c3-4930-b54b-20aefc8ffc2a",
+      "version_number": null,
+      "body_chars": 3604,
+      "trigger": "Targeted governed update to portable shared or explicitly OpenClaw-local-only skill.",
+      "invocation_wiring": "SkilzVolt governed proposal/readback is prescribed; adapter exposes proposal tools, but no proposal was submitted.",
+      "executor_owner": "Agent edits/validates; SkilzVolt reviewers approve portable changes; local-only changes require platform rationale.",
+      "input_evidence_contract": "Current SkilzVolt body/version, classification, dependencies/resources, frontmatter, paths, gates, no credentials, and changed-file hashes.",
+      "approval_final_executor": "Portable completion is approved/current with readback; local completion is exact runtime path verified.",
+      "destination_readback": "Current SkilzVolt version or explicit local-only canonical directory; proposal status/readback is receipt.",
+      "tests_gaps": "No proposal/approval/readback exists; adapter source is present but live capability and deployment were not tested.",
+      "disposition": "aligned_contract_unverified_execution",
+      "evidence": [
+        "extensions/skilzvolt/index.ts:10-15,33-76",
+        "extensions/skilzvolt/src/tool.ts:55-93"
+      ]
+    },
+    {
+      "name": "app-build",
+      "skill_id": "b4dcae64-f7d7-47d3-baa4-8466e1d718ac",
+      "version": "0cc51172-bd48-41a6-83ac-6163d7a5f45f",
+      "version_number": null,
+      "body_chars": 8857,
+      "trigger": "Build after planning/initialization; implement one coherent, testable slice.",
+      "invocation_wiring": "Manual contract through generic prompt/slash; no build orchestrator or project registry adapter.",
+      "executor_owner": "Executing agent/operator; user owns intent/trade-offs; external project also needs control-plane path.",
+      "input_evidence_contract": "Approved plan/acceptance/proof target, repo home, branch, bounded source context, tests/logging, runtime and hosted-preview chain.",
+      "approval_final_executor": "User approval for non-obvious architecture/deployment; completion states git/update/deploy state.",
+      "destination_readback": "Code/repo, tests/logs, commit/push, provider preview URL and control-plane discoverability.",
+      "tests_gaps": "Repository test/build commands exist, but no app-build executor or receipt; no build was run.",
+      "disposition": "not_product_runtime",
+      "evidence": [
+        "attached_assets/skills/app-build/SKILL.md",
+        "AGENTS.md:55-101",
+        "src/agents/skills/workspace.ts:829-935"
+      ]
+    },
+    {
+      "name": "youtube-transcript",
+      "skill_id": "b7fba8f6-2ac9-47d4-adda-32661fb255dd",
+      "version": "ccc2f2f0-d0c4-400d-bdbe-2602a39f3884",
+      "version_number": null,
+      "body_chars": 2930,
+      "trigger": "YouTube URL/ID plus request to summarize, analyze, quote, reference, or get transcript.",
+      "invocation_wiring": "Native product tool youtube_transcript is registered by OpenClaw and the skill body directs direct use.",
+      "executor_owner": "OpenClaw tool fetches captions or Gemini fallback; model consumes and summarizes returned transcript.",
+      "input_evidence_contract": "URL or bare 11-character ID plus optional language/timestamps; tool validates forms, reports source/errors, caps output.",
+      "approval_final_executor": "No approval gate; tool is final extractor and model must disclose AI non-verbatim path.",
+      "destination_readback": "Structured transcript/source/lang/cache/error result; only in-process 24-hour cache, no durable file.",
+      "tests_gaps": "Broad tool registration tests exist but no dedicated YouTube tool test; network, captions, Gemini key, and user delivery were not live-run.",
+      "disposition": "aligned_runtime_proof_partial",
+      "evidence": [
+        "src/agents/openclaw-tools.ts:32-36,215",
+        "src/agents/tools/youtube-transcript-tool.ts:31-50,332-500",
+        "src/agents/test-helpers/fast-tool-stubs.ts:25"
+      ]
+    },
+    {
+      "name": "local-llm",
+      "skill_id": "b8c4c055-8af9-41b3-b814-4534a7e2fd19",
+      "version": "df50a51f-9616-496a-9b2f-b7325c42bf1b",
+      "version_number": null,
+      "body_chars": 9783,
+      "trigger": "Small private low-stakes waitable first-pass work, especially quiet overnight/background work; not interactive/high-stakes/client work.",
+      "invocation_wiring": "Manual routing guidance; names an external Ollama route/model, but no current endpoint health/config/readback is present.",
+      "executor_owner": "Local Ollama for bounded rough pass; cloud model/human reviews final output.",
+      "input_evidence_contract": "One bounded source slice, acceptable latency, internal/private/low stakes, quiet host, context limit, and later review; all checklist conditions must pass.",
+      "approval_final_executor": "Cloud/human is final authority; local output is never source of truth.",
+      "destination_readback": "Draft returned or sent for refinement; no named durable receipt.",
+      "tests_gaps": "No route health/model test and no current LOCAL-LLM reference file; no local inference was run. Other repository knowledge documents a different local route.",
+      "disposition": "unverified",
+      "evidence": [
+        "knowledge/troubleshooting.md:43-80",
+        "src/memory/manager.ts:58-60",
+        "src/agents/skills/workspace.ts:650-691"
+      ]
+    },
+    {
+      "name": "openai-whisper-api",
+      "skill_id": "c84687a0-d4f2-4478-a1c8-fb079ceaf98a",
+      "version": "4ffe3e98-0db7-48f8-836d-0007999152a0",
+      "version_number": null,
+      "body_chars": 980,
+      "trigger": "Audio transcription through the OpenAI Audio Transcriptions API.",
+      "invocation_wiring": "Bundled local skill declares curl and OPENAI_API_KEY and invokes baseDir/scripts/transcribe.sh.",
+      "executor_owner": "Shell script calls OpenAI endpoint; caller reads the emitted output path.",
+      "input_evidence_contract": "Existing audio file, optional model/language/prompt/JSON, and OPENAI_API_KEY; missing file/key fails.",
+      "approval_final_executor": "No separate approval gate; user request/config is sufficient; script/API is final executor.",
+      "destination_readback": "Explicit output or input-adjacent .txt/.json; stdout prints output path.",
+      "tests_gaps": "No script unit or mocked HTTP test; no API call or secret use was run. Add offline argument, key/file, multipart, output, and API failure tests.",
+      "disposition": "aligned_runtime_proof_partial",
+      "evidence": [
+        "skills/openai-whisper-api/SKILL.md:16-57",
+        "skills/openai-whisper-api/scripts/transcribe.sh:1-85"
+      ]
+    },
+    {
+      "name": "app-patch",
+      "skill_id": "dbedbfaa-6dba-47e1-a0ca-813de4fa5358",
+      "version": "bada4652-1434-40c5-a84b-004c37d138f0",
+      "version_number": null,
+      "body_chars": 4291,
+      "trigger": "Patch an existing project/system without reinitializing or rebuilding.",
+      "invocation_wiring": "Manual contract through generic skill route; no patch executor, change tracker, or deploy path.",
+      "executor_owner": "Executing agent implements/tests; user owns architecture/product trade-offs and deploy approval.",
+      "input_evidence_contract": "Current source/repo state, narrow proof target, tests/logging, runtime/user-facing chain, persistence/state/monitoring implications.",
+      "approval_final_executor": "Test before deploy approval; completion states location, commit/push, deploy/restart, and blockers.",
+      "destination_readback": "Repo, tests/logs, deployed/restarted runtime and user-facing surface where requested.",
+      "tests_gaps": "Generic repository tests exist; no patch orchestrator; no code change or test was run.",
+      "disposition": "not_product_runtime",
+      "evidence": [
+        "attached_assets/skills/app-patch/SKILL.md",
+        "AGENTS.md:55-101",
+        "src/agents/skills/workspace.ts:829-935"
+      ]
+    },
+    {
+      "name": "context-budget",
+      "skill_id": "e2cb3776-8bae-4ed2-b0e7-f1796fd53701",
+      "version": "8da7bc65-ec91-4143-8e4b-5984238184a2",
+      "version_number": null,
+      "body_chars": 2254,
+      "trigger": "Multi-step repair, investigation, audit, or source/log-heavy work likely to exceed usable context.",
+      "invocation_wiring": "Manual planning/worker handoff contract; no worker scheduler or context enforcement module.",
+      "executor_owner": "Main agent defines question; bounded/isolated worker gathers evidence; main agent decides.",
+      "input_evidence_contract": "Exact decision/evidence needed, bounded extraction, compact handoff, and live checklist; no bulk unknown-size reads.",
+      "approval_final_executor": "Main agent interprets; completion receipt lists sources, changed files, tests, runtime/user-surface proof, and blockers.",
+      "destination_readback": "Compact evidence receipt in session; no required durable destination.",
+      "tests_gaps": "No dedicated runtime test. This audit used bounded slices and pinned pagination but claims no worker/runtime proof.",
+      "disposition": "not_product_runtime",
+      "evidence": ["src/agents/skills/workspace.ts:445-527,650-691", "src/agents/skills*.test.ts"]
+    },
+    {
+      "name": "bootstrap-governance",
+      "skill_id": "fbf81ce3-aaf6-4c46-9e4b-999b7e40e5b2",
+      "version": "cfe4cc71-f7be-4f08-b6a0-15826a2d359d",
+      "version_number": null,
+      "body_chars": 12705,
+      "trigger": "Audit or slim bootstrap files and classify content into AGENTS, skills, references, memory, or maps.",
+      "invocation_wiring": "Manual contract; generic discovery only. AGENTS.md exists, but root SYSTEM_MAP.md is absent.",
+      "executor_owner": "Agent audits/edits bootstrap files; user owns broad operating policy.",
+      "input_evidence_contract": "Exact backup, measured pressure/budget, file-role classification, preserved triggers/constraints, discoverability route, and post-edit reread.",
+      "approval_final_executor": "Exact pre-edit copy and unresolved meaning loss are hard stops; policy changes need user review.",
+      "destination_readback": "AGENTS/HEARTBEAT/MEMORY/SYSTEM_MAP/reference/skill destination and routing entry.",
+      "tests_gaps": "No dedicated governance test; missing SYSTEM_MAP prevents full discoverability proof; no bootstrap edit was made.",
+      "disposition": "unverified",
+      "evidence": [
+        "AGENTS.md:1-16,55-101",
+        "skills/skill-creator/SKILL.md:400-456",
+        "src/agents/skills/workspace.ts:650-691"
+      ]
+    }
+  ],
+  "prioritized_repairs": [
+    {
+      "priority": "P0",
+      "item": "Authority and activation receipt",
+      "action": "Document active agent/config scope for SkilzVolt, prove metadata injection plus current-body read through owner-only adapter, and prevent installer snapshots being mistaken for current remote versions."
+    },
+    {
+      "priority": "P0",
+      "item": "Google auth",
+      "action": "Align portable paths and phone-first callback handling with the actual poller, remove absent-helper reference, and add offline token/service/feed-readback tests."
+    },
+    {
+      "priority": "P0",
+      "item": "Management approval",
+      "action": "Trace the .dev-cmd.json producer write path and capture the confirmation/approval receipt end to end. Add a queue gate only if that producer invariant is not proven; do not infer bypass from the consumer's lack of an approval field."
+    },
+    {
+      "priority": "P1",
+      "item": "Transcript closure",
+      "action": "Separate native extraction from durable filing and test raw preservation, calendar corroboration, queue readback, CRM update, and SharePoint current-truth completion."
+    },
+    {
+      "priority": "P1",
+      "item": "Governance",
+      "action": "Resolve skill-creator's SharePoint-manifest requirement against skill-update's current rejection of retired SharePoint authority."
+    },
+    {
+      "priority": "P1",
+      "item": "Executable coverage",
+      "action": "Add safe offline tests for YouTube URL/fallback/cache/truncation, Whisper failures, Codex profile shapes, and mgmt queue allowlisting."
+    },
+    {
+      "priority": "P2",
+      "item": "Manual workflow receipts",
+      "action": "Define durable plan/build/test/deploy and bootstrap discoverability receipts if these skills are intended as product workflows rather than prompt-only guidance."
+    }
+  ]
+}

@@ -1,0 +1,700 @@
+{
+  "schema_version": 1,
+  "report": "skills-operations-audit",
+  "audit_mode": "read_only_whole_product_reconciliation",
+  "write_boundary": [
+    "docs/audits/openclaw-product/skills-operations-audit.md",
+    "docs/audits/openclaw-product/skills-operations-audit.json"
+  ],
+  "production_changes_made": false,
+  "tests_run_by_audit": false,
+  "live_fetch": {
+    "method": "mcpSkilzVolt_skillsGet",
+    "scope": "11 assigned CURRENT approved skills",
+    "all_assigned_version_ids_matched": true,
+    "all_responses_isError_false": true,
+    "security_warning_policy": "Warnings were checked before body use; warning-bearing bodies were treated as untrusted data, not instructions.",
+    "warning_bearing_response_count": 6,
+    "body_hashes": "not_recorded_for_reconstructed_temporary_files_without_offset_verification"
+  },
+  "evidence_boundary": {
+    "source_of_truth_for_skill_contracts": "Pinned live SkilzVolt responses only",
+    "local_skill_copies": "Not used as live skill truth",
+    "ignored_repair_copies": ".local/intake-repair is context/evidence only",
+    "source_capability_is_activation": false,
+    "snapshot_or_queue_is_completion_proof": false,
+    "live_state_available": false,
+    "unavailable_live_state": [
+      "installed plugin and agent activation state",
+      "which assigned skills are invoked",
+      "native OpenClaw cron catalogue and run history",
+      "complete user crontab and systemd user state",
+      "task gateway/worker and WCP runtime identity",
+      "mirror-router activation and central watcher ExecStartPost",
+      "credentials and account/token configuration (without exposing secrets)",
+      "destination readbacks and delivery receipts",
+      "final email executor path and active approval boundary"
+    ]
+  },
+  "adapter_and_loader_evidence": [
+    {
+      "claim": "SkilzVolt is owner-only, fixed-endpoint, degraded-state reporting, and no stale local organisation-skill fallback.",
+      "evidence": [
+        "extensions/skilzvolt/index.ts:10-15",
+        "extensions/skilzvolt/index.ts:17-76",
+        "extensions/skilzvolt/openclaw.plugin.json:1-33"
+      ],
+      "proven": "source capability"
+    },
+    {
+      "claim": "The adapter allowlists published tools and requires the live tools workspaces_list, skills_search, and skills_get before calls.",
+      "evidence": [
+        "extensions/skilzvolt/src/client.ts:3-38",
+        "extensions/skilzvolt/src/client.ts:72-74",
+        "extensions/skilzvolt/src/client.ts:420-484"
+      ],
+      "proven": "source capability and isolated tests"
+    },
+    {
+      "claim": "The local workspace loader scans local roots with containment, limits, and explicit precedence; this is not live SkilzVolt activation.",
+      "evidence": [
+        "src/agents/skills/workspace.ts:292-527",
+        "src/agents/skills/workspace.ts:614-722",
+        "src/cron/isolated-agent/skills-snapshot.ts:8-36"
+      ],
+      "proven": "source capability"
+    }
+  ],
+  "skills": [
+    {
+      "name": "inbound-intake",
+      "assigned_version_id": "e400179d-62c4-4c1f-87a4-703d09cd4d2a",
+      "live_contract": [
+        "Capture provider/account namespace, stable provider item or conversation identity, timestamps, all source surfaces, evidence references, and explicit coverage state before interpretation.",
+        "Separate importance/category/fact-inference-proposal/entity state and preserve uncertain or incomplete items.",
+        "Declare independent routes and receipts; verified requires destination readback and durable evidence.",
+        "Do not treat mirrors, queues, sidecars, alerts, drafts, polls, or local state as downstream completion.",
+        "Apply human gates to entities, external messages, financial mutation, and unapproved external writes."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "attached_assets/integrations/microsoft/poll.py:283-365,411-444",
+          "pi-services/expense-intake-watcher/watcher.py:1405-1463",
+          "src/agents/tools/task-system-tool.ts:15-45,299-449,465-549",
+          "attached_assets/integrations/microsoft/sharepoint_queue_processor.py:22-46,131-170"
+        ]
+      },
+      "tool_schema": {
+        "status": "aligned_for_subroutes",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:279-286",
+          "src/agents/tools/task-system-tool.ts:216-230"
+        ]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "task-system gateway",
+          "SharePoint expense/finance boundary",
+          "email and WhatsApp watcher state",
+          "alert, CRM, resource, reminder, and email routes as separate capabilities"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "owner-only task-system adapter",
+        "SharePoint workbook protocol and readback requirements",
+        "human approval for consequential external/entity/financial actions"
+      ],
+      "tests": [
+        "pi-services/expense-intake-watcher/test_watcher.py",
+        "pi-services/expense-intake-watcher/test_watcher_state.py",
+        "pi-services/expense-intake-watcher/test_expense_outcomes.py",
+        "pi-services/expense-intake-watcher/test_enrichment_queue.py",
+        "pi-services/expense-intake-watcher/test_enrichment_resolution.py",
+        "pi-services/expense-intake-watcher/test_finance_handoff.py",
+        "src/agents/tools/task-system-tool.test.ts:45-170"
+      ],
+      "gaps": [
+        "No tracked generic canonical_event/route_receipt writer for all declared routes.",
+        "Central mirror-router scripts and units named by live contract/operating guide are missing from tracked main.",
+        "Five-minute expense timer declaration conflicts with operating guide's retired-timer/central-ExecStartPost claim.",
+        "Whole route graph and live invocation/readback are unavailable."
+      ],
+      "determination": "partially_aligned_live_unproven",
+      "repair_priority": "P0"
+    },
+    {
+      "name": "whatsapp-check",
+      "assigned_version_id": "43abbcac-90a5-405d-8806-b7d85f5cc8b3",
+      "live_contract": [
+        "Read ACTIONED.md and WHATSAPP_RECENT.md, not the legacy full log for routine checks.",
+        "Use central mirror-router state/report/event files for new-item gating and durable routing.",
+        "Classify ALERT, FOLLOW_UP, CRM, OUTBOUND_CONTEXT, EXPENSE, DIARY, or IGNORE.",
+        "Preserve coverage-incomplete items; handled items require suppression write-back and consequential items need owning-system proof."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "attached_assets/install-forked-openclaw.sh:1592-1614",
+          "pi-services/expense-intake-watcher/watcher.py:1466-1515",
+          "pi-services/expense-intake-watcher/watcher.py:1878-1916"
+        ]
+      },
+      "tool_schema": {
+        "status": "aligned_for_outbound_target_policy",
+        "evidence": ["src/whatsapp/resolve-outbound-target.test.ts:64-200"]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "WHATSAPP_RECENT.md",
+          "ACTIONED.md",
+          "monitored-items-state.json",
+          "central mirror event/routing state",
+          "task/CRM/SharePoint/expense/diary/reminder owning routes"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "WhatsApp target normalisation and allowlist",
+        "coverage-incomplete/blocked state in watcher",
+        "central router is intended as the routing owner"
+      ],
+      "tests": [
+        "src/whatsapp/resolve-outbound-target.test.ts:64-200",
+        "pi-services/expense-intake-watcher/test_watcher.py"
+      ],
+      "gaps": [
+        "scripts/mirror_router.py and scripts/inbound-monitoring.py are absent from tracked main.",
+        "Central router ExecStartPost service/timer named by operating guidance is absent from tracked main.",
+        "No source-controlled single destination contract joins ACTIONED, operational log, owning system, and closure readback.",
+        "Central routing invocation, source freshness, and live readback are unavailable."
+      ],
+      "determination": "partially_aligned_central_route_unproven",
+      "repair_priority": "P0"
+    },
+    {
+      "name": "task-decompose",
+      "assigned_version_id": "70f1393a-5439-4c37-8fe0-2771718cca50",
+      "live_contract": [
+        "Run only after selected work is explicitly ready for decomposition.",
+        "Preserve objective/source/context/non-goals and decide owner, risk, capability, execution mode, review, proof, and provenance per subtask.",
+        "Load first-hop context and internal communication mirrors before execute_ready.",
+        "Record coverage gaps rather than making L1 rediscover context."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:15-45",
+          "src/agents/tools/task-system-tool.ts:346-400",
+          "src/agents/tools/task-system-tool.ts:465-525"
+        ]
+      },
+      "tool_schema": {
+        "status": "aligned_for_gateway_delegation",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:279-286",
+          "src/agents/tools/task-system-tool.ts:180-210"
+        ]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "task-system gateway decompose/commit routes",
+          "context-broker registry/bindings"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "owner-only task tool",
+        "selection/readiness and capability gates are live-contract requirements, not enforced by this adapter",
+        "context-broker response is delegated to gateway"
+      ],
+      "tests": [
+        "src/agents/tools/task-system-tool.test.ts:45-100",
+        "src/agents/tools/task-system-tool.test.ts:102-170"
+      ],
+      "gaps": [
+        "Adapter does not implement or prove first-hop context loading and internal mirror source ladder.",
+        "No live task gateway/worker or GUI transition invocation is available.",
+        "Tests do not cover selected-only, execute_ready, risk, blocker, or proof transitions."
+      ],
+      "determination": "partially_aligned_worker_and_context_unproven",
+      "repair_priority": "P1"
+    },
+    {
+      "name": "task-capture",
+      "assigned_version_id": "bbd3a98e-4243-40b1-a884-8cf9bd913502",
+      "live_contract": [
+        "Cheaply capture non-code actions to TASKS.md, technical work to BACKLOG.md, or non-breaking improvements to L1-IMPROVEMENTS.md.",
+        "Preserve capture metadata including date, source/context, why, next action, owner, status, and capture state.",
+        "Stop after capture; do not silently decompose or operate."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:15-22,310-344",
+          "src/agents/tools/task-system-tool.ts:281-286"
+        ]
+      },
+      "tool_schema": {
+        "status": "aligned_for_structured_capture",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:50-63",
+          "src/agents/tools/task-system-tool.ts:310-344"
+        ]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "task-system capture/capture_batch/brief_intake gateway routes",
+          "live contract holding layers TASKS.md/BACKLOG.md/L1-IMPROVEMENTS.md"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "capture-only stop boundary",
+        "task gateway bearer authentication and owner-only tool"
+      ],
+      "tests": ["src/agents/tools/task-system-tool.test.ts:45-100"],
+      "gaps": [
+        "No tracked TASKS.md, BACKLOG.md, or L1-IMPROVEMENTS.md at repository scope.",
+        "No source mapping reconciles visible holding layers with structured task records.",
+        "No test proves capture metadata, idempotency, or capture-only stop."
+      ],
+      "determination": "partially_aligned_destination_semantics_unproven",
+      "repair_priority": "P1"
+    },
+    {
+      "name": "discord",
+      "assigned_version_id": "9d710890-68de-4e14-9851-04f45c308d70",
+      "live_contract": [
+        "Use only the message tool with channel discord.",
+        "Respect channels.discord.actions gates and prefer explicit guild/channel/message/user IDs.",
+        "Use message actions for send, read, edit, delete, react, poll, pin, thread, search, and permitted presence."
+      ],
+      "source_capability": {
+        "status": "aligned",
+        "evidence": [
+          "src/agents/tools/message-tool.ts:31-51,442-486",
+          "src/agents/tools/message-tool.ts:669-724",
+          "src/agents/tools/message-tool.ts:769-789"
+        ]
+      },
+      "tool_schema": {
+        "status": "aligned",
+        "evidence": [
+          "src/agents/tools/message-tool.ts:442-486",
+          "src/agents/tools/message-tool.ts:669-724"
+        ]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "Discord channel, DM, forum thread, message, reaction, search, and moderation APIs"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "configured channel action gates",
+        "guild/member/channel permission checks",
+        "group-policy fail-closed fallback when provider configuration is missing",
+        "owner identity lockdown is installer-environment dependent"
+      ],
+      "tests": [
+        "src/discord/send.sends-basic-channel-messages.test.ts:73-90,206-250,324-337,528-615",
+        "src/discord/send.permissions.authz.test.ts:46-155",
+        "src/discord/monitor/provider.group-policy.test.ts:4-37"
+      ],
+      "gaps": [
+        "Live Discord config, action gates, owner identity, destination readback, and skill invocation unavailable.",
+        "Installer DM lockdown depends on DISCORD_OWNER_USER_ID and was not inspected."
+      ],
+      "determination": "source_aligned_live_destination_unproven",
+      "repair_priority": "P2"
+    },
+    {
+      "name": "reminder-delivery",
+      "assigned_version_id": "2cb8f6e8-3ea8-4990-8e25-31289dc9d395",
+      "live_contract": [
+        "Register stable reminder, primary, and verifier IDs.",
+        "Create isolated agentTurn with Telegram announce delivery.",
+        "Create a verifier five minutes later and retry once only when status=ok and deliveryStatus=delivered are not both proven.",
+        "Verify both jobs with cron list and distinguish delivery from read acknowledgement."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "src/cron/types.ts:15-43,59-67,109-142",
+          "src/cron/delivery.ts:13-101",
+          "src/cron/isolated-agent/run.ts:145-190"
+        ]
+      },
+      "tool_schema": {
+        "status": "aligned_for_generic_cron",
+        "evidence": ["src/agents/tools/cron-tool.test.ts:38-70,320-357,453-504"]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "Telegram announce destination",
+          "cron job state and delivery status",
+          "reminder registry and verifier"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "deliveryStatus=delivered is required for clean primary outcome",
+        "one conditional retry",
+        "critical reminder acknowledgement must not be inferred from delivery"
+      ],
+      "tests": ["src/agents/tools/cron-tool.test.ts:38-70,320-357,453-504"],
+      "gaps": [
+        "reference/REMINDER-DELIVERY-SYSTEM.md is absent from tracked main.",
+        "reference/reminder-delivery-registry.json is absent from tracked main.",
+        "No reminder-specific verifier or daily failure audit is present in tracked source.",
+        "Live cron list, IDs, Telegram receipt, and read acknowledgement unavailable."
+      ],
+      "determination": "partially_aligned_verifier_and_live_delivery_unproven",
+      "repair_priority": "P0"
+    },
+    {
+      "name": "task-operate",
+      "assigned_version_id": "485c9bbd-e71f-4346-8f29-d0a4437dd7f6",
+      "live_contract": [
+        "Pick up only owner=L1, todo, execute_ready, unblocked, permitted-risk subtasks.",
+        "Load context, execute safely, use governing skills, handle gates/blockers, verify success_definition, and complete/patch with proof.",
+        "A GUI state change is not an invocation trigger without a real event, cron, hook, or explicit user message."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:15-45",
+          "src/agents/tools/task-system-tool.ts:346-449",
+          "src/agents/tools/task-system-tool.ts:279-286"
+        ]
+      },
+      "tool_schema": {
+        "status": "aligned_for_lifecycle_delegation",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:50-63",
+          "src/agents/tools/task-system-tool.ts:453-549"
+        ]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "task gateway execute/subtask lifecycle",
+          "context broker",
+          "operator state and signal endpoints"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "owner-only task tool",
+        "email authorization fields controlled by task system",
+        "live skill risk/readiness/gate rules"
+      ],
+      "tests": ["src/agents/tools/task-system-tool.test.ts:45-170"],
+      "gaps": [
+        "No tracked worker proves discovery, readiness filtering, bounded pickup, or continuation.",
+        "No live task gateway/worker/state store/event wiring was inspected.",
+        "Tests do not cover L1 pickup, success_definition, blocked, or gated paths."
+      ],
+      "determination": "partially_aligned_autonomous_operation_unproven",
+      "repair_priority": "P0"
+    },
+    {
+      "name": "email-send",
+      "assigned_version_id": "45a073fb-fffa-4079-858f-ff0560e1cab8",
+      "live_contract": [
+        "Confirm recipient, subject, body, sender account, and governed signature.",
+        "Obtain a valid six-digit TOTP code or already-open approved window.",
+        "Use exact send.py path/command and record the email log.",
+        "Completion requires actual send, destination proof, and consequential downstream update; a draft or prepared command is not completion."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "attached_assets/install-forked-openclaw.sh:932-960",
+          "attached_assets/install-forked-openclaw.sh:500-520,2207-2216",
+          "src/infra/outbound/trust-gate.ts:40-63,227-280",
+          "src/auto-reply/reply/commands-totp.ts:220-295",
+          "attached_assets/integrations/microsoft/send.py:431-523,580-655"
+        ]
+      },
+      "tool_schema": {
+        "status": "no_dedicated_email_send_tool; exec_and_task_dispatch_paths_exist",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:216-226,539-549",
+          "attached_assets/integrations/microsoft/send.py:107-111"
+        ]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "Microsoft Graph /me/sendMail",
+          "Microsoft Graph createReply/createReplyAll then send",
+          "sent-item and email log expected by live contract"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "repository trust gate can enforce exec.run TOTP",
+        "send.py task dispatch uses HMAC signed exact-email single-use permit",
+        "installer removes message.send from requireApproval for routine deliveries",
+        "active live final-executor gate is unknown"
+      ],
+      "tests": [
+        "attached_assets/integrations/microsoft/test_send_task_dispatch.py:22-99",
+        "attached_assets/integrations/microsoft/test_send_task_dispatch.py:100-183"
+      ],
+      "gaps": [
+        "send.py does not itself enforce the live six-digit TOTP contract.",
+        "Signed task-dispatch permit is a separate mechanism and is not proof of live TOTP compliance.",
+        "No live config, executor invocation, account/token, sent readback, or email log was inspected.",
+        "No proof of downstream CRM/SharePoint/task route update."
+      ],
+      "determination": "partially_aligned_final_gate_and_post_send_proof_unproven",
+      "repair_priority": "P0"
+    },
+    {
+      "name": "resource-intake",
+      "assigned_version_id": "090b4abc-09f6-49c2-b9bb-1e77e124d8fa",
+      "live_contract": [
+        "Retain complete source and useful metadata in the correct canonical home.",
+        "Preserve exact wording and verify retained files directly rather than answering from memory.",
+        "Update the owning system when retained material changes consequential truth.",
+        "Leave a reviewable artifact/destination/operational proof path and fail closed on ambiguity."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "attached_assets/integrations/microsoft/sharepoint_cache_poller.py:1-42,63-71",
+          "attached_assets/integrations/microsoft/sharepoint_queue_processor.py:1-20,57-63",
+          "attached_assets/integrations/microsoft/sharepoint_queue_processor.py:22-46,131-170",
+          "attached_assets/install-forked-openclaw.sh:1265-1315"
+        ]
+      },
+      "tool_schema": {
+        "status": "no_generic_resource_intake_tool_proven",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:15-45",
+          "attached_assets/integrations/microsoft/sharepoint_queue_processor.py:87-115"
+        ]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "SharePoint canonical files/workbooks",
+          "SharePoint cache and manifest",
+          "queue result files",
+          "owning task/CRM/expense/reference systems"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "source/content/hash/etag/semantic validation for bounded workbook writes",
+        "cache skipped-file visibility",
+        "cache and queue are not authoritative completion proof"
+      ],
+      "tests": [
+        "attached_assets/integrations/microsoft/test_sharepoint_cache_poller.py",
+        "attached_assets/integrations/microsoft/test_sharepoint_queue_safety.py",
+        "attached_assets/integrations/microsoft/test_sharepoint_housekeeping.py"
+      ],
+      "gaps": [
+        "No generic canonical resource-intake writer or owner is tracked.",
+        "reference/OPERATIONAL_ACTIVITY_LOG.md is absent from tracked main.",
+        "No live SharePoint credentials/readback/downstream owner was inspected.",
+        "Cache presence does not prove canonical destination retention."
+      ],
+      "determination": "partially_aligned_canonical_home_and_downstream_proof_unproven",
+      "repair_priority": "P1"
+    },
+    {
+      "name": "email-check",
+      "assigned_version_id": "f28b46f8-e473-4b88-9b20-3e4cdda65ba5",
+      "live_contract": [
+        "Check all inbox, external, and sent surfaces and use last-seen/closure state.",
+        "Distinguish newly seen, already actioned, needs attention, and content unverified.",
+        "Route each consequential message and report explicit CRM/SharePoint route state.",
+        "Use trusted body paths and fail closed for hidden, stale, inaccessible, or insufficient evidence."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "attached_assets/integrations/microsoft/poll.py:1-20,48-93",
+          "attached_assets/integrations/microsoft/poll.py:283-365,411-444",
+          "attached_assets/integrations/microsoft/poll.py:65-68,472-542",
+          "pi-services/expense-intake-watcher/watcher.py:1391-1463",
+          "attached_assets/install-forked-openclaw.sh:1727-1836,1848-1912"
+        ]
+      },
+      "tool_schema": {
+        "status": "no_dedicated_email_check_tool_proven",
+        "evidence": [
+          "attached_assets/integrations/microsoft/poll.py:35-59",
+          "src/agents/tools/task-system-tool.ts:38-45"
+        ]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "MICROSOFT_INBOX.md and MICROSOFT_EXTERNAL.md",
+          "ASSISTANT_INBOX.md and ASSISTANT_EXTERNAL.md",
+          "GMAIL_INBOX.md and GMAIL_EXTERNAL.md",
+          "last-seen, monitored-item, and mirror-router state",
+          "CRM/SharePoint/expense/task/alert routes"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "immutable trusted-contact registry",
+        "unknown sender body quarantine",
+        "trusted reader/body and downstream route gates",
+        "coverage-incomplete and blocked states"
+      ],
+      "tests": [
+        "pi-services/expense-intake-watcher/test_watcher.py",
+        "pi-services/expense-intake-watcher/test_watcher_state.py"
+      ],
+      "gaps": [
+        "Complete six-surface live producer/consumer chain and central mirror state unavailable.",
+        "poll.py retains a bounded trusted preview, not proof of a final full-message reader.",
+        "No coupled route-state writer proves explicit CRM/SharePoint outcome for every surfaced item.",
+        "No tracked poller suite covers all surfaces, continuity, and route-state proof."
+      ],
+      "determination": "partially_aligned_complete_surface_and_downstream_route_unproven",
+      "repair_priority": "P0"
+    },
+    {
+      "name": "email-reply-draft",
+      "assigned_version_id": "22a5715c-1345-4b2b-a45f-e42dbfeea6d5",
+      "live_contract": [
+        "Use task-system/context-broker for context-heavy drafting without ordinary TOTP.",
+        "Keep exact-thread email_reply_draft and standalone email_new_draft modes distinct.",
+        "Bind entity/recipient/thread context, preserve createReplyAll/quoted-history continuity, add governed signature, and deduplicate task-owned drafts.",
+        "Create an unsent Outlook Drafts item and verify draft state plus conversation ID; never send automatically."
+      ],
+      "source_capability": {
+        "status": "partially_aligned",
+        "evidence": [
+          "src/agents/tools/task-system-tool.ts:527-549",
+          "src/agents/tools/task-system-tool.ts:216-226",
+          "src/agents/tools/task-system-tool.test.ts:45-100",
+          "attached_assets/integrations/microsoft/send.py:476-523",
+          "attached_assets/integrations/microsoft/poll.py:340-365"
+        ]
+      },
+      "tool_schema": {
+        "status": "partial_single_reply_route_only",
+        "evidence": ["src/agents/tools/task-system-tool.ts:43-44,527-549"]
+      },
+      "destinations": {
+        "declared_or_source_capable": [
+          "task-system email draft gateway route",
+          "Outlook Drafts folder",
+          "task context-broker registered mirrors/bindings"
+        ],
+        "independent_readback_proven": false,
+        "live_destination_state_available": false
+      },
+      "gates": [
+        "task-system-owned dispatch accepts only draft_id",
+        "ordinary draft creation should not require TOTP",
+        "exact message/entity/recipient binding and conversation readback",
+        "send.py is a send executor and cannot be treated as draft-only"
+      ],
+      "tests": [
+        "src/agents/tools/task-system-tool.test.ts:45-100",
+        "attached_assets/integrations/microsoft/test_send_task_dispatch.py"
+      ],
+      "gaps": [
+        "Adapter exposes one email_draft_create action routed to /task-system/email-draft/reply; it does not enforce both live modes.",
+        "The tracked sender creates/patches then sends a reply; no evidence establishes that it is the live draft writer, so the draft-only/send-executor relationship remains unverified.",
+        "No tracked task broker registry/binding source, Drafts readback, Graph grant, signature enforcement, or idempotency worker is proven.",
+        "reference/EMAIL-REPLY-DRAFT-SYSTEM.md is absent from tracked main."
+      ],
+      "determination": "partially_aligned_final_draft_worker_absent_or_unproven",
+      "repair_priority": "P0"
+    }
+  ],
+  "cross_cutting_findings": [
+    {
+      "id": "watcher_timer_vs_central_router",
+      "classification": "contradiction",
+      "severity": "P0",
+      "source_a": "pi-services/systemd-user/expense-intake-watcher.timer:1-8",
+      "source_b": "pi-services/expense-intake-watcher/OPERATING.md:9-17,54-64",
+      "description": "Tracked timer declares every-five-minute watcher execution while operating guidance says it is disabled and central mirror-router ExecStartPost is the active trigger; central router source/units are absent from tracked main.",
+      "required_proof": "Live timer enabled/active state, central router unit fragment and ExecStartPost, sole-owner decision, idempotency, and one controlled interval."
+    },
+    {
+      "id": "email_totp_vs_task_permit",
+      "classification": "unverified",
+      "severity": "P0",
+      "source_a": "SKILL:email-send@45a073fb-fffa-4079-858f-ff0560e1cab8",
+      "source_b": "attached_assets/integrations/microsoft/send.py:344-428,580-655",
+      "source_c": "attached_assets/install-forked-openclaw.sh:465-468,501-519",
+      "description": "Direct exec.run plus TOTP and task-system signed exact-draft permits are intentionally separate authorization routes with different callers and ownership. The final sender enforces a signed single-use task-dispatch permit when that option is used, while six-digit TOTP is enforced by the caller's exec trust gate rather than send.py; the active route and final-executor gate are unknown. The installer removes message.send from requireApproval.",
+      "required_proof": "Live final executor call path, active config gate, account, exact draft/permit ownership, sent-item readback, and owner decision on contract alignment."
+    },
+    {
+      "id": "live_skill_vs_local_loader",
+      "classification": "evidence_boundary",
+      "severity": "P1",
+      "source_a": "extensions/skilzvolt/index.ts:66-76",
+      "source_b": "src/agents/skills/workspace.ts:292-527",
+      "description": "SkilzVolt hook supplies live catalogue metadata and directs full reads through the tool; local loader only scans local files. A local or ignored repair copy cannot prove live skill activation. This is an evidence boundary, not a live-skill/local-loader contradiction.",
+      "required_proof": "Live prompt/tool trace showing selected current skill read and invoked runtime consumer."
+    },
+    {
+      "id": "draft_only_vs_send_executor",
+      "classification": "unverified",
+      "severity": "P0",
+      "source_a": "SKILL:email-reply-draft@22a5715c-1345-4b2b-a45f-e42dbfeea6d5",
+      "source_b": "attached_assets/integrations/microsoft/send.py:476-523",
+      "description": "Live reply-draft contract requires unsent Outlook Drafts with no automatic send. The tracked send executor creates/patches a reply and then calls Graph send, but no evidence establishes that send.py is used as the live draft writer; the relationship therefore remains unverified.",
+      "required_proof": "Identify live draft writer, prove no-send execution and Drafts/conversation readback; do not infer it from the bridge adapter."
+    }
+  ],
+  "repair_priorities": {
+    "P0": [
+      "Inventory live activation, scheduler, gateway/worker, destination receipts, and credentials presence.",
+      "Reconcile watcher timer and central mirror-router ownership.",
+      "Prove inbound/email/WhatsApp IDs through independent route readbacks.",
+      "Prove email final executor TOTP/permit boundary and sent readback.",
+      "Identify task worker/email-draft writer and prove no-send Drafts continuity/idempotency.",
+      "Identify reminder registry/verifier and prove one conditional retry."
+    ],
+    "P1": [
+      "Reconcile TASKS.md/BACKLOG.md/L1-IMPROVEMENTS.md with structured capture and stop boundary.",
+      "Prove task context loading/readiness and resource canonical-home/source retention.",
+      "Prove all email surfaces and explicit CRM/SharePoint route outcomes."
+    ],
+    "P2": [
+      "Capture live Discord action/owner configuration and controlled readback.",
+      "Add a SkilzVolt activation smoke test distinct from adapter capability tests."
+    ]
+  },
+  "test_coverage": {
+    "existing_tests_are": "source-level or isolated capability evidence only",
+    "not_run": true,
+    "required_end_to_end_proof": [
+      "current live skill read and invocation trace",
+      "inbound stable identity through independent route receipts",
+      "WhatsApp central-router source ID and ACTIONED closure proof",
+      "task capture/decompose/operate selection and blocked/gated transitions",
+      "reminder primary plus one conditional verifier retry and deliveryStatus",
+      "Discord configured action gate and destination readback",
+      "email send TOTP/permit/account/sent-item proof",
+      "resource complete-source retention and exact retrieval",
+      "email six-surface continuity and route-state proof",
+      "email reply/new draft modes with Drafts conversation readback and no-send"
+    ]
+  },
+  "final_determination": "Repository source can support substantial portions of the contracts, but no assigned live skill is proven invoked or activated and consequential destination, scheduler, worker, receipt, and final approval state remain unverified. Preserve paths and repair evidence gaps; do not claim activation, completion, retirement, or deployment from source declarations, snapshots, queues, mirrors, alerts, drafts, or tests alone."
+}

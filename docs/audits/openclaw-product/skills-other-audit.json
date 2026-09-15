@@ -1,0 +1,706 @@
+{
+  "audit": {
+    "title": "OpenClaw product reconciliation audit - current approved SkilzVolt skills (non-cartoon scope)",
+    "authority": "Current SkilzVolt catalogue and version-pinned skill bodies fetched during this audit",
+    "catalogueRevision": "b95e7feae0186f85306d6000a48ca6c144aeec030d58cfc5e7e171931cb79b12",
+    "assignedCount": 32,
+    "includedCount": 27,
+    "excludedCount": 5,
+    "coverage": "27 included non-cartoon skills audited to completion; 5 cartoon skills excluded by owner instruction",
+    "includedNames": [
+      "afternoon-standup",
+      "estimation-breakdown",
+      "web-search",
+      "canvas",
+      "vendor-brief",
+      "linkedin-post",
+      "briefing",
+      "stackstone-talk-deck",
+      "stackstone-branding",
+      "video-frames",
+      "calendar-today",
+      "calendar-read",
+      "weekly-planning",
+      "event-timeline-builder",
+      "file-audit",
+      "talk-live",
+      "calendar-send",
+      "document-anonymiser",
+      "learning",
+      "solution-architecture",
+      "stackstone-report",
+      "weekly-review",
+      "system-definition",
+      "weather",
+      "vendor-scorecard",
+      "daily-plan",
+      "kombucha"
+    ],
+    "excludedNames": [
+      "skilzvolt-cartoon-storyboard",
+      "stackstone-cartoon-graphic",
+      "skilzvolt-cartoon-shot-prompts",
+      "skilzvolt-cartoon-ideation",
+      "skilzvolt-cartoon-brand-bible"
+    ],
+    "counts": {
+      "unverified": 7,
+      "not_product_runtime": 14,
+      "aligned": 6,
+      "contradiction": 0
+    },
+    "bodyAssembly": "All 32 assigned version-pinned bodies fetched through complete continuation chunks; code-point lengths validated.",
+    "securityWarningPolicy": "Unique live security warnings were surfaced before content review. Warned bodies are not treated as unconditionally trusted; warning status is recorded per row."
+  },
+  "method": {
+    "proofStandard": [
+      "A declared schedule/cron phrase is not proof of a live scheduler.",
+      "Runtime activation requires source event -> router/tool -> executor -> destination -> readback/receipt.",
+      "Generic/manual skills are not failed for lacking invented local modules; they are marked not_product_runtime when no product-owned route is claimed or required.",
+      "A missing dedicated module or worker is not itself a contradiction for a procedural/model/manual skill; do not infer a product-runtime requirement from absence alone.",
+      "External attached_assets scripts are repository evidence only; deployment and live state are unverified."
+    ],
+    "sourceInventory": [
+      "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+      "src/agents/skills/workspace.ts:380-432,445-525,658-687,829-935; src/agents/skills/bundled-dir.ts:36-90; src/agents/skills/frontmatter.ts:208-217",
+      "src/agents/openclaw-tools.ts:108-163,213-218",
+      "src/agents/openclaw-tools.ts:149-161; generic scheduler execution has no live state in checkout",
+      "attached_assets/integrations/microsoft/poll-calendar.py:1-8,67-69,213-245,300-384; attached_assets/integrations/google/poll-calendar-google.py:1-6,38-60,215-229,301-389",
+      "attached_assets/integrations/microsoft/create-event.py:1-37,219-283,286-360",
+      "src/infra/outbound/trust-gate.ts:227-295; attached_assets/install-forked-openclaw.sh:465-468,501-519",
+      "knowledge/integrations/ai-briefing.md:1-34; attached_assets/integrations/ai-briefing/run.py:1-17,131-260; attached_assets/integrations/ai-briefing/synthesize.py:1-24,233-292",
+      "src/agents/tools/linkedin-message-mirror-tool.ts:36-56,119-231,252-307; src/agents/tools/linkedin-message-mirror-tool.test.ts:8-59",
+      "src/agents/tools/canvas-tool.ts:53-87,93-105,107-210; src/gateway/server.impl.ts:513-616; src/gateway/server.canvas-auth.test.ts:108-375; src/cli/nodes-canvas.ts:10-23",
+      "src/agents/tools/web-search.ts:148-231,1635-1855; src/agents/openclaw-tools.ts:108-115,213-215; src/agents/tools/web-tools.enabled-defaults.test.ts:19-35,138-183",
+      "attached_assets/integrations/stackstone/report_poller.py:1-23,34-40,500-703"
+    ],
+    "globalBlockers": [
+      "No live scheduler/cron records, worker state, gateway/node state, delivery receipts or external destination readback were available.",
+      "SkilzVolt extension injects metadata and exposes generic owner-only describe/call; it does not install each current remote body as a local executable skill.",
+      "Tracked attached_assets integrations may represent deployable/manual scripts, but their deployed status is not proven."
+    ],
+    "warnings": [
+      {
+        "name": "video-frames",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "linkedin-post",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "file-audit",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "talk-live",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "solution-architecture",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "weekly-review",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "briefing",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "weekly-planning",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "vendor-brief",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "stackstone-report",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      },
+      {
+        "name": "system-definition",
+        "note": "SkilzVolt scanner reported a minor security concern and required caution; report disposition is based on source reconciliation, not unconditional trust of the body."
+      }
+    ]
+  },
+  "skills": [
+    {
+      "name": "afternoon-standup",
+      "status": "unverified",
+      "contract": "Declared 13:45 afternoon check; read plans/tasks, both calendars, inbox/WhatsApp, CRM, Garmin and recent sent state; update last-seen state and produce a delta/nudge.",
+      "trigger": "declared scheduled run (13:45); owner request",
+      "input": "workspace markdown feeds and state files named by the live contract",
+      "route": "SkilzVolt owner-only catalogue/body; repository has calendar and CRM pollers but no standup worker or current scheduler record",
+      "executor": "model/manual composition; no checked-in standup executor",
+      "destination": "briefing reply plus last-seen state; no readback/receipt available",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "attached_assets/integrations/microsoft/poll-calendar.py:1-8,67-69,213-245,300-384; attached_assets/integrations/google/poll-calendar-google.py:1-6,38-60,215-229,301-389",
+        "attached_assets/integrations/crm/poll-crm.py:1-27,243-338",
+        "src/agents/openclaw-tools.ts:149-161; generic scheduler execution has no live state in checkout"
+      ],
+      "tests": "No standup-specific repository test found.",
+      "gap": "Scheduler, source freshness, worker completion, delivery and state readback are unavailable.",
+      "id": "11ff1d50-40e9-4bed-a56b-1749265d01c2",
+      "version": "0eaf1303-f8aa-4704-8208-217e6c7c301e",
+      "securityWarning": false
+    },
+    {
+      "name": "estimation-breakdown",
+      "status": "not_product_runtime",
+      "contract": "Manual requirements-to-work-breakdown and risk/complexity/confidence assessment; requires a system definition or architecture first.",
+      "trigger": "owner request / scoping work",
+      "input": "approved system definition, architecture, risk rubric and assumptions",
+      "route": "No matching OpenClaw module, installer entry, tool schema or scheduled worker; live body is procedural guidance.",
+      "executor": "model/manual analysis",
+      "destination": "client-facing table/document; no product-owned destination or receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/skills/workspace.ts:380-432,445-525,658-687,829-935; src/agents/skills/bundled-dir.ts:36-90; src/agents/skills/frontmatter.ts:208-217"
+      ],
+      "tests": "No skill-specific repository test found.",
+      "gap": "Artifact template and review/approval handoff are external to this checkout.",
+      "id": "15b8a083-1c77-4397-ba80-cceab2d31b02",
+      "version": "1bf429fd-38e8-4bd8-9b97-0dff753087f1",
+      "securityWarning": false
+    },
+    {
+      "name": "web-search",
+      "status": "aligned",
+      "contract": "First check native OpenClaw web search; use configured provider, report route and citations, and fail clearly when unavailable.",
+      "trigger": "owner asks to search/read/verify web",
+      "input": "query plus optional count, locale, freshness, date and provider-specific filters",
+      "route": "Native conditional web_search registration and provider-specific TypeBox schema; executor validates filters, resolves key, runs provider and returns structured results.",
+      "executor": "OpenClaw web_search; API-key presence/configuration is required and was not live-tested",
+      "destination": "structured tool result with URLs/snippets/citations; no external write",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/tools/web-search.ts:148-231,1635-1855; src/agents/openclaw-tools.ts:108-115,213-215; src/agents/tools/web-tools.enabled-defaults.test.ts:19-35,138-183",
+        "src/agents/openclaw-tools.ts:108-163,213-218"
+      ],
+      "tests": "web-tools.enabled-defaults.test.ts:19-35,138-183; web-search.test.ts and web-search.redirect.test.ts cover provider/redirect behavior.",
+      "gap": "Live provider config, key availability, current network success and citation receipts were not inspected.",
+      "id": "18f099d5-6d9a-45e3-a660-93e31d4c994b",
+      "version": "42e84be9-3085-4ff7-92d3-50789f62bce6",
+      "securityWarning": false
+    },
+    {
+      "name": "canvas",
+      "status": "aligned",
+      "contract": "Create self-contained HTML, identify an online canvas-capable node, build a bind-mode-correct URL, then present/navigate/eval/snapshot/hide as needed.",
+      "trigger": "owner requests visual/demo/dashboard presentation",
+      "input": "HTML target, explicit node, canvas action and optional snapshot/A2UI arguments",
+      "route": "Native canvas tool flattens the action schema, resolves node, invokes gateway canvas commands and sanitizes snapshots; gateway canvas host/auth and node capability tests exist.",
+      "executor": "OpenClaw canvas to gateway node.invoke to paired node; no live node invocation tested",
+      "destination": "paired node canvas or sanitized snapshot media; no live receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/tools/canvas-tool.ts:53-87,93-105,107-210; src/gateway/server.impl.ts:513-616; src/gateway/server.canvas-auth.test.ts:108-375; src/cli/nodes-canvas.ts:10-23",
+        "src/agents/openclaw-tools.ts:108-163,213-218"
+      ],
+      "tests": "server.canvas-auth.test.ts:108-375; android-node.capabilities.live.test.ts:74-103; nodes-media tests cover snapshots.",
+      "gap": "Canvas host enablement, paired node availability, bind mode and live delivery remain unverified.",
+      "id": "35772a80-d504-4a4b-b5c1-dc90fa26b398",
+      "version": "19264848-f41b-4daa-873f-fe13c234efca",
+      "securityWarning": false
+    },
+    {
+      "name": "vendor-brief",
+      "status": "not_product_runtime",
+      "contract": "Manual vendor-facing brief from agreed System Definition/Evaluation Matrix; confirm shortlist, contacts, response/demo format, constraints and disclosures before drafting.",
+      "trigger": "owner requests buy/vendor/RFP brief",
+      "input": "approved requirements, evaluation matrix and owner-confirmed procurement decisions",
+      "route": "No local command, module, schema, installer or scheduler; body is a drafting/review procedure.",
+      "executor": "model/manual document drafting",
+      "destination": "vendor-facing document; no product-owned send/approval receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36"
+      ],
+      "tests": "No skill-specific repository test found.",
+      "gap": "External document generation and governed release path are not represented here; scanner warning requires cautious handling.",
+      "id": "47d88f93-92e8-43f1-814e-27a836b0a84a",
+      "version": "90fcc4e0-4358-4a8a-8053-41e36a6218a0",
+      "securityWarning": true
+    },
+    {
+      "name": "linkedin-post",
+      "status": "unverified",
+      "contract": "Draft owner/Stackstone posts only after loading current brief, content calendar, published/queued posts and ideas; Monday/Wednesday schedule wording and anti-repeat gates apply.",
+      "trigger": "declared Monday/Wednesday draft schedule or owner request",
+      "input": "local Stackstone content files and live conversation direction",
+      "route": "Repository exposes only owner-only read/capture mirror actions; explicitly no LinkedIn post/message/reaction/comment sending. No scheduler or draft worker is proven.",
+      "executor": "model/manual drafting; mirror can capture/read but cannot publish",
+      "destination": "draft response/local content files; no publish receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/tools/linkedin-message-mirror-tool.ts:36-56,119-231,252-307; src/agents/tools/linkedin-message-mirror-tool.test.ts:8-59",
+        "src/agents/openclaw-tools.ts:149-161; generic scheduler execution has no live state in checkout"
+      ],
+      "tests": "linkedin-message-mirror-tool.test.ts:8-59 proves fixed read-only action surface.",
+      "gap": "Declared cadence, current source files, draft persistence and owner delivery are unavailable; scanner warning applies.",
+      "id": "516dade5-4136-4652-bdd3-47e3612c0ba9",
+      "version": "171d668f-4edc-4317-b471-638f1f4ad42d",
+      "securityWarning": true
+    },
+    {
+      "name": "briefing",
+      "status": "not_product_runtime",
+      "contract": "Morning briefing on weekday 06:45/weekend 08:00 combining calendar, inbox, WhatsApp, Stackstone feeds/CRM, plan and health; update last-seen state.",
+      "trigger": "declared morning schedule or owner request",
+      "input": "workspace calendar/inbox/messaging/CRM/health files",
+      "route": "The current body is a procedural/model/manual morning briefing contract. The tracked AI-briefing integration is a separate weekly RSS to rank to Claude/Tavily news sidecar, not this skill's product-runtime route.",
+      "executor": "model/manual composition; the weekly RSS sidecar is unrelated and is not a morning-briefing executor",
+      "destination": "briefing reply plus last-seen state; no product-owned receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "knowledge/integrations/ai-briefing.md:1-34; attached_assets/integrations/ai-briefing/run.py:1-17,131-260; attached_assets/integrations/ai-briefing/synthesize.py:1-24,233-292",
+        "src/agents/openclaw-tools.ts:149-161; generic scheduler execution has no live state in checkout"
+      ],
+      "tests": "No morning-briefing contract test found; mgmt-bot route is documented in knowledge/integrations/ai-briefing.md:29-34.",
+      "gap": "No product-owned briefing executor or destination is claimed by this procedural body; do not infer a dedicated worker requirement from the absence of a module. Scanner warning applies.",
+      "id": "588a0083-a1fc-4cf2-a653-d8831230fccc",
+      "version": "c0a8a663-69d5-4ae8-8e7e-fcaefe40ab3a",
+      "securityWarning": true
+    },
+    {
+      "name": "stackstone-talk-deck",
+      "status": "not_product_runtime",
+      "contract": "Manual standalone branded HTML deck with navigation, fullscreen/progress and contact/QR slide; save output and present to owner.",
+      "trigger": "owner requests talk/presentation/keynote/deck",
+      "input": "talk structure, supplied template/assets and branding rules",
+      "route": "No deck builder or installer/schema in checkout; canvas can display a produced URL but does not generate the deck.",
+      "executor": "model/manual HTML authoring",
+      "destination": "declared /mnt/user-data/outputs/ plus owner presentation; no receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/tools/canvas-tool.ts:53-87,93-105,107-210; src/gateway/server.impl.ts:513-616; src/gateway/server.canvas-auth.test.ts:108-375; src/cli/nodes-canvas.ts:10-23"
+      ],
+      "tests": "No talk-deck repository test found.",
+      "gap": "Declared output path, template resources and presentation receipt are external/unverified.",
+      "id": "6026bb9c-79f2-4671-8777-c100e94c11d3",
+      "version": "e499d90e-cc43-4490-a055-52d55f97e3c0",
+      "securityWarning": false
+    },
+    {
+      "name": "stackstone-branding",
+      "status": "not_product_runtime",
+      "contract": "Reference-only Stackstone colours, typography, layout, table/docx-js implementation and report/deck styling.",
+      "trigger": "used while drafting Stackstone deliverables",
+      "input": "document/deck content and branding reference",
+      "route": "No runtime skill executor; it is a style reference consumed by other manual skills.",
+      "executor": "model/manual formatting",
+      "destination": "downstream document/deck",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36"
+      ],
+      "tests": "No branding-specific repository test found.",
+      "gap": "No product-owned document renderer or style conformance test is present.",
+      "id": "625b41be-7aad-4f65-9419-cc4d7eb6acb9",
+      "version": "55795e1f-0879-4f08-b957-4283e95d988e",
+      "securityWarning": false
+    },
+    {
+      "name": "video-frames",
+      "status": "aligned",
+      "contract": "Use ffmpeg to extract first/timestamp/index frames or short clips; perform the mandatory post-use review.",
+      "trigger": "owner asks for frame/thumbnail/video inspection",
+      "input": "video file, optional timestamp/index and output image path",
+      "route": "Bundled skill declares ffmpeg requirement and points to tracked scripts/frame.sh; shell script validates input/output and invokes ffmpeg.",
+      "executor": "bundled script via model/tool execution; ffmpeg install/runtime availability not checked",
+      "destination": "explicit output image path plus tool result; no external write beyond requested file",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "skills/video-frames/SKILL.md:1-50; skills/video-frames/scripts/frame.sh:1-75",
+        "src/agents/skills/workspace.ts:380-432,445-525,658-687,829-935; src/agents/skills/bundled-dir.ts:36-90; src/agents/skills/frontmatter.ts:208-217"
+      ],
+      "tests": "No dedicated script test found; loader metadata path is covered by generic skill loading code.",
+      "gap": "ffmpeg binary, input media and live output/readback were not tested; scanner warning applies.",
+      "id": "6f824bb6-e31b-4a94-85e1-52cef82f0d21",
+      "version": "db2c6896-8811-403a-b3be-6430fc7eff2e",
+      "securityWarning": true
+    },
+    {
+      "name": "calendar-today",
+      "status": "aligned",
+      "contract": "Read both Outlook and Google feed files, check staleness, return compact time/title entries, and never write personal calendars.",
+      "trigger": "owner asks todays/tomorrows meetings or conflict check",
+      "input": "OUTLOOK_CALENDAR.md and GOOGLE_CALENDAR.md with freshness markers",
+      "route": "Tracked Microsoft/Google pollers fetch calendar data, poll every 15 minutes and write the named feed files; no model calendar writer is needed for read-only use.",
+      "executor": "external pollers plus manual/model read; live service state unavailable",
+      "destination": "owner response (time/title only); source readback is the feed files",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "attached_assets/integrations/microsoft/poll-calendar.py:1-8,67-69,213-245,300-384; attached_assets/integrations/google/poll-calendar-google.py:1-6,38-60,215-229,301-389"
+      ],
+      "tests": "No calendar-today skill-specific test found.",
+      "gap": "Actual poller installation, feed freshness, event completeness and delivery were not verified.",
+      "id": "70d52362-dbc4-4029-919e-313b5483453e",
+      "version": "e20d3fb9-a6e8-492d-b9f4-269f8ed0f15e",
+      "securityWarning": false
+    },
+    {
+      "name": "calendar-read",
+      "status": "aligned",
+      "contract": "Fail closed on dates/weekdays/times; use Outlook then Google source entries, preserve ISO source values and convert Outlook UTC to Europe/London.",
+      "trigger": "any date/time/calendar fact requiring verification",
+      "input": "direct calendar feed entry and freshness marker",
+      "route": "Same tracked Outlook/Google poller outputs supply the declared source layer; no write path is required.",
+      "executor": "external pollers plus manual/model reconciliation",
+      "destination": "date/time answer with uncertainty when evidence is stale; no external write",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "attached_assets/integrations/microsoft/poll-calendar.py:1-8,67-69,213-245,300-384; attached_assets/integrations/google/poll-calendar-google.py:1-6,38-60,215-229,301-389"
+      ],
+      "tests": "No calendar-read skill-specific repository test found.",
+      "gap": "Live source freshness and readback cannot be asserted from checkout.",
+      "id": "7b3f4ea0-9b45-4281-b53d-852a2de4de7a",
+      "version": "0a2896eb-7f4d-4d23-8b9d-51ebcd2e07b9",
+      "securityWarning": false
+    },
+    {
+      "name": "weekly-planning",
+      "status": "unverified",
+      "contract": "Build weekly focus from prior plan, calendar, tasks, CRM/health; write short WEEK_PLAN.md and ask owner to confirm/refine.",
+      "trigger": "declared weekly planning session",
+      "input": "calendar/tasks/CRM/health/previous plan files",
+      "route": "No tracked weekly-planning worker or current scheduler. Generic cron/task tools exist, but no live job/state is available.",
+      "executor": "model/manual planning; optional generic cron creation",
+      "destination": "WEEK_PLAN.md plus owner confirmation; no live readback",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/openclaw-tools.ts:149-161; generic scheduler execution has no live state in checkout",
+        "attached_assets/integrations/microsoft/poll-calendar.py:1-8,67-69,213-245,300-384; attached_assets/integrations/google/poll-calendar-google.py:1-6,38-60,215-229,301-389"
+      ],
+      "tests": "No weekly-planning-specific test found.",
+      "gap": "Schedule, file path, owner confirmation and resulting plan state are unverified; scanner warning applies.",
+      "id": "818d03ae-e5e8-4021-bc50-797839315628",
+      "version": "b838a234-10f4-4bdf-a2b6-98de7832eb6d",
+      "securityWarning": true
+    },
+    {
+      "name": "event-timeline-builder",
+      "status": "not_product_runtime",
+      "contract": "Manual evidence-first timeline across email/calendar/transcripts/messaging/web, with source/confidence annotations and sources footer; optional HTML template/helper.",
+      "trigger": "owner asks sequence/precedence/history/timeline",
+      "input": "searchable primary records and corroborating sources",
+      "route": "No matching timeline builder, template/helper, installer or schema in tracked repository.",
+      "executor": "model/manual research and document construction",
+      "destination": "timeline document/HTML; no product-owned receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36"
+      ],
+      "tests": "No timeline-builder repository test found.",
+      "gap": "Referenced bundled resources and multi-source search connectors are external/unverified.",
+      "id": "84cc9627-57cb-46a5-85c2-59da46387760",
+      "version": "f5d3758b-9d44-4650-b57d-c3f55659ac7d",
+      "securityWarning": false
+    },
+    {
+      "name": "file-audit",
+      "status": "not_product_runtime",
+      "contract": "Manual workspace file/skill audit: classify canonical/supporting/transitional/orphan files, preserve useful content, produce FILE-AUDIT and delete queue only after migration.",
+      "trigger": "owner asks to tidy/audit files",
+      "input": "workspace tree, skill/process index and governing files",
+      "route": "No file-audit executor, command schema or deletion queue worker in checkout; body is a safety procedure.",
+      "executor": "model/manual audit",
+      "destination": "audit/policy/delete-queue files; no product-owned approval receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/skills/workspace.ts:380-432,445-525,658-687,829-935; src/agents/skills/bundled-dir.ts:36-90; src/agents/skills/frontmatter.ts:208-217"
+      ],
+      "tests": "No file-audit-specific repository test found.",
+      "gap": "Deletion approval, workspace inventory and post-migration readback are external; scanner warning applies.",
+      "id": "870bfa4a-80c8-4653-85f9-10afb91022ac",
+      "version": "cc37ff18-c6fa-4fa5-ac4c-1263e4f7fad9",
+      "securityWarning": true
+    },
+    {
+      "name": "talk-live",
+      "status": "not_product_runtime",
+      "contract": "Manual live-talk response mode: concise owner-approved live messaging, no tokens/URLs/private identifiers/control paths, with approval boundaries.",
+      "trigger": "owner asks for live-message wording or short reply",
+      "input": "owner-provided context and target audience",
+      "route": "No talk-live module; generic message tool exists, but this body is content/safety guidance and no destination is encoded.",
+      "executor": "model/manual copy; delivery only if separately approved through message route",
+      "destination": "draft or separately addressed message; no live receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/openclaw-tools.ts:108-163,213-218"
+      ],
+      "tests": "No talk-live-specific repository test found.",
+      "gap": "Target channel, approval and delivery receipt are not established; scanner warning applies.",
+      "id": "8f56936a-21d1-45e8-a063-ae31bb2c920e",
+      "version": "1c6cd645-78cb-403f-bca1-63b5928b0612",
+      "securityWarning": true
+    },
+    {
+      "name": "calendar-send",
+      "status": "unverified",
+      "contract": "Create Outlook/Teams invite only after account/calendar confirmation, attendee confirmation, valid TOTP/open gate, exact temp-file command, output verification and email log.",
+      "trigger": "owner explicitly requests calendar send",
+      "input": "confirmed account, title, times, attendees, timezone and TOTP/open gate",
+      "route": "Tracked create-event.py writes Graph /me/events, refreshes token and prints event ID/Teams URL. The generic exec.run approval/TOTP gate can cover a command invoked through that route, but exact invocation and live gate configuration are unverified; absence of per-script TOTP is not treated as a bypass.",
+      "executor": "external Python command through generic exec.run approval/TOTP path if invoked there; not registered as a calendar-specific OpenClaw tool",
+      "destination": "Microsoft Graph calendar; command output is only available readback",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "attached_assets/integrations/microsoft/create-event.py:1-37,219-283,286-360",
+        "src/infra/outbound/trust-gate.ts:227-295; attached_assets/install-forked-openclaw.sh:465-468,501-519",
+        "src/agents/openclaw-tools.ts:149-161; generic scheduler execution has no live state in checkout"
+      ],
+      "tests": "No calendar-send contract test found; repository trust-gate/exec-approval coverage is generic, not calendar-send-specific.",
+      "gap": "Exact command path, approval/TOTP/open-gate enforcement, live account/event/log receipts and owner confirmations were not inspected; missing per-script TOTP is not treated as a bypass.",
+      "id": "93682993-158c-4cc2-9c98-82787fdda8d2",
+      "version": "18530eb2-ddb2-4855-b8a0-7ab87542d65a",
+      "securityWarning": false
+    },
+    {
+      "name": "document-anonymiser",
+      "status": "not_product_runtime",
+      "contract": "Manual PII replacement preserving formatting/numbers/cross-document consistency, then scan every output and filenames before delivery.",
+      "trigger": "owner asks to anonymise/anonymize/redact documents",
+      "input": "source docx/xlsx/pdf and explicit PII mapping",
+      "route": "No tracked anonymise.py or OpenClaw document-anonymisation tool/schema; docx converter is a separate artifact utility only.",
+      "executor": "external/manual script/resource",
+      "destination": "sanitized documents and leak-scan report; no product-owned receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "attached_assets/integrations/docx-converter/convert.py (artifact conversion only; no anonymisation contract)"
+      ],
+      "tests": "No anonymiser-specific repository test found.",
+      "gap": "Referenced resource, file-type fidelity and PII scan proof are unavailable; no tracked XLSX sample was found.",
+      "id": "97488ec2-d65d-41a3-b0e3-857514f9a375",
+      "version": "e5790a94-3307-4774-8bdb-7580c4f8400a",
+      "securityWarning": false
+    },
+    {
+      "name": "learning",
+      "status": "not_product_runtime",
+      "contract": "Turn corrections into durable safeguards: identify root cause, governed home, trigger/handoff/output, implement via supported route, test repeat case and report proof/gaps.",
+      "trigger": "owner correction/repeated failure",
+      "input": "incident/correction plus live skill/process registry",
+      "route": "SkilzVolt exposes governed proposal/status/diff actions, but no automatic learning mutator or proof that a proposal was approved/current.",
+      "executor": "model/manual governed proposal",
+      "destination": "approved skill/process change and verification report; no live approval receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/skills/workspace.ts:380-432,445-525,658-687,829-935; src/agents/skills/bundled-dir.ts:36-90; src/agents/skills/frontmatter.ts:208-217"
+      ],
+      "tests": "No learning-specific repository test found.",
+      "gap": "Approval, deployment and repeat-failure verification are unavailable; do not equate proposal submission with activation.",
+      "id": "9a0bdf7a-25da-439f-8896-9da68d222148",
+      "version": "d2c98143-2a88-4f9c-9612-9bc7d3080b4b",
+      "securityWarning": false
+    },
+    {
+      "name": "solution-architecture",
+      "status": "not_product_runtime",
+      "contract": "Manual architecture assessment: load definition, research current tools/models every engagement, compare lean/balanced/robust options, ADRs, C4 views and recommendation.",
+      "trigger": "owner requests architecture/design options",
+      "input": "system definition, current landscape research, constraints and quality attributes",
+      "route": "Native web_search can support research, but no architecture generator, ADR/C4 renderer, installer or runtime route is present.",
+      "executor": "model/manual analysis",
+      "destination": "architecture report/ADRs/views; no product-owned receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/tools/web-search.ts:148-231,1635-1855; src/agents/openclaw-tools.ts:108-115,213-215; src/agents/tools/web-tools.enabled-defaults.test.ts:19-35,138-183"
+      ],
+      "tests": "No solution-architecture-specific repository test found.",
+      "gap": "Current web research success, artifact generation and approval are unverified; scanner warning applies.",
+      "id": "a1b1d340-9a96-42bd-a9a2-bb34aab501ac",
+      "version": "32b9e223-dd95-4d1f-af3c-60484431b290",
+      "securityWarning": true
+    },
+    {
+      "name": "stackstone-report",
+      "status": "not_product_runtime",
+      "contract": "Manual client-report generation from discovery/project context, with branding, source recording, client-perspective gates and follow-up email content.",
+      "trigger": "owner requests client report/options document/proposal",
+      "input": "project files, transcripts, audience and approved framing",
+      "route": "The current body is procedural/model/manual client-report guidance. The tracked Stackstone poller is an unrelated report-delivery sidecar that polls website reports and emails pre-existing branded HTML; it is not this skill's product-runtime route.",
+      "executor": "model/manual drafting; the report-delivery poller is a separate sidecar and does not generate this skill's report",
+      "destination": "client report plus optional email; no generation/readback receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "attached_assets/integrations/stackstone/report_poller.py:1-23,34-40,500-703"
+      ],
+      "tests": "No stackstone-report generation test found.",
+      "gap": "No product-owned report-generation executor or destination is claimed by this procedural body; do not infer a dedicated worker requirement from the absence of a generator. Scanner warning applies.",
+      "id": "ab86a330-ec2c-4545-971d-fda5bda6857b",
+      "version": "2601161a-28b0-4611-a766-b4844d134e06",
+      "securityWarning": true
+    },
+    {
+      "name": "weekly-review",
+      "status": "unverified",
+      "contract": "Friday system/process review across BACKLOG/TASKS/SOUL_PENDING/memory/lessons and relevant skills; patch clear improvements and stage owner decisions.",
+      "trigger": "declared Friday/end-of-week review",
+      "input": "workspace planning, memory, skill/process and audit files",
+      "route": "No tracked weekly-review worker or live schedule; generic skill loader and governed SkilzVolt proposal path do not prove execution.",
+      "executor": "model/manual review and governed proposal",
+      "destination": "updated process files/SOUL_PENDING and owner report; no receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/openclaw-tools.ts:149-161; generic scheduler execution has no live state in checkout"
+      ],
+      "tests": "No weekly-review-specific repository test found.",
+      "gap": "Schedule, file state, approval and post-change verification are unavailable; scanner warning applies.",
+      "id": "d07da866-d0ff-4de2-a842-190f82bce305",
+      "version": "abf38d9d-f6af-4f59-9bdd-5a8bc09b3c57",
+      "securityWarning": true
+    },
+    {
+      "name": "system-definition",
+      "status": "not_product_runtime",
+      "contract": "Manual requirements-engineering definition: actors/goals, boundary, testable FR/NFR, data shape, MoSCoW, acceptance criteria and open questions.",
+      "trigger": "owner requests spec/requirements/system definition",
+      "input": "transcripts, notes, prior summaries and sample input/output files",
+      "route": "No system-definition generator, schema or installer; downstream solution-architecture is also manual.",
+      "executor": "model/manual analysis",
+      "destination": "requirements document and open-question register; no product-owned receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36"
+      ],
+      "tests": "No system-definition-specific repository test found.",
+      "gap": "Sample artifacts, approval and downstream handoff are external; scanner warning applies.",
+      "id": "d997ea47-99f2-4ad0-aeb0-47202f60519e",
+      "version": "9dc6cf16-2633-4b00-a96b-80f82b9159f1",
+      "securityWarning": true
+    },
+    {
+      "name": "weather",
+      "status": "aligned",
+      "contract": "Use approved no-key wttr.in route with explicit location, select current/forecast format, and use official sources for severe alerts.",
+      "trigger": "owner asks weather/forecast/travel check",
+      "input": "city/region/airport code",
+      "route": "Bundled skill exactly declares curl requirement and approved endpoint; loader reads bundled SKILL.md and metadata bin requirement.",
+      "executor": "curl/manual external read; no key required and no write",
+      "destination": "owner response from returned weather text/JSON; no external write",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "skills/weather/SKILL.md:1-116",
+        "src/agents/skills/workspace.ts:380-432,445-525,658-687,829-935; src/agents/skills/bundled-dir.ts:36-90; src/agents/skills/frontmatter.ts:208-217"
+      ],
+      "tests": "Generic skill loading/eligibility tests cover bundled metadata; no weather-network test run.",
+      "gap": "curl availability, endpoint response and current forecast were not live-tested.",
+      "id": "e321de40-6741-4cb3-8fea-90df02b21ae6",
+      "version": "6d98c676-eb81-4b12-b872-7c7ef8d2e1bc",
+      "securityWarning": false
+    },
+    {
+      "name": "vendor-scorecard",
+      "status": "not_product_runtime",
+      "contract": "Manual weighted vendor workbook from brief/responses/demo observations; confirm Must/Should/Could/cost model, keep editable and separate fit from cost.",
+      "trigger": "owner requests vendor scorecard/ranking",
+      "input": "sent brief, vendor responses and demo observations",
+      "route": "No tracked XLSX workbook, generator, spreadsheet schema or installer found; no product tool can produce/read back the workbook.",
+      "executor": "model/manual spreadsheet authoring",
+      "destination": "editable workbook and decision review; no receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36"
+      ],
+      "tests": "No vendor-scorecard repository test found.",
+      "gap": "Workbook resource and exact destination/readback are unavailable; no tracked XLSX files were found.",
+      "id": "e78f1797-f0d6-4146-8493-78ae2a437c0d",
+      "version": "48cc44bf-0da7-4841-899b-a15886d6747a",
+      "securityWarning": false
+    },
+    {
+      "name": "daily-plan",
+      "status": "unverified",
+      "contract": "Build PLAN.md around calendar, health, revenue and priorities; avoid reserved poller slots; may create [TODAY] cron nudges and relies on live cron readback.",
+      "trigger": "morning stand-up/briefing, health drift or owner request",
+      "input": "calendar/tasks/health/CRM/week plan and existing cron state",
+      "route": "Generic OpenClaw cron/task tools are registered, but no daily-plan worker, current cron state or PLAN.md runtime snapshot is available.",
+      "executor": "model/manual planning plus optional generic cron calls",
+      "destination": "PLAN.md, [TODAY] cron objects and owner response; no live readback",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/openclaw-tools.ts:149-161; generic scheduler execution has no live state in checkout",
+        "attached_assets/integrations/microsoft/poll-calendar.py:1-8,67-69,213-245,300-384; attached_assets/integrations/google/poll-calendar-google.py:1-6,38-60,215-229,301-389"
+      ],
+      "tests": "No daily-plan-specific repository test found.",
+      "gap": "Actual cron creation/deletion, cleanup and delivery receipts are unverified.",
+      "id": "eeaa0aa4-a777-4a0e-bfc5-c84a87082085",
+      "version": "fdc891aa-171c-43b6-a828-c4b1178836a7",
+      "securityWarning": false
+    },
+    {
+      "name": "kombucha",
+      "status": "unverified",
+      "contract": "Read KOMBUCHA tracker, record batches, create two live reminders (day 12/13 and day 14 failsafe), verify live cron state and fail closed if absent.",
+      "trigger": "new batch, taste/bottle timing or weather-sensitive timing",
+      "input": "reference/KOMBUCHA.md, weather and live cron objects",
+      "route": "Generic cron tool exists, but no tracked KOMBUCHA reference, dedicated worker, installer or live cron state is present.",
+      "executor": "model/manual tracker update plus optional generic cron creation",
+      "destination": "tracker and two live reminder objects; no readback/receipt",
+      "refs": [
+        "extensions/skilzvolt/index.ts:10-15,66-76; extensions/skilzvolt/src/tool.ts:55-93; extensions/skilzvolt/src/client.ts:3-36",
+        "src/agents/openclaw-tools.ts:149-161; generic scheduler execution has no live state in checkout",
+        "skills/weather/SKILL.md:1-116"
+      ],
+      "tests": "No kombucha-specific repository test found.",
+      "gap": "The contract mandatory reminder chain cannot be proven; tracker dates must not be treated as delivery.",
+      "id": "f29e5c40-2cb2-437d-bf05-78dee3f092d3",
+      "version": "9dd4d9b0-132b-4e53-9da1-0eda0118878d",
+      "securityWarning": false
+    }
+  ],
+  "excludedSkills": [
+    {
+      "name": "skilzvolt-cartoon-storyboard",
+      "id": "1cc66574-13a6-4fe3-b904-5dfe82e17dad",
+      "version": "d01b4a63-befb-4261-a1a7-68212910bbba",
+      "reason": "Excluded by explicit owner instruction: cartoon-based name/explicit cartoon-only skill; not audited and not a failure or unverified result."
+    },
+    {
+      "name": "stackstone-cartoon-graphic",
+      "id": "28cf9c07-3337-4548-b4ef-c1f61aad71c0",
+      "version": "37e8c9df-0031-4da1-b859-5d4a19004270",
+      "reason": "Excluded by explicit owner instruction: cartoon-based name/explicit cartoon-only skill; not audited and not a failure or unverified result."
+    },
+    {
+      "name": "skilzvolt-cartoon-shot-prompts",
+      "id": "60593a23-6361-4a0b-8811-e16ea0edaba7",
+      "version": "b5e0c9d2-32d9-41fb-be77-6806fb42bf3b",
+      "reason": "Excluded by explicit owner instruction: cartoon-based name/explicit cartoon-only skill; not audited and not a failure or unverified result."
+    },
+    {
+      "name": "skilzvolt-cartoon-ideation",
+      "id": "92e887e3-3fc3-4b97-9bfa-b3b05eb4ea36",
+      "version": "c1dd0d74-7475-4a88-bc94-dbfd5aeaab76",
+      "reason": "Excluded by explicit owner instruction: cartoon-based name/explicit cartoon-only skill; not audited and not a failure or unverified result."
+    },
+    {
+      "name": "skilzvolt-cartoon-brand-bible",
+      "id": "a356dbcb-2155-4fc9-a79e-0f064aa1d49f",
+      "version": "66763b26-b454-45a1-bd51-284b602fce31",
+      "reason": "Excluded by explicit owner instruction: cartoon-based name/explicit cartoon-only skill; not audited and not a failure or unverified result."
+    }
+  ],
+  "prioritizedRepairs": [
+    {
+      "priority": 1,
+      "repair": "Clarify briefing ownership and keep the weekly RSS sidecar explicitly separate; only add a product-owned route/readback if the briefing contract is intended to be product runtime. Do not infer a dedicated worker from an absent module."
+    },
+    {
+      "priority": 2,
+      "repair": "Verify calendar-send is invoked through the generic exec.run approval/TOTP gate at src/infra/outbound/trust-gate.ts:227-295 and the installer configuration at attached_assets/install-forked-openclaw.sh:465-468,501-519; then verify exact command, account/attendee confirmation and Graph/log readback. Missing per-script TOTP is not itself a bypass."
+    },
+    {
+      "priority": 3,
+      "repair": "For skills that explicitly claim schedules, verify whether product ownership exists via scheduler, execution and delivery observability; do not create dedicated workers solely because no module is tracked."
+    },
+    {
+      "priority": 4,
+      "repair": "Where product runtime is intentionally claimed for manual artifact skills, register approved templates/resources and destination/readback checks (deck, timeline, anonymiser, scorecard, reports); otherwise retain the procedural/manual classification."
+    },
+    {
+      "priority": 5,
+      "repair": "Keep warning-marked skills behind owner review and document scanner findings/mitigations before any writes or external delivery."
+    }
+  ]
+}

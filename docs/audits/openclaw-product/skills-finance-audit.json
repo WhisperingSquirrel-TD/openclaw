@@ -1,0 +1,531 @@
+{
+  "schema_version": "1.0",
+  "report": "Current SkilzVolt finance/CRM skill reconciliation",
+  "scope": {
+    "assigned_skill_count": 14,
+    "read_only": true,
+    "production_code_changed": false,
+    "live_data_changed": false,
+    "skill_body_source": "mcpSkilzVolt_skillsGet",
+    "skill_bodies_executed": false,
+    "resources_attached": false,
+    "live_deployment_proven": false,
+    "tracked_xlsx_found": false
+  },
+  "global_findings": [
+    {
+      "id": "FIN-BOUNDARY",
+      "severity": "strong-positive",
+      "finding": "Finance and expense source code implements SharePoint-authoritative XLSX boundaries with authenticated native eTag/version, exact source-byte hash, semantic workbook hash, queue locking, and binary/semantic/readback proof.",
+      "citations": [
+        "pi-services/seer-finance/README.md:17-65",
+        "pi-services/seer-finance/seer_finance/sharepoint_boundary.py:76-124",
+        "pi-services/seer-finance/seer_finance/ledger/sharepoint_contract.py:330-428"
+      ]
+    },
+    {
+      "id": "CRM-SCOPE",
+      "severity": "unverified",
+      "finding": "crm-update and related CRM skills are procedural/model skills fetched by SkilzVolt. The installer declares an 08:00 poll-crm.py cron for only a narrow CSV-to-local-Markdown lead-import subroute; installer execution and activation are unknown. Actual model-skill invocation, complete evidence, attributed writes, and readback are unverified. A missing deterministic CRM worker does not prove central CRM capability is absent.",
+      "citations": [
+        "attached_assets/install-forked-openclaw.sh:1107-1124",
+        "attached_assets/integrations/crm/poll-crm.py:1-28,119-161,273-334",
+        "SKILL:crm-update@1f9721b4-10be-453c-985a-dde7a08e9755"
+      ]
+    },
+    {
+      "id": "INVOICE-ABSENCE",
+      "severity": "P1",
+      "finding": "Invoice skills declare exact invoice_ops.py and invoice_generate.py scripts. Those scripts and tracker adapters are absent from this checkout and not linked by the checked-in installer; this is not a finding that they are absent from a live/external Pi. Generic send.py does not establish invoice wiring.",
+      "citations": [
+        "attached_assets/install-forked-openclaw.sh:932-974",
+        "attached_assets/integrations/microsoft/send.py:1-40",
+        "repository rg --files search for invoice_ops.py, invoice_generate.py"
+      ]
+    },
+    {
+      "id": "EXPENSE-ACTIVATION",
+      "severity": "P1",
+      "finding": "Expense implementation is strong, but the operating guide says the legacy direct watcher timer is retired while the checked-in service/timer still directly run it; the central router unit is absent from this checkout.",
+      "citations": [
+        "pi-services/expense-intake-watcher/OPERATING.md:9-64",
+        "pi-services/systemd-user/expense-intake-watcher.service:1-9",
+        "pi-services/systemd-user/expense-intake-watcher.timer:1-11"
+      ]
+    },
+    {
+      "id": "LIVE-ACTIVATION",
+      "severity": "P1",
+      "finding": "Repository source, installer text, and skill bodies do not prove the active Pi checkout, service schedules, credentials, or production readback.",
+      "citations": [
+        "docs/audits/openclaw-product/pi-live-reconciliation.md:37-43",
+        "docs/audits/openclaw-product/poller-expense-reconciliation.md:85-87"
+      ]
+    }
+  ],
+  "test_evidence": [
+    {
+      "area": "sharepoint",
+      "files": [
+        "attached_assets/integrations/microsoft/test_sharepoint_queue_safety.py",
+        "attached_assets/integrations/microsoft/test_sharepoint_cache_poller.py",
+        "attached_assets/integrations/microsoft/test_send_task_dispatch.py",
+        "pi-services/seer-finance/tests/test_sharepoint_authority.py",
+        "pi-services/seer-finance/tests/test_sharepoint_workbook_authority.py",
+        "pi-services/seer-finance/tests/test_sharepoint_workbook_e2e.py"
+      ],
+      "result": "Checked-in regression/e2e fixtures cover queue safety and workbook proof. Historical reconciliation records 40 Microsoft tests passing; no live Graph/deployment proof.",
+      "citations": [
+        "docs/audits/openclaw-product/poller-expense-reconciliation.md:73-87",
+        "pi-services/seer-finance/tests/test_sharepoint_workbook_e2e.py:132-299"
+      ]
+    },
+    {
+      "area": "expense-watcher",
+      "files": [
+        "pi-services/expense-intake-watcher/test_watcher.py",
+        "pi-services/expense-intake-watcher/test_expense_outcomes.py",
+        "pi-services/expense-intake-watcher/test_enrichment_queue.py",
+        "pi-services/expense-intake-watcher/test_enrichment_resolution.py",
+        "pi-services/expense-intake-watcher/test_finance_handoff.py",
+        "pi-services/expense-intake-watcher/test_watcher_state.py"
+      ],
+      "result": "Checked-in tests cover source identity, blocked outcomes, pending versus verified readback, enrichment, and finance handoff. Historical reconciliation records 44 watcher tests passing; no live activation proof.",
+      "citations": [
+        "pi-services/expense-intake-watcher/test_finance_handoff.py:66-124",
+        "docs/audits/openclaw-product/poller-expense-reconciliation.md:73-87"
+      ]
+    },
+    {
+      "area": "crm",
+      "files": [],
+      "result": "Only the CSV poller subroute is present under attached_assets/integrations/crm; no CRM domain test file was found. Generic Microsoft tests do not prove procedural/model skill invocation, complete evidence, entity attribution, SharePoint orchestration, or readback."
+    },
+    {
+      "area": "invoice",
+      "files": [],
+      "result": "No exact named invoice executor, tracker adapter, PDF generator, or invoice domain test file was found in this checkout; live/external presence is unverified."
+    }
+  ],
+  "skills": [
+    {
+      "name": "crm-sharepoint",
+      "skill_id": "2838490a-7633-41c3-adb5-91d73d79d967",
+      "version_id": "5a29267f-3aed-41c5-9cac-799b0d7b1145",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "a1ca9456a586b39e6a4438dd30732f33e7b4eda5653a65d59ac550c5b5e8bde1",
+      "trigger": "Account, opportunity, partnership, contact, meeting, communication, or Meeting Copilot context that must become operationally current across SharePoint and local CRM.",
+      "wiring": "Generic SharePoint cache and locked queue are installer-wired. This procedural/model skill is fetched by SkilzVolt; no dedicated deterministic worker was observed in this checkout, but that does not establish that model capability is absent. The installer declares an 08:00 poll-crm.py cron for only the CSV lead-import subroute; installer execution and activation are unknown.",
+      "executor": "Procedural/model skill capability; invocation, entity resolution, attributed writes, and readback are unverified. Generic queue/cache is proven.",
+      "evidence_input_contract": "Entity spine from stackstone/crm.md and stackstone/partnerships.md; bounded dated source evidence; SHAREPOINT_INDEX.md, Current.md, and dated artifacts; fail closed for ambiguous entity matches.",
+      "gate": "Source-backed match, complete artifact/current/local-summary/log chain, and verified result/cache readback. Queue acceptance alone is not completion.",
+      "destination_readback": "Opportunities/<Company>/<Company> - Current.md, Accounts/<Company>/<Company> - Current.md, or Partnerships/<Person>/<Person> - Current.md; dated artifacts; local summaries; operational log; queue result/cache proof.",
+      "tests_gaps": "Generic queue/cache tests only; no CRM invocation, attribution, reconciliation, or artifact tests/evidence.",
+      "disposition": "instruction-level/model capability exists; invocation, attributed writes, and readback unverified",
+      "prioritized_repairs": [
+        "P1 verify an actual skill invocation with source-cited entity matching",
+        "P1 capture artifact/current alignment and readback evidence; deterministic worker productization is optional"
+      ],
+      "source_citations": [
+        "SKILL:crm-sharepoint@5a29267f-3aed-41c5-9cac-799b0d7b1145",
+        "attached_assets/install-forked-openclaw.sh:1265-1315",
+        "attached_assets/integrations/microsoft/sharepoint_queue_processor.py:1-20"
+      ]
+    },
+    {
+      "name": "invoice-close",
+      "skill_id": "28509c2b-17ba-4a32-8efb-741bc90052c7",
+      "version_id": "21d04288-e654-49e1-bf43-c4555f2729db",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "e3f7d97c3707e88078ed93b0c619203495202f8bcff0e775490a7ec681687bf5",
+      "trigger": "Credible payment, settlement, part-payment, write-off, hold, or final-resolution evidence, including sent/outbox acknowledgement.",
+      "wiring": "The exact invoice_ops.py script and tracker adapter are absent from this checkout and not linked by the installer; external/live presence is unverified.",
+      "executor": "External invoice_ops.py update command named by the skill.",
+      "evidence_input_contract": "Exact invoice row plus payment source, paid date, settlement/exception details, and chase state.",
+      "gate": "Invoice gate/TOTP open for mutation; ambiguity asks Tom.",
+      "destination_readback": "Live Invoice tracker structured status/Paid/paid_date and chase fields; ACTIONED.md for watch-originated evidence; operational log; live row readback.",
+      "tests_gaps": "No invoice command/schema/readback tests.",
+      "disposition": "exact named executor absent from checkout; external/live presence and invocation unverified",
+      "prioritized_repairs": [
+        "P1 verify the external invoice-ops exact-row update contract",
+        "P1 test ambiguous target, gate, structured closure, and readback where implementation is maintained"
+      ],
+      "source_citations": [
+        "SKILL:invoice-close@21d04288-e654-49e1-bf43-c4555f2729db",
+        "attached_assets/integrations/microsoft/send.py:1-40"
+      ]
+    },
+    {
+      "name": "invoice-chase",
+      "skill_id": "2a0698f4-593e-4d3f-b916-c855719d692b",
+      "version_id": "9c2574bf-a7ca-448f-8996-dd33fadcf87b",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "96e577bf4f74b25d2053064d0db43cb85d655ccff6bc77e598856f432491ba8c",
+      "trigger": "Tom asks to walk through, prepare, or send an unpaid invoice chase, or a real unpaid-invoice review calls for one.",
+      "wiring": "The exact invoice chase executor and tracker adapter are absent from this checkout; generic send.py is not chase orchestration. External/live presence is unverified.",
+      "executor": "External invoice_ops.py chase --dry-run/--send.",
+      "evidence_input_contract": "Exact live invoice row, live billing recipient, account Current/contacts, due/status/auto-chase guardrails, dry-run draft and intended row delta.",
+      "gate": "Review/TOTP gate must be open for send; preparation is ungated; ambiguity asks Tom.",
+      "destination_readback": "assistant@ reminder, live tracker last-chased/next-chase/status/notes, operational log; post-send row readback.",
+      "tests_gaps": "No invoice chase tests or invoice gate mapping; generic send task-dispatch tests cannot prove invoice behavior.",
+      "disposition": "exact named executor absent from checkout; external/live presence and invocation unverified",
+      "prioritized_repairs": [
+        "P1 verify the external gated chase executor with recipient proof and idempotent send",
+        "P1 test post-send tracker/readback and blocked outcomes where implementation is maintained"
+      ],
+      "source_citations": [
+        "SKILL:invoice-chase@9c2574bf-a7ca-448f-8996-dd33fadcf87b",
+        "attached_assets/integrations/microsoft/send.py:105-111,370-427"
+      ]
+    },
+    {
+      "name": "governed-document",
+      "skill_id": "2ed0a315-c0e2-4cd9-ac7a-02d11b94db81",
+      "version_id": "45194928-5b7e-4651-84af-8896d0f87f68",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "3b49057c88d383b6f72ec7cd9babd4a78d8165b25d57adfb277c3b64933153b5",
+      "trigger": "Request to create or update a durable governed policy, process/skill, work instruction, tool, tracker, guide, or reference.",
+      "wiring": "Text/process guidance; no placement validator or document executor checked in.",
+      "executor": "Manual agent decision route using ORGANIZATION.md, SYSTEM_MAP.md, and relevant skills.",
+      "evidence_input_contract": "Classify artifact, establish why/when/where it is read, inspect governing routing stack, establish policy/process lineage and discoverability.",
+      "gate": "Classification and unambiguous canonical placement; app/system handoff requires app-plan run or explicit blocked state.",
+      "destination_readback": "Classification-dependent workspace root, skills, reference, or domain folder; file/routing/lineage checklist, no machine readback.",
+      "tests_gaps": "No governed-document tests.",
+      "disposition": "manual decision/process skill; no runtime executor expected",
+      "prioritized_repairs": [
+        "P2 add placement checklist automation only if document mutation becomes a product feature"
+      ],
+      "source_citations": ["SKILL:governed-document@45194928-5b7e-4651-84af-8896d0f87f68"]
+    },
+    {
+      "name": "invoice-generate",
+      "skill_id": "49c56b45-dc8e-4d64-8493-d93688284ae2",
+      "version_id": "f95cf1d6-dd81-4ed0-91ac-6fd7a9cd5b02",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "a26673c85ae6b7ee5d91e4b60b300f6044b1eab08e5a78bde6ee41d772092d3a",
+      "trigger": "Tom requests a new/corrected invoice or an existing tracker row needs PDF generation.",
+      "wiring": "The exact invoice_generate.py and invoice_ops.py scripts plus tracker adapter are absent from this checkout and not linked by the installer; external/live presence is unverified.",
+      "executor": "External invoice_generate.py using live invoice_ops lookup/update.",
+      "evidence_input_contract": "Exact live tracker row/number; client and static details from live row, SharePoint cache, contacts, or CRM; UTC-to-Europe/London dates; fresh transactional fields.",
+      "gate": "Exact row and complete payload; optional send gate/TOTP; PDF extraction comparison against live row; ambiguity fails closed.",
+      "destination_readback": "Branded PDF in client Finance SharePoint folder, SharePoint URL, live tracker link/status/date/chase fields; PDF text and tracker readback.",
+      "tests_gaps": "No generator, PDF, invoice tracker, or invoice readback tests.",
+      "disposition": "exact named scripts absent from checkout; external/live presence and invocation unverified",
+      "prioritized_repairs": [
+        "P1 verify the external executor and tracker schema",
+        "P1 add fixture-based PDF/live-row/readback tests and installer wiring where this checkout is authoritative"
+      ],
+      "source_citations": [
+        "SKILL:invoice-generate@f95cf1d6-dd81-4ed0-91ac-6fd7a9cd5b02",
+        "attached_assets/install-forked-openclaw.sh:932-974"
+      ]
+    },
+    {
+      "name": "crm-partnership",
+      "skill_id": "5b6d468e-28bc-4e66-bd78-7951ad3c0ea7",
+      "version_id": "146d3ad7-68d0-41ab-9aaf-b57b998bad70",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "069b5763239db6a80e8b75f8052c46e0902037840fc0535d0092446fae717010",
+      "trigger": "Strategic investor, introducer, referrer, collaboration partner, ecosystem relationship, or cross-opportunity strategic person.",
+      "wiring": "Generic SharePoint transport is available. This procedural/model skill is fetched by SkilzVolt; poll-crm proves only prospect CSV lead import. No dedicated deterministic partnership worker was observed in this checkout, but that does not establish model capability is absent.",
+      "executor": "Procedural/model skill capability; partnership invocation, attribution, writes, and readback are unverified.",
+      "evidence_input_contract": "Person identity, why strategically important, linked companies/opportunities, commercial interests, Tom intent, communication trail, next step, and mixed-topic linkage.",
+      "gate": "Exact context and person match; verified SharePoint result/cache; access or stale-state failures remain blocked.",
+      "destination_readback": "Partnerships/<Person>/<Person> - Current.md, dated artifacts, stackstone/partnerships.md, operational log, queue/cache proof.",
+      "tests_gaps": "No partnership invocation or multi-thread linkage tests/evidence.",
+      "disposition": "instruction-level/model capability exists; invocation, attributed writes, and readback unverified",
+      "prioritized_repairs": [
+        "P1 verify actual partnership skill invocation with exact-contact evidence",
+        "P1 capture cross-home artifacts and blocked-write recovery; deterministic worker productization is optional"
+      ],
+      "source_citations": [
+        "SKILL:crm-partnership@146d3ad7-68d0-41ab-9aaf-b57b998bad70",
+        "attached_assets/integrations/crm/poll-crm.py:1-28",
+        "attached_assets/install-forked-openclaw.sh:1107-1124,1265-1315"
+      ]
+    },
+    {
+      "name": "sharepoint",
+      "skill_id": "759bfcc5-e357-4f37-b03c-d846ff641e7d",
+      "version_id": "54bc7fe2-05b6-49b1-9a71-673337aaf286",
+      "version_number": 6,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "5e3aa15564c50b6446d1821ef5bec87916f8f46d860d7af79e9e8e648d61f2cc",
+      "trigger": "Every SharePoint-backed workflow including CRM, expenses, finance, and receipt evidence.",
+      "wiring": "Implemented seer_finance boundary, SharePointDocumentStore, locked queue processor, and cache poller; installer links cache every 15 minutes and queue every minute.",
+      "executor": "seer_finance.sharepoint_boundary plus SharePointDocumentStore; generic non-ledger producer is queue processor.",
+      "evidence_input_contract": "Index/cache manifest; workbook snapshot with authenticated eTag/version, exact bytes/hash, XLSX structure, semantic hash; complete text/binary operation fields and stable boundary ID.",
+      "gate": "Fresh authenticated snapshot, exact native preconditions, semantic hash, queue lock, machine result/readback; no-TOTP routine path; conflict requires fresh rebase.",
+      "destination_readback": "SharePoint cache/result for text, XLSX, and receipts; workbook requires success, operation ID/path/time, resulting eTag, exact readback hash, matching semantic hash; receipt requires uploaded/exists and original-byte hash.",
+      "tests_gaps": "Queue safety, cache, workbook authority, and e2e tests; historical 40 Microsoft tests passing; no live Graph/deployment proof.",
+      "disposition": "implemented transport boundary; live activation and domain invocation unproven",
+      "prioritized_repairs": [
+        "P1 reconcile live units, hashes, credentials/profile, and readback",
+        "P1 verify the CRM model-skill tool path and invoice producer without weakening generic queue safety; deterministic CRM consumer productization is optional"
+      ],
+      "source_citations": [
+        "SKILL:sharepoint@54bc7fe2-05b6-49b1-9a71-673337aaf286",
+        "pi-services/seer-finance/seer_finance/sharepoint_boundary.py:37-167",
+        "pi-services/seer-finance/seer_finance/ledger/sharepoint_contract.py:589-740,774-835",
+        "attached_assets/install-forked-openclaw.sh:1265-1315"
+      ]
+    },
+    {
+      "name": "crm-follow-up",
+      "skill_id": "85cc6732-6b38-4a35-87de-2f38f8fca4c2",
+      "version_id": "934c137d-e050-46a1-8843-c371b71cb844",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "264dd7a7b19a0ddca0294a75f91ba9b256515f171aed54fd8e4a156188852791",
+      "trigger": "Moment a commercial next action is chosen.",
+      "wiring": "Procedural/model decision guidance fetched by SkilzVolt and referenced by CRM skills. No deterministic caller was observed in this checkout; that does not prove model capability is absent.",
+      "executor": "Procedural/model decision capability; invocation and persistence/readback are unverified.",
+      "evidence_input_contract": "crm.md, SharePoint Current/artifacts, recent inbox/sent, TASKS, and Tom context; decide liveness, timing, blockers, relationship route, and lightest correct action.",
+      "gate": "Context blockers, evidence-backed alternate contact, dated owner/state/action output; uncertainty chooses lighter action or blocked/watch.",
+      "destination_readback": "Structured Next Step/Current.md control fields via invoking CRM workflow; persistence and readback not proven.",
+      "tests_gaps": "No follow-up invocation or persistence tests/evidence.",
+      "disposition": "instruction-level/model capability exists; invocation and persistence/readback unverified",
+      "prioritized_repairs": [
+        "P1 verify a skill invocation consumes structured output",
+        "P1 capture blocker, alternate-contact, and dated-action cases; deterministic worker productization is optional"
+      ],
+      "source_citations": [
+        "SKILL:crm-follow-up@934c137d-e050-46a1-8843-c371b71cb844",
+        "SKILL:crm-update@1f9721b4-10be-453c-985a-dde7a08e9755"
+      ]
+    },
+    {
+      "name": "finance",
+      "skill_id": "af4cb122-70a6-4698-a04b-7793049b5d3a",
+      "version_id": "1c4bd206-3a60-4bf7-ab4d-16cb6de398ff",
+      "version_number": 3,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "9b93733e8187add716230c2458a29ad53eda4505b682293086e6a8ffa449ae87",
+      "trigger": "Reviewed finance fact or finance ledger change.",
+      "wiring": "Implemented SharePoint boundary, workbook store, queue contract, and finance writer; live activation unproven.",
+      "executor": "seer_finance.sharepoint_boundary and SharePointFinanceWriter.",
+      "evidence_input_contract": "Authenticated finance workbook snapshot; complete merged XLSX bytes, content hash, native eTag, source hash, expected snapshot, semantic hash, source_ref, and generated operation ID.",
+      "gate": "No generic append/create; no invented eTag/ID; pending/blocked/rebase states fail closed; routine path no-TOTP.",
+      "destination_readback": "/Finance/Finance ledger.xlsx with machine success, ID/path/time, resulting eTag, exact readback SHA, matching semantic hash; SQLite/Markdown/queues recovery only.",
+      "tests_gaps": "Finance/workbook/queue/e2e tests present; no live SharePoint or skill invocation proof.",
+      "disposition": "source/runtime boundary aligned; activation and production deployment unproven",
+      "prioritized_repairs": [
+        "P1 perform read-only live deployment/source/hash/schedule reconciliation"
+      ],
+      "source_citations": [
+        "SKILL:finance@1c4bd206-3a60-4bf7-ab4d-16cb6de398ff",
+        "pi-services/seer-finance/README.md:17-65",
+        "pi-services/seer-finance/seer_finance/ledger/sharepoint_finance_writer.py:20-76"
+      ]
+    },
+    {
+      "name": "invoice-create",
+      "skill_id": "b12457cb-0563-4c51-94d3-e838f025abf5",
+      "version_id": "7ca3b387-fe08-446c-b23f-bfbfbcf2fff4",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "91af50038a0792efc6a4f188a4341372117858afb63a14924da40c5e0ec53db7",
+      "trigger": "Tom requests creation of a new invoice tracker row.",
+      "wiring": "The exact invoice_ops.py script and tracker adapter are absent from this checkout and not linked by the installer; external/live presence is unverified.",
+      "executor": "External invoice_ops.py create/create-from-context.",
+      "evidence_input_contract": "Exact entity, legal name, billing recipient, contact/address, work, amount, issue/due dates from CRM, Current, contacts, prior invoice, and live context; dry-run and duplicate check.",
+      "gate": "Ambiguous/missing fields ask Tom; row create only with gate/TOTP open; completion requires created/already exists/exact blocker.",
+      "destination_readback": "SharePoint Invoice tracker row and operational activity log; no repository-proven schema/readback.",
+      "tests_gaps": "No invoice create tests or executor in this checkout.",
+      "disposition": "exact named executor absent from checkout; external/live presence and invocation unverified",
+      "prioritized_repairs": [
+        "P1 verify exact tracker schema, ID allocation, dry-run, gate, and readback",
+        "P1 add idempotency and ambiguity tests where implementation is maintained"
+      ],
+      "source_citations": [
+        "SKILL:invoice-create@7ca3b387-fe08-446c-b23f-bfbfbcf2fff4",
+        "attached_assets/install-forked-openclaw.sh:949-960"
+      ]
+    },
+    {
+      "name": "crm-opportunity",
+      "skill_id": "d6691b0d-dde0-4f38-ad9e-b22c2bc001e8",
+      "version_id": "48236db6-3fc7-482c-bfc5-9b5e0d9eebe2",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "278b8da402cd12339b4100ba216ba83132a33dca570409d04aefb62a95364e65",
+      "trigger": "Lead moves beyond simple lead stage, website enquiry becomes real conversation, or paid work is booked.",
+      "wiring": "Procedural/model skill fetched by SkilzVolt; generic SharePoint transport is available and poll-crm proves only prospect CSV lead import. No dedicated deterministic stage worker was observed in this checkout, but that does not establish model capability is absent.",
+      "executor": "Procedural/model stage capability; invocation, stage attribution, writes, and readback are unverified.",
+      "evidence_input_contract": "Existing entity/folder match, stage evidence, concrete timeline/trigger next step, last touch, campaign eligibility, associated people, and paid/client status.",
+      "gate": "Exact entity match and stage evidence; stage >= Opportunity needs Current/artifacts and campaign exclusion; paid work must migrate to Account/Client.",
+      "destination_readback": "crm.md summary and SharePoint Current/artifacts with verified sharepoint_path; model-skill invocation/readback unverified.",
+      "tests_gaps": "No CRM opportunity invocation tests/evidence.",
+      "disposition": "instruction-level/model capability exists; invocation, attributed writes, and readback unverified",
+      "prioritized_repairs": [
+        "P1 verify stage/entity skill invocation",
+        "P1 capture promotion, paid migration, duplicate folder, next action, and readback evidence; deterministic worker productization is optional"
+      ],
+      "source_citations": [
+        "SKILL:crm-opportunity@48236db6-3fc7-482c-bfc5-9b5e0d9eebe2",
+        "attached_assets/integrations/crm/poll-crm.py:1-28,273-334"
+      ]
+    },
+    {
+      "name": "crm-update",
+      "skill_id": "d90f3d72-a16c-4842-a2ca-9cc1585434eb",
+      "version_id": "1f9721b4-10be-453c-985a-dde7a08e9755",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "7e5ca537303b2622fe08145110814e5844c80bb7abe0cdb18a71cb1a66b81e55",
+      "trigger": "Any CRM-relevant Tom message, /crm-update, inbox/sent/WhatsApp/LinkedIn movement, prospect CSV, bounce, unsubscribe, reply, or outbound work delivery.",
+      "wiring": "Procedural/model skill fetched by SkilzVolt; the body supplies CRM update capability and does not require a deterministic service. Installer declares one separate poll-crm.py CSV lead-import subroute at 08:00; installer execution and activation are unknown, and actual model-skill invocation is unverified.",
+      "executor": "poll-crm.py proves only narrow CSV lead import. Model-skill invocation for inbox/sent/WhatsApp/LinkedIn evidence, attribution, SharePoint writes, task closure, and readback is unverified; no deterministic worker was observed, which does not prove capability is absent.",
+      "evidence_input_contract": "Company+contact, visible body/source, speaker certainty, exact-name artifact, crm.md, partnerships.md, sent-emails.md, inboxes, SharePoint Current/artifacts, TASKS, monitored items, and operational log.",
+      "gate": "Exact multi-context attribution and rich-context escalation before reply; direct Graph full-register sweep requires TOTP; local poller has no domain readback gate.",
+      "destination_readback": "Claimed local CRM, SharePoint Current/artifacts, operational log, task/Discord/audit surfaces; observed poller subroute only local crm.md, local state, and log, with no SharePoint/readback. Full model-skill destination/readback is unverified.",
+      "tests_gaps": "No CRM test file; generic Microsoft tests are insufficient to prove model-skill invocation, complete evidence, attributed writes, or readback.",
+      "disposition": "instruction-level/model capability exists; actual invocation, complete evidence, attributed writes, and readback unverified",
+      "prioritized_repairs": [
+        "P1 verify representative crm-update invocations with source-cited evidence, attribution, next actions, SharePoint, tasks, audit, and readback",
+        "P1 keep poll-crm.py explicitly scoped as CSV lead import",
+        "P1 add CRM fixtures and regression evidence; deterministic reconciler/worker productization is optional"
+      ],
+      "source_citations": [
+        "SKILL:crm-update@1f9721b4-10be-453c-985a-dde7a08e9755",
+        "attached_assets/integrations/crm/poll-crm.py:1-28,119-161,273-334",
+        "attached_assets/install-forked-openclaw.sh:1107-1124"
+      ]
+    },
+    {
+      "name": "expenses",
+      "skill_id": "eecfdf76-8585-418c-b56c-412627538df5",
+      "version_id": "dfe79ed1-fbbc-4517-966f-a9e737aa66c0",
+      "version_number": 5,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "707d9ed324a8b0dcf53735099bdac93c3eb4b849de219b880290abfaba64861e",
+      "trigger": "Any plausible expense signal in trusted/external email, sent items, WhatsApp, Telegram, or monitored mirrors.",
+      "wiring": "Watcher invokes source-linked capture through seer_finance boundary; adapter delegates to SharePointExpenseRepository and SharePointFinanceWriter; reader, replay, enrichment, and receipt code are checked in.",
+      "executor": "expense-intake-watcher/watcher.py, seer_finance SharePoint repositories/writers, and locked SharePoint transport.",
+      "evidence_input_contract": "Stable source identity, exact invoice/receipt reference, supplier/amount/date/payment source/business purpose, attachment/evidence, unresolved fields, and machine-readable blocker.",
+      "gate": "Routine path is explicitly no-TOTP; authenticated workbook snapshot, native eTag/source hash, semantic hash, queue lock, machine result, and exact binary/semantic readback gate completion.",
+      "destination_readback": "Expenses workbook for review, Finance workbook after validated handoff, Expenses/Receipts for evidence; result ID/path/time/eTag/exact hash/semantic hash and source-linked row state required.",
+      "tests_gaps": "Watcher and seer-finance tests cover blocked/pending/readback/enrichment/workbook proof; historical 44 watcher and 40 Microsoft pass evidence; central activation versus legacy timer unresolved.",
+      "disposition": "implementation/boundary aligned; activation and duplicate-trigger state unproven",
+      "prioritized_repairs": [
+        "P1 reconcile and install one current central router/enrichment schedule",
+        "P1 prove one no-TOTP source-to-readback and finance handoff journey",
+        "P1 retire conflicting direct timer only after consumer/activation proof"
+      ],
+      "source_citations": [
+        "SKILL:expenses@dfe79ed1-fbbc-4517-966f-a9e737aa66c0",
+        "pi-services/expense-intake-watcher/watcher.py:1079-1113",
+        "pi-services/expense-intake-watcher/sharepoint_boundary.py:392-443",
+        "pi-services/expense-intake-watcher/OPERATING.md:9-64",
+        "pi-services/systemd-user/expense-intake-watcher.timer:1-11"
+      ]
+    },
+    {
+      "name": "invoice-update",
+      "skill_id": "fecdc038-7ac8-4727-9dd2-c2446c39003d",
+      "version_id": "03fa23f0-abd2-46da-aef9-a5f6362dfac7",
+      "version_number": 1,
+      "archived": false,
+      "version_is_current": true,
+      "content_sha256": "fc4bdefb2adf56f39da482b49f5580df454a6ce38d92e1759da3d637d7d56e72",
+      "trigger": "Invoice status question or sent/outbox evidence of invoice, reminder, chase, payment-adjacent, link/date/amount/notes movement.",
+      "wiring": "The exact invoice_ops.py script and tracker adapter are absent from this checkout and not linked by the installer; external/live presence is unverified.",
+      "executor": "External invoice_ops.py find/list/update.",
+      "evidence_input_contract": "Exact invoice number first or unique client/item match; live tracker row, explicit field diff, sent evidence, and ambiguity/conflict state.",
+      "gate": "Dry-run for non-trivial change; mutation only with gate/TOTP; ambiguous target asks Tom.",
+      "destination_readback": "Live Invoice tracker/API is authoritative; markdown mirror is secondary; post-update live-row readback and operational log with mirror lag as coverage_incomplete.",
+      "tests_gaps": "No invoice update executor, schema, or tests in this checkout.",
+      "disposition": "exact named executor absent from checkout; external/live presence and invocation unverified",
+      "prioritized_repairs": [
+        "P1 verify exact live-row lookup/update and readback",
+        "P1 test sent-mirror reconciliation, ambiguity, gate, and stale mirror where implementation is maintained"
+      ],
+      "source_citations": [
+        "SKILL:invoice-update@03fa23f0-abd2-46da-aef9-a5f6362dfac7",
+        "attached_assets/install-forked-openclaw.sh:949-960"
+      ]
+    }
+  ],
+  "prioritized_repairs": [
+    {
+      "priority": "P1",
+      "id": "CRM-INVOCATION-READBACK",
+      "repair": "Verify representative procedural/model CRM skill invocations for source evidence, exact entity/contact/speaker attribution, chronological state, local CRM control, SharePoint Current/artifacts, task closure, activity log, and queue/cache/readback proof. Keep poll-crm.py scoped to CSV lead import. Deterministic CRM worker productization is optional, not a required repair.",
+      "affected_skills": [
+        "crm-update",
+        "crm-sharepoint",
+        "crm-opportunity",
+        "crm-partnership",
+        "crm-follow-up"
+      ]
+    },
+    {
+      "priority": "P1",
+      "id": "INVOICE-EXECUTION",
+      "repair": "Reconcile external Pi ownership and verify the authoritative location of invoice_ops.py and invoice_generate.py (check in only if this checkout is authoritative; otherwise inventory the external source), including tracker schema, exact-row selectors, gate ownership, signed send authorization, PDF retention, post-send/close/update readback, IDs, and tests.",
+      "affected_skills": [
+        "invoice-create",
+        "invoice-generate",
+        "invoice-chase",
+        "invoice-update",
+        "invoice-close"
+      ]
+    },
+    {
+      "priority": "P1",
+      "id": "EXPENSE-ACTIVATION",
+      "repair": "Reconcile central mirror-router and legacy watcher units, activate one current route, prove no-TOTP source-to-capture/readback and enrichment-to-finance/readback journeys, and only then retire conflicting timer artifacts.",
+      "affected_skills": ["expenses", "finance", "sharepoint"]
+    },
+    {
+      "priority": "P1",
+      "id": "DOMAIN-PRODUCERS",
+      "repair": "Verify any CRM model-skill tool path and any invoice producer over the protected SharePoint transport. Preserve stable IDs, current snapshots, explicit pending/blocked/rebase states, and readback proof; deterministic CRM producer productization is optional and direct queue access must not expand.",
+      "affected_skills": [
+        "crm-sharepoint",
+        "crm-partnership",
+        "sharepoint",
+        "invoice-create",
+        "invoice-update"
+      ]
+    },
+    {
+      "priority": "P2",
+      "id": "SKILL-CONTRACT-REGISTER",
+      "repair": "After runtime evidence exists, revise only claims that remain unsupported: distinguish CSV lead import from full crm-update and publish exact invoice command/gate/readback citations. Preserve workbook authority and expense no-TOTP invariants.",
+      "affected_skills": [
+        "crm-update",
+        "invoice-create",
+        "invoice-generate",
+        "invoice-chase",
+        "invoice-update",
+        "invoice-close"
+      ]
+    },
+    {
+      "priority": "P2",
+      "id": "LIVE-ACTIVATION-EVIDENCE",
+      "repair": "Collect read-only live Pi service/unit/schedule/profile/token/checkout hashes and bounded readback receipts before declaring any skill active.",
+      "affected_skills": ["all"]
+    }
+  ]
+}
