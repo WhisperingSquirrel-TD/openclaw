@@ -46,6 +46,8 @@ branches (pattern: `review/<topic>-wip-<date>`, authored by "L1 Assistant"). Whe
   — if the branch's base predates later refactor commits that already landed on `main`, its diff
   will look like it's *reverting* those refactors as well as adding new code. That's a strong
   signal the branch is stale relative to `main`, not a parallel design worth reconciling.
+  **Do not blindly merge a stale branch**; compare it with current `main` first and extract only
+  a verified reusable change.
   - **`review/skilzvolt-tool-contract-oauth-wip-20260826` (decided 2026-08-26, deleted from
     GitHub):** an incomplete second SkilzVolt OAuth implementation via a generic
     `getMcpConnection`/`OpenClawPluginMcpConnection` plugin-registry capability. Diverged from an
