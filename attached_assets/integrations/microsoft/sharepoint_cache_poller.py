@@ -64,6 +64,11 @@ CACHEABLE_EXTENSIONS   = {".md", ".txt"}
 MAX_FILE_KB_DEFAULT    = 500
 
 BINARY_MAX_FILE_KB_DEFAULT = 5000  # 5 MB — binaries larger than this are skipped
+# Canonical ledgers are cached as exact XLSX bytes, not extracted markdown.
+# Keep this limit comfortably above normal workbooks (including >2 MB files)
+# while retaining a bounded memory/disk policy for a poller run.
+WORKBOOK_MAX_FILE_KB_DEFAULT = 64 * 1024
+WORKBOOK_EXTENSIONS = frozenset({".xlsx"})
 
 # Folders that should remain visible in SharePoint at the tree level but should
 # not be recursively traversed for local content mirroring. These are typically
@@ -95,6 +100,7 @@ try:
 except ImportError:
     _extract_binary_text      = None        # type: ignore
     EXTRACTABLE_EXTENSIONS    = frozenset()
+from sharepoint_workbook import semantic_sha256 as _workbook_semantic_sha256  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +566,23 @@ def _atomic_text_write(path: Path, content: str) -> None:
             Path(temporary).unlink(missing_ok=True)
 
 
+def _atomic_binary_write(path: Path, content: bytes) -> None:
+    """Publish exact remote bytes atomically, without a text/header wrapper."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary:
+            Path(temporary).unlink(missing_ok=True)
+
+
 def _cached_body_bytes(raw: bytes) -> bytes:
     """Remove exactly the poller header and its one separator line.
 
@@ -940,6 +963,78 @@ def main() -> None:
         if sync_paths and not _in_sync_paths(sp_path, sync_paths):
             continue
 
+        # ── Canonical XLSX workbooks — exact bytes only ─────────────────────
+        # Never route a ledger workbook through the markdown extractor.  The
+        # cache entry is a version-bound byte snapshot suitable for a later
+        # base_etag/expected_source_sha256 update.
+        if ext in WORKBOOK_EXTENSIONS:
+            workbook_max_file_bytes = int(
+                os.environ.get(
+                    "SHAREPOINT_MAX_WORKBOOK_KB", WORKBOOK_MAX_FILE_KB_DEFAULT
+                )
+            ) * 1024
+            if size > workbook_max_file_bytes:
+                size_kb = size // 1024
+                limit_kb = workbook_max_file_bytes // 1024
+                skipped[rel_path] = {
+                    "sp_path": sp_path,
+                    "size": size,
+                    "sp_modified": modified,
+                    "reason": "workbook_too_large",
+                    "reason_detail": (
+                        f"Workbook is {size_kb:,} KB — cache limit is "
+                        f"{limit_kb:,} KB"
+                    ),
+                }
+                log(
+                    f"  SKIP [workbook_too_large] {sp_path} "
+                    f"({size_kb} KB > {limit_kb} KB limit)"
+                )
+                continue
+
+            eligible_sp_paths.add(rel_path)
+            local_path = _local_path_for(sp_path)
+            try:
+                raw_bytes, remote = _fetch_consistent_file_content(
+                    token, site_id, drive_id, sp_path, binary=True,
+                )
+                raw_bytes = bytes(raw_bytes)
+                # Parsing is part of the cache trust boundary: a malformed
+                # package is never published as an authoritative workbook.
+                semantic_digest = _workbook_semantic_sha256(raw_bytes)
+                _atomic_binary_write(local_path, raw_bytes)
+                exact_hash = hashlib.sha256(raw_bytes).hexdigest()
+                cached[rel_path] = {
+                    "sp_path": sp_path,
+                    "size": len(raw_bytes),
+                    "sp_modified": modified,
+                    "etag": remote["etag"],
+                    "version": remote["version"],
+                    "synced_at": synced_at,
+                    "local_path": str(local_path.relative_to(WORKSPACE)),
+                    "content_sha256": exact_hash,
+                    "raw_content_sha256": exact_hash,
+                    "source_content_sha256": exact_hash,
+                    "semantic_sha256": semantic_digest,
+                    "semantic_workbook_sha256": semantic_digest,
+                    "binary": True,
+                    "workbook": True,
+                }
+                log(
+                    f"  CACHED XLSX {sp_path} ({len(raw_bytes) // 1024} KB, "
+                    f"semantic {semantic_digest[:12]}…)"
+                )
+            except Exception as e:
+                skipped[rel_path] = {
+                    "sp_path": sp_path,
+                    "size": size,
+                    "sp_modified": modified,
+                    "reason": "workbook_error",
+                    "reason_detail": f"Workbook fetch/validation error: {str(e)[:150]}",
+                }
+                log(f"  SKIP [workbook_error] {sp_path}: {e}")
+            continue
+
         # ── Text files (.md / .txt) ─────────────────────────────────────────
         if ext in CACHEABLE_EXTENSIONS:
             if size > max_file_bytes:
@@ -1092,7 +1187,14 @@ def main() -> None:
         }
         log(f"  SKIP [non_cacheable_type] {sp_path}")
 
-    log(f"Content sync done: {len(cached)} text cached, {len(extracted)} binary extracted, {len(skipped)} skipped")
+    workbook_count = sum(
+        1 for entry in cached.values() if entry.get("workbook")
+    )
+    log(
+        f"Content sync done: {len(cached)} files cached "
+        f"({workbook_count} exact XLSX), {len(extracted)} binary extracted, "
+        f"{len(skipped)} skipped"
+    )
 
     # Orphan cleanup — only performed when the Graph enumeration was complete.
     # If _collect_all_files raised at any point (full_scan_ok=False), we skip
@@ -1138,9 +1240,16 @@ def main() -> None:
             file_size = 0
         stale_synced_at = ""
         try:
-            first_line = local_path.read_text(encoding="utf-8", errors="ignore").split("\n", 1)[0]
-            if "synced:" in first_line:
-                stale_synced_at = first_line.split("synced:")[-1].strip(" -->").strip()
+            if Path(sp_key).suffix.lower() == ".xlsx":
+                # XLSX cache files contain no generated text header.  Their
+                # prior manifest timestamp is the only safe retained identity.
+                stale_synced_at = str(prior_entry.get("synced_at", ""))
+            else:
+                first_line = local_path.read_text(
+                    encoding="utf-8", errors="ignore"
+                ).split("\n", 1)[0]
+                if "synced:" in first_line:
+                    stale_synced_at = first_line.split("synced:")[-1].strip(" -->").strip()
         except OSError:
             pass
         entry = {
@@ -1165,7 +1274,19 @@ def main() -> None:
             entry["source_content_sha256"] = prior_entry.get(
                 "source_content_sha256", ""
             )
-        except (OSError, UnicodeError):
+            if Path(sp_key).suffix.lower() == ".xlsx":
+                entry["semantic_sha256"] = prior_entry.get("semantic_sha256", "")
+                if not entry["semantic_sha256"]:
+                    entry["semantic_sha256"] = _workbook_semantic_sha256(
+                        local_path.read_bytes()
+                    )
+                entry["semantic_workbook_sha256"] = entry["semantic_sha256"]
+                entry["binary"] = True
+                entry["workbook"] = True
+        except (OSError, UnicodeError, ValueError) as exc:
+            if Path(sp_key).suffix.lower() == ".xlsx":
+                log(f"  STALE NOT PUBLISHED: {rel_path} invalid XLSX cache: {exc}")
+                continue
             entry["content_sha256"] = (
                 prior_entry.get("content_sha256", "")
             )
@@ -1177,7 +1298,7 @@ def main() -> None:
         log(f"  STALE RETAINED: {rel_path} (previous copy kept)")
 
     log(
-        f"On-disk manifest: {len(cached)} text files, "
+        f"On-disk manifest: {len(cached)} cached files, "
         f"{len(extracted)} extracted binaries "
         f"(freshly synced + retained from previous runs)"
     )

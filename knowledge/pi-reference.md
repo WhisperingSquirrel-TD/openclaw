@@ -93,6 +93,17 @@ tail -f ~/.openclaw/gateway.log
 
 See [Skills path configuration](./integrations/skills.md) for the `skills.paths` requirement.
 
+### Canonical SharePoint workbooks
+
+The authoritative Office workbooks are `/Expenses/Expense ledger.xlsx` and
+`/Finance/Finance ledger.xlsx`. The SharePoint mirror stores their exact XLSX
+bytes (up to the 64 MB workbook cache limit, including workbooks larger than
+2 MB); it does not convert them into Markdown. Finance and transport agents
+must use the `seer_finance` `update_workbook` boundary with
+`content_base64`, `content_sha256`, `base_etag`, `expected_source_sha256`, and
+`semantic_sha256`. Direct queue-file access and generic append/create writes are
+not valid for these workbooks.
+
 ## Systemd user services on this Pi
 
 | Service                              | Purpose                          |

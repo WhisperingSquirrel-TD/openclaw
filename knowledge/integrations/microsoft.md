@@ -97,15 +97,36 @@ Entity-by-entity CRM normalisation using the Anthropic batch API (50% cost savin
 | File / Path                                                 | Purpose                                                                                                                       |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `~/.openclaw/workspace/SHAREPOINT_INDEX.md`                 | Full document tree: all paths, sizes, cached vs. skipped status                                                               |
-| `~/.openclaw/workspace/sharepoint-cache/<SP-path>`          | Local mirror of `.md`/`.txt` files (≤500 KB). Read directly — no queue needed. Each file starts with a sync-timestamp header. |
+| `~/.openclaw/workspace/sharepoint-cache/<SP-path>`          | Local mirror of `.md`/`.txt` files (≤500 KB), plus exact `.xlsx` workbooks (up to 64 MB). Read directly — no queue needed. Each file starts with a sync-timestamp header. |
 | `~/.openclaw/workspace/sharepoint-cache/.manifest.json`     | Per-file cache status plus exact source eTag, content version and SHA-256 used by version-checked writers                     |
-| `~/.openclaw/sharepoint-queue.json`                         | Processor-owned queue state. Producers must call the locked `enqueue_operation` contract; agents never edit this file directly. |
+| `~/.openclaw/sharepoint-queue.json`                         | Processor-owned queue state for non-ledger transport work. Producers must use the locked boundary; agents never edit this file directly. |
 | `~/.openclaw/workspace/SHAREPOINT_RESULT.md`                | Write results — check ~1 min after queuing to confirm success/failure                                                         |
 | `~/.openclaw/integrations/microsoft/sp-cache-poller.log`    | Cache poller log — check if index or cache is not updating                                                                    |
 | `~/.openclaw/integrations/microsoft/sp-queue-processor.log` | Queue processor log — check if writes are failing                                                                             |
 | `~/.openclaw/skills/sharepoint/SKILL.md`                    | L1 skill — read/write patterns, queue format, error states                                                                    |
 
-Cache refreshes every **15 minutes** via cron. Non-`.md`/`.txt` files (docx, pdf, xlsx) are indexed but not cached; use the queue to request content.
+Cache refreshes every **15 minutes** via cron. Text files remain capped at 500
+KB. Canonical `.xlsx` workbooks are cached as exact bytes, without Markdown
+extraction, up to the 64 MB workbook limit so files above 2 MB remain usable.
+Other binary files (docx, pdf, etc.) are indexed but not cached; use the
+approved transport boundary to request content.
+
+## Canonical expense and finance workbooks
+
+The business authorities are the existing Office workbooks:
+
+* `/Expenses/Expense ledger.xlsx`
+* `/Finance/Finance ledger.xlsx`
+
+Finance, expense, and transport agents must use the public `seer_finance`
+boundary's `update_workbook` operation. It accepts the complete
+`content_base64`, `content_sha256`, native `base_etag`,
+`expected_source_sha256`, and visible-table `semantic_sha256`. The boundary
+must preserve workbook tables and return exact remote readback proof plus
+Office semantic identity before a write can be reported as complete. Generic
+`append`/`create` operations are not valid for these paths, and agents must not
+read or write the queue file directly. Local Markdown, SQLite, JSON, and cache
+artifacts are migration/recovery state only.
 
 ## Email & calendar files
 

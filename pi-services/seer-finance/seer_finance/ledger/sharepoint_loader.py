@@ -10,8 +10,8 @@ from .sharepoint_contract import (
     FINANCE_LEDGER_PATH,
     SharePointDocumentStore,
     SharePointContractError,
-    parse_document,
 )
+from .workbook_codec import WorkbookCodec, WorkbookCodecError
 
 
 class SharePointLedgerLoadError(ValueError):
@@ -24,12 +24,8 @@ def load_finance_transactions_from_sharepoint(
     """Load strictly validated transactions; no Graph access is fabricated here."""
     document_store = store or SharePointDocumentStore(**store_paths)
     try:
-        content = document_store.read(FINANCE_LEDGER_PATH)
-        if content is None:
-            raise SharePointLedgerLoadError(
-                "authoritative SharePoint finance ledger is not present in the local cache"
-            )
-        value = parse_document(content, path=FINANCE_LEDGER_PATH)
+        snapshot = document_store.read_workbook_snapshot(FINANCE_LEDGER_PATH)
+        value = WorkbookCodec.decode_finance(snapshot["content_bytes"])
         if value.get("schema_version") != 1 or not isinstance(value.get("transactions"), list):
             raise SharePointLedgerLoadError("invalid authoritative SharePoint finance ledger")
         transactions: list[Transaction] = []
@@ -41,7 +37,7 @@ def load_finance_transactions_from_sharepoint(
             except TransactionValidationError as exc:
                 raise SharePointLedgerLoadError(f"invalid finance transaction at {index}: {exc}") from exc
         return transactions
-    except SharePointContractError as exc:
+    except (SharePointContractError, WorkbookCodecError) as exc:
         raise SharePointLedgerLoadError(str(exc)) from exc
 
 

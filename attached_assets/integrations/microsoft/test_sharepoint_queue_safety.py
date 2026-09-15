@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import importlib.util
+import hashlib
+import io
 import json
 import subprocess
 import tempfile
 import threading
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -322,6 +325,86 @@ class SharePointWriteSafetyTests(unittest.TestCase):
         put_call = next(kwargs for method, kwargs in calls if method == "put")
         self.assertEqual(put_call["headers"]["If-Match"], '"etag-v1"')
         self.assertEqual([method for method, _ in calls], ["get", "put", "get"])
+
+    def test_receipt_queue_adapter_consumes_real_upload_cli_json_proof(self):
+        receipt = Path(self.tempdir.name) / "receipt.pdf"
+        receipt.write_bytes(b"receipt bytes")
+        sp_path = "/Expenses/Receipts/" + "a" * 64 + "-receipt.pdf"
+        old_script = queue_processor.SP_SCRIPT
+        queue_processor.SP_SCRIPT = Path(self.tempdir.name) / "sharepoint.py"
+        queue_processor.SP_SCRIPT.write_text("# fixture")
+        responses = [
+            Response(status_code=404),
+            Response(content=receipt.read_bytes()),
+        ]
+        uploaded = Response(payload={
+            "eTag": '"receipt-v1"',
+            "size": receipt.stat().st_size,
+            "webUrl": "https://example.invalid/receipt.pdf",
+        })
+        try:
+            with patch.object(sharepoint.requests, "get", side_effect=responses), \
+                 patch.object(
+                     sharepoint.requests,
+                     "put",
+                     return_value=uploaded,
+                 ):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    sharepoint.cmd_upload(
+                        "token",
+                        sp_path,
+                        "site",
+                        "drive",
+                        str(receipt),
+                        "application/pdf",
+                    )
+            cli_proof = json.loads(output.getvalue())
+            self.assertEqual("uploaded", cli_proof["status"])
+            self.assertEqual(sp_path, cli_proof["path"])
+            self.assertEqual('"receipt-v1"', cli_proof["etag"])
+            self.assertEqual(
+                hashlib.sha256(receipt.read_bytes()).hexdigest(),
+                cli_proof["readback_sha256"],
+            )
+
+            entry = {
+                "id": "receipt-proof",
+                "operation": "upload_binary",
+                "path": sp_path,
+                "source_path": str(receipt),
+                "content_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest(),
+                "mime_type": "application/pdf",
+            }
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=output.getvalue(),
+                stderr="",
+            )
+            with patch.object(
+                queue_processor.subprocess,
+                "run",
+                return_value=completed,
+            ) as runner:
+                success, adapter_output = queue_processor._run_binary_upload_operation(entry)
+            self.assertTrue(success)
+            self.assertEqual(cli_proof, json.loads(adapter_output))
+            self.assertEqual(
+                [
+                    "python3",
+                    str(queue_processor.SP_SCRIPT),
+                    "upload",
+                    sp_path,
+                    "--content-file",
+                    str(receipt),
+                    "--mime-type",
+                    "application/pdf",
+                ],
+                runner.call_args.args[0],
+            )
+        finally:
+            queue_processor.SP_SCRIPT = old_script
 
     def test_update_conflict_never_writes_and_ledger_requires_base_etag(self):
         responses = [Response(payload={"eTag": '"remote-v2"'})]

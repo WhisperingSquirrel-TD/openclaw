@@ -1,10 +1,17 @@
 # SharePoint authority cutover review procedure
 
-The live seer-finance boundary targets SharePoint documents
-`/Expenses/Expense ledger.md` and `/Finance/Finance ledger.md`. This package does
+The live seer-finance boundary targets SharePoint workbooks
+`/Expenses/Expense ledger.xlsx` and `/Finance/Finance ledger.xlsx`. This package does
 not perform Graph operations or claim a completed cutover: queue processing and
 cache readback must be independently verified before a write is accepted.
 Legacy JSON and local SQLite are migration/recovery inputs only.
+
+Every repository mutation carries the exact decoded cache snapshot that produced
+it through the binary `update_workbook` request. It must not reread and
+authorize against a newer cache snapshot; a concurrent human edit therefore
+causes a queue rebase failure rather than a silent whole-workbook overwrite.
+Workbook updates preserve supported source-package formatting/comments/widths/
+validations and fail closed for unsupported package features.
 
 ## Safe migration/recovery parity check
 
@@ -41,5 +48,6 @@ verified SQLite backup/restore check. It does not make SQLite authoritative.
 3. Do not overwrite legacy JSON, SharePoint documents, or a live runtime record.
    Recovery means restoring an isolated verified SQLite copy and replaying through
    the SharePoint boundary after external queue/readback verification.
-4. Treat SharePoint as authoritative only after processed-success results and
-   exact cache readback have been observed for the destination document.
+4. Treat SharePoint as authoritative only after processed-success results,
+   exact XLSX byte readback, and matching visible-table semantic proof have
+   been observed for the destination workbook.

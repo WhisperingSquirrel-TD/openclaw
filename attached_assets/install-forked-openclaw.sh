@@ -1198,6 +1198,26 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# seer-finance workbook boundary — the canonical expense and finance ledgers
+# are XLSX files. Install its declared runtime dependency before any watcher
+# or boundary import; do not substitute Markdown or a local ledger.
+# ---------------------------------------------------------------------------
+SEER_FINANCE_ROOT="$HOME/openclaw/pi-services/seer-finance"
+SEER_FINANCE_REQUIREMENTS="$SEER_FINANCE_ROOT/requirements.txt"
+if [ ! -f "$SEER_FINANCE_REQUIREMENTS" ]; then
+    fail "seer-finance requirements not found at $SEER_FINANCE_REQUIREMENTS; refusing to install without the XLSX dependency"
+fi
+if python3 -c "import openpyxl" >/dev/null 2>&1; then
+    info "seer-finance workbook dependency already installed: openpyxl"
+else
+    pip3 install --quiet --break-system-packages --timeout 120 -r "$SEER_FINANCE_REQUIREMENTS" \
+        || fail "seer-finance dependency install failed; refusing to continue without openpyxl"
+    python3 -c "import openpyxl" >/dev/null 2>&1 \
+        || fail "openpyxl is still unavailable after installation; refusing to start workbook services"
+    info "seer-finance workbook dependency installed from requirements.txt"
+fi
+
+# ---------------------------------------------------------------------------
 # SharePoint binary extractor — shared library used by both the cache poller
 # and the queue processor. Deploy first so both can import it.
 # Supports: .docx (python-docx), .pdf (pdfminer.six), .pptx (python-pptx),
@@ -1234,10 +1254,19 @@ else
     warn "SharePoint binary extractor not found at $SP_EXTRACTOR_SRC — skipping"
 fi
 
+# The workbook semantic codec is imported as a sibling by the cache poller,
+# queue processor, and assistant-owned Graph CLI. Deploy it beside both
+# transport entry points; linking only sharepoint.py leaves the cron workers
+# unable to import their XLSX validation dependency.
+SP_WORKBOOK_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_workbook.py"
+deploy_integration "$SP_WORKBOOK_SRC" "$HOME/.openclaw/integrations/microsoft/sharepoint_workbook.py"
+deploy_integration "$SP_WORKBOOK_SRC" "$HOME/.openclaw/integrations/microsoft-l1/sharepoint_workbook.py"
+
 # ---------------------------------------------------------------------------
 # SharePoint cache poller — runs every 15 min.
 # Writes SHAREPOINT_INDEX.md (document tree) AND mirrors content locally:
-#   • .md / .txt files — raw text cached directly
+#   • .md / .txt files — raw text cached directly (≤500 KB)
+#   • .xlsx workbooks — exact bytes cached directly (up to 64 MB; no truncation)
 #   • .docx / .pdf / .pptx / .msg — text extracted into <file>.extracted.md
 # L1 reads all of these directly from sharepoint-cache/ with no queue entry.
 # ---------------------------------------------------------------------------
@@ -1260,10 +1289,11 @@ fi
 
 # ---------------------------------------------------------------------------
 # SharePoint queue processor — runs every 1 min.
-# Handles WRITE ops (create/update/append) AND on-demand binary reads
+# Handles non-ledger WRITE ops (create/update/append) AND on-demand binary reads
 # (read_binary). Agents and producers must use the processor's locked
-# enqueue_operation contract; they must never edit sharepoint-queue.json
-# directly. Results land in the machine-readable receipt log and cache.
+# transport contract; they must never edit sharepoint-queue.json directly.
+# Canonical XLSX ledgers use seer_finance.update_workbook instead. Results land
+# in the machine-readable receipt log and cache.
 # ---------------------------------------------------------------------------
 SP_QUEUE_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_queue_processor.py"
 SP_QUEUE_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_queue_processor.py"
@@ -1280,7 +1310,7 @@ if [ -f "$SP_QUEUE_SRC" ]; then
 
     SP_QUEUE_CRON="* * * * * python3 $SP_QUEUE_DST >> $SP_QUEUE_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "sharepoint_queue_processor.py"; echo "$SP_QUEUE_CRON" ) | crontab -
-    info "SharePoint queue processor cron installed: every 1 minute → writes + on-demand binary reads"
+    info "SharePoint transport processor cron installed: every 1 minute → non-ledger writes + on-demand binary reads"
 else
     warn "SharePoint queue processor not found at $SP_QUEUE_SRC — skipping"
 fi

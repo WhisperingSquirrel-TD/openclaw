@@ -13,19 +13,18 @@ that the canonical document contains the requested content.
 """
 from __future__ import annotations
 
-import importlib
-import fcntl
+import base64
+import binascii
 import hashlib
-import json
+import importlib
 import os
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol, runtime_checkable
 
-EXPENSE_LEDGER_PATH = "/Expenses/Expense ledger.md"
-FINANCE_LEDGER_PATH = "/Finance/Finance ledger.md"
+EXPENSE_LEDGER_PATH = "/Expenses/Expense ledger.xlsx"
+FINANCE_LEDGER_PATH = "/Finance/Finance ledger.xlsx"
 
 
 class SharePointBoundaryError(RuntimeError):
@@ -108,135 +107,46 @@ class UnavailableBoundary:
             "seer-finance SharePoint authority is unavailable; no local ledger fallback is permitted"
         )
 
+    def write_workbook_verified(
+        self,
+        path: str,
+        content_base64: str,
+        *,
+        content_sha256: str,
+        base_etag: str,
+        expected_source_sha256: str,
+        expected_snapshot: Mapping[str, Any] | None = None,
+        semantic_sha256: str,
+    ) -> BoundaryResult:
+        del (
+            content_base64,
+            content_sha256,
+            base_etag,
+            expected_source_sha256,
+            expected_snapshot,
+            semantic_sha256,
+        )
+        return BoundaryResult(
+            operation="update_workbook",
+            path=path,
+            accepted=False,
+            verified=False,
+            blocker="seer-finance workbook authority is unavailable",
+        )
 
-class QueueBoundary:
-    """Operational queue adapter for deployments with an external writer.
+    update_workbook = write_workbook_verified
 
-    This is intentionally not a business-authority fallback.  It records a
-    bounded retry request and reports ``verified=False`` until the writer (or
-    the seer-finance implementation) performs readback.
+
+class QueueBoundary(UnavailableBoundary):
+    """Compatibility name for the retired direct-queue adapter.
+
+    Older tests/importers may still refer to ``QueueBoundary``.  It deliberately
+    performs no filesystem queue operation: canonical workbook writes can only
+    use the seer-finance boundary, and an unavailable boundary must fail closed.
     """
 
     def __init__(self, queue_path: str | Path | None = None) -> None:
-        self.queue_path = Path(
-            queue_path
-            or os.environ.get(
-                "OPENCLAW_SHAREPOINT_QUEUE",
-                str(Path.home() / ".openclaw" / "sharepoint-queue.json"),
-            )
-        )
-        self.lock_path = Path(
-            os.environ.get(
-                "SEER_FINANCE_SHAREPOINT_QUEUE_LOCK",
-                str(self.queue_path.parent / "integrations" / "microsoft" / "sp-queue.lock"),
-            )
-        )
-
-    def write_verified(
-        self,
-        path: str,
-        content: str,
-        *,
-        operation: str = "append",
-        base_etag: str | None = None,
-        expected_source_sha256: str | None = None,
-    ) -> BoundaryResult:
-        if operation not in {"create", "update", "append"}:
-            raise ValueError("unsupported SharePoint write operation")
-        if path not in {EXPENSE_LEDGER_PATH, FINANCE_LEDGER_PATH}:
-            raise ValueError("finance boundary only permits canonical ledger paths")
-        if path in {EXPENSE_LEDGER_PATH, FINANCE_LEDGER_PATH} and (
-            operation != "update" or not base_etag or not expected_source_sha256
-        ):
-            return BoundaryResult(
-                operation=operation,
-                path=path,
-                accepted=False,
-                verified=False,
-                blocker=(
-                    "canonical ledger queue requests require seer-finance "
-                    "base_etag and expected_source_sha256"
-                ),
-            )
-        if expected_source_sha256 and (
-            len(expected_source_sha256) != 64
-            or any(character not in "0123456789abcdef" for character in expected_source_sha256.lower())
-        ):
-            raise ValueError("expected_source_sha256 must be a SHA-256 hex digest")
-        operation_id = "finance-boundary-" + hashlib.sha256(
-            f"{path}\0{content}\0{base_etag or ''}\0{expected_source_sha256 or ''}".encode("utf-8")
-        ).hexdigest()
-        item = {
-            "id": operation_id,
-            "operation": operation,
-            "path": path,
-            "content": content,
-            "verify_readback": True,
-            "no_totp": True,
-        }
-        if base_etag:
-            item["base_etag"] = base_etag
-        if expected_source_sha256:
-            item["expected_source_sha256"] = expected_source_sha256.lower()
-        self.enqueue_operation(item)
-        return BoundaryResult(
-            operation=operation,
-            path=path,
-            accepted=True,
-            verified=False,
-            blocker="SharePoint write queued; verified readback is pending",
-        )
-
-    def enqueue_operation(self, operation: Mapping[str, Any]) -> bool:
-        """Append using the same flock/atomic producer protocol as the processor."""
-        if not isinstance(operation, Mapping):
-            raise TypeError("SharePoint queue operation must be an object")
-        item = dict(operation)
-        operation_id = str(item.get("id") or "").strip()
-        if not operation_id:
-            raise ValueError("SharePoint queue operation requires a stable id")
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        self.queue_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.lock_path.open("a+") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
-                try:
-                    current = json.loads(self.queue_path.read_text(encoding="utf-8"))
-                except FileNotFoundError:
-                    current = []
-                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-                    raise SharePointBoundaryError(
-                        f"SharePoint operation queue is malformed: {exc}"
-                    ) from exc
-                if not isinstance(current, list):
-                    raise SharePointBoundaryError("SharePoint operation queue is malformed")
-                if any(
-                    isinstance(existing, dict) and str(existing.get("id", "")) == operation_id
-                    for existing in current
-                ):
-                    return False
-                with tempfile.NamedTemporaryFile(
-                    mode="w",
-                    encoding="utf-8",
-                    dir=self.queue_path.parent,
-                    prefix=f".{self.queue_path.name}.",
-                    suffix=".tmp",
-                    delete=False,
-                ) as handle:
-                    json.dump(current + [item], handle, indent=2)
-                    handle.write("\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                    temporary = Path(handle.name)
-                temporary.replace(self.queue_path)
-                return True
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-
-    def read(self, path: str) -> str:
-        raise SharePointBoundaryError(
-            f"SharePoint readback unavailable for {path}; queued writes remain operational recovery state"
-        )
+        del queue_path
 
 
 class _ReadbackRequiredStore:
@@ -252,6 +162,7 @@ class _ReadbackRequiredStore:
         self.transport = transport
         self.store = transport.store
         self._snapshots: dict[str, str] = {}
+        self._workbook_snapshots: dict[str, tuple[str, str]] = {}
 
     def read(self, path: str) -> str:
         content = self.transport.read(path)
@@ -272,6 +183,87 @@ class _ReadbackRequiredStore:
             )
         return self.store.write(**kwargs)
 
+    def read_workbook_snapshot(self, path: str) -> dict[str, Any]:
+        """Read an authenticated XLSX snapshot and retain its exact base proof.
+
+        The repositories deliberately depend on this richer interface rather
+        than ``read()``: workbook updates need the original bytes' SHA-256 and
+        native eTag, not a decoded text representation.
+        """
+        reader = getattr(self.transport, "read_workbook_snapshot", None)
+        if not callable(reader):
+            reader = getattr(self.store, "read_workbook_snapshot", None)
+        if not callable(reader):
+            raise SharePointBoundaryError(
+                "seer-finance transport does not expose read_workbook_snapshot"
+            )
+        snapshot = reader(path)
+        if not isinstance(snapshot, dict):
+            raise SharePointBoundaryError("seer-finance workbook snapshot is not an object")
+        etag = snapshot.get("etag")
+        content_sha256 = snapshot.get("content_sha256")
+        content_bytes = snapshot.get("content_bytes")
+        if (
+            not isinstance(etag, str)
+            or not etag
+            or not isinstance(content_sha256, str)
+            or not content_sha256
+            or not isinstance(content_bytes, (bytes, bytearray))
+        ):
+            raise SharePointBoundaryError(
+                "seer-finance workbook snapshot lacks authenticated bytes, etag, or hash"
+            )
+        if hashlib.sha256(bytes(content_bytes)).hexdigest() != content_sha256:
+            raise SharePointBoundaryError(
+                f"seer-finance workbook snapshot hash does not match authenticated bytes for {path}"
+            )
+        self._workbook_snapshots[path] = (etag, content_sha256)
+        return snapshot
+
+    def write_workbook(self, **kwargs: Any) -> str:
+        """Write only against the exact workbook snapshot previously read."""
+        path = str(kwargs.get("path", ""))
+        expected = self._workbook_snapshots.get(path)
+        if expected is None:
+            raise SharePointBoundaryError(
+                f"cannot write {path}: authoritative workbook was not read first"
+            )
+        if kwargs.get("base_etag") != expected[0]:
+            raise SharePointBoundaryError(
+                f"cannot write {path}: base_etag does not match the authenticated snapshot"
+            )
+        if kwargs.get("expected_source_sha256") != expected[1]:
+            raise SharePointBoundaryError(
+                f"cannot write {path}: expected_source_sha256 does not match the authenticated snapshot"
+            )
+        encoded = kwargs.get("content_base64")
+        content_sha256 = kwargs.get("content_sha256")
+        if not isinstance(encoded, str) or not isinstance(content_sha256, str):
+            raise SharePointBoundaryError(
+                f"cannot write {path}: workbook content and content_sha256 are required"
+            )
+        try:
+            content_bytes = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise SharePointBoundaryError(
+                f"cannot write {path}: workbook content_base64 is invalid"
+            ) from exc
+        if hashlib.sha256(content_bytes).hexdigest() != content_sha256:
+            raise SharePointBoundaryError(
+                f"cannot write {path}: content_sha256 does not match content_base64"
+            )
+        current = self.read_workbook_snapshot(path)
+        if (current.get("etag"), current.get("content_sha256")) != expected:
+            raise SharePointBoundaryError(
+                f"cannot write {path}: authoritative workbook changed during preparation"
+            )
+        writer = getattr(self.store, "write_workbook", None)
+        if not callable(writer):
+            raise SharePointBoundaryError(
+                "seer-finance transport does not expose write_workbook"
+            )
+        return writer(**kwargs)
+
 
 class _SeerFinanceBoundaryAdapter:
     """Adapt the concurrent seer-finance public boundary to this protocol."""
@@ -289,12 +281,110 @@ class _SeerFinanceBoundaryAdapter:
         base_etag: str | None = None,
         expected_source_sha256: str | None = None,
     ) -> BoundaryResult:
+        if path in {EXPENSE_LEDGER_PATH, FINANCE_LEDGER_PATH} or path.lower().endswith(".xlsx"):
+            return BoundaryResult(
+                operation=operation,
+                path=path,
+                accepted=False,
+                verified=False,
+                blocker=(
+                    "canonical XLSX paths require seer-finance "
+                    "write_workbook_verified/update_workbook"
+                ),
+            )
         kwargs: dict[str, Any] = {"operation": operation}
         if base_etag is not None:
             kwargs["base_etag"] = base_etag
         if expected_source_sha256 is not None:
             kwargs["expected_source_sha256"] = expected_source_sha256
         return self.transport.write_verified(path, content, **kwargs)
+
+    def write_workbook_verified(
+        self,
+        path: str,
+        content_base64: str,
+        *,
+        content_sha256: str,
+        base_etag: str,
+        expected_source_sha256: str,
+        expected_snapshot: Mapping[str, Any] | None = None,
+        semantic_sha256: str,
+    ) -> BoundaryResult:
+        """Forward the complete workbook contract without queue-file access."""
+        method = getattr(self.transport, "write_workbook_verified", None)
+        if not callable(method):
+            return BoundaryResult(
+                operation="update_workbook",
+                path=path,
+                accepted=False,
+                verified=False,
+                blocker="seer-finance workbook boundary is unavailable",
+            )
+        snapshot_kwargs = (
+            {"expected_snapshot": expected_snapshot}
+            if expected_snapshot is not None
+            else {}
+        )
+        try:
+            result = method(
+                path,
+                content_base64,
+                content_sha256=content_sha256,
+                base_etag=base_etag,
+                expected_source_sha256=expected_source_sha256,
+                **snapshot_kwargs,
+                semantic_sha256=semantic_sha256,
+            )
+        except TypeError as exc:
+            # Current seer-finance releases used the longer internal keyword;
+            # keep the public watcher contract stable while accepting that
+            # release during the staged deployment.
+            if "semantic_sha256" not in str(exc):
+                raise
+            result = method(
+                path,
+                content_base64,
+                content_sha256=content_sha256,
+                base_etag=base_etag,
+                expected_source_sha256=expected_source_sha256,
+                **snapshot_kwargs,
+                semantic_workbook_sha256=semantic_sha256,
+            )
+        if not isinstance(result, BoundaryResult):
+            raise SharePointBoundaryError("seer-finance workbook boundary returned an invalid result")
+        return result
+
+    update_workbook = write_workbook_verified
+
+    def upload_receipt_verified(
+        self,
+        *,
+        path: str,
+        source_ref: str,
+        local_path: Path,
+        content_sha256: str,
+        mime_type: str,
+    ) -> BoundaryResult:
+        """Forward receipt evidence when the authority explicitly supports it."""
+        method = getattr(self.transport, "upload_receipt_verified", None)
+        if not callable(method):
+            return BoundaryResult(
+                operation="upload_binary",
+                path=path,
+                accepted=False,
+                verified=False,
+                blocker="seer-finance receipt boundary is unavailable",
+            )
+        result = method(
+            path=path,
+            source_ref=source_ref,
+            local_path=local_path,
+            content_sha256=content_sha256,
+            mime_type=mime_type,
+        )
+        if not isinstance(result, BoundaryResult):
+            raise SharePointBoundaryError("seer-finance receipt boundary returned an invalid result")
+        return result
 
     def read(self, path: str) -> str:
         return self.transport.read(path)
@@ -330,7 +420,7 @@ class _SeerFinanceBoundaryAdapter:
             canonical_ref=f"{EXPENSE_LEDGER_PATH}#{expense.expense_id}",
         )
 
-    def append_validated_expense(self, candidate: Mapping[str, Any]) -> BoundaryResult:
+    def update_validated_expense(self, candidate: Mapping[str, Any]) -> BoundaryResult:
         module = importlib.import_module("seer_finance.ledger.sharepoint_finance_writer")
         loader = importlib.import_module("seer_finance.ledger.loader")
         try:
@@ -338,20 +428,19 @@ class _SeerFinanceBoundaryAdapter:
             reference = module.SharePointFinanceWriter(store=self.store).validate_and_write(transaction)
         except Exception as exc:
             return BoundaryResult(
-                operation="append",
+                operation="update_workbook",
                 path=FINANCE_LEDGER_PATH,
                 accepted=True,
                 verified=False,
                 blocker=f"SharePoint finance write pending readback: {exc}",
             )
         return BoundaryResult(
-            operation="append",
+            operation="update_workbook",
             path=FINANCE_LEDGER_PATH,
             accepted=True,
             verified=True,
             canonical_ref=reference,
         )
-
 
 def _candidate_modules() -> tuple[str, ...]:
     # The Pi service is installed beside the source-only seer-finance package,
@@ -389,8 +478,6 @@ def resolve_boundary() -> SharePointBoundary:
                 candidate = candidate()
             if isinstance(candidate, SharePointBoundary):
                 return _SeerFinanceBoundaryAdapter(candidate)
-    if os.environ.get("OPENCLAW_SHAREPOINT_QUEUE"):
-        return QueueBoundary()
     return UnavailableBoundary()
 
 
@@ -404,6 +491,17 @@ def write_verified(
     boundary: SharePointBoundary | None = None,
 ) -> BoundaryResult:
     """Write through the authority and require verified readback."""
+    if path in {EXPENSE_LEDGER_PATH, FINANCE_LEDGER_PATH} or path.lower().endswith(".xlsx"):
+        return BoundaryResult(
+            operation=operation,
+            path=path,
+            accepted=False,
+            verified=False,
+            blocker=(
+                "canonical XLSX paths require seer-finance "
+                "write_workbook_verified/update_workbook"
+            ),
+        )
     target = boundary or resolve_boundary()
     kwargs: dict[str, Any] = {"operation": operation}
     if base_etag is not None:

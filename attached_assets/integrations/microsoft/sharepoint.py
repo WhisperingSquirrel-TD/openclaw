@@ -63,9 +63,17 @@ import argparse
 import hashlib
 import json
 import sys
+from pathlib import Path
 import requests
 from datetime import datetime
-from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+from sharepoint_workbook import (  # type: ignore
+    XLSX_CONTENT_TYPE,
+    is_canonical_workbook_path,
+    is_sha256,
+    semantic_sha256 as workbook_semantic_sha256,
+)
 
 STATE_DIR  = Path.home() / ".openclaw"
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -124,7 +132,7 @@ def parse_args() -> argparse.Namespace:
         description="OpenClaw SharePoint document manager (assistant@ identity)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("command", choices=["list", "read", "create", "update", "append", "upload", "move", "delete_folder", "reauth"],
+    p.add_argument("command", choices=["list", "read", "create", "update", "append", "update_workbook", "upload", "move", "delete_folder", "reauth"],
                    help="Operation to perform")
     p.add_argument("path", nargs="?", default="",
                    help="SharePoint path, e.g. /Stackstone CRM/Opportunities/Harken Health.md")
@@ -136,6 +144,13 @@ def parse_args() -> argparse.Namespace:
                    help="Required source eTag for an optimistic update/append")
     p.add_argument("--expected-source-sha256", default=None,
                    help="Expected SHA-256 of the source content before an update")
+    p.add_argument("--content-sha256", default=None,
+                   help="SHA-256 of the exact content file bytes")
+    p.add_argument(
+        "--semantic-sha256", "--semantic-workbook-sha256",
+        dest="semantic_sha256", default=None,
+        help="Semantic SHA-256 of canonical XLSX cells/tables",
+    )
     p.add_argument("--mime-type", default=None,
                    help="For upload: original binary MIME type (required)")
     p.add_argument("--destination", default=None,
@@ -520,6 +535,10 @@ def _is_ledger_update_path(sp_path: str) -> bool:
     return sp_path.strip("/").casefold() in LEDGER_UPDATE_PATHS
 
 
+def _is_canonical_workbook(sp_path: str) -> bool:
+    return is_canonical_workbook_path(sp_path)
+
+
 def _validate_source_sha256(value: str | None) -> str:
     value = str(value or "").strip().lower()
     if value and (len(value) != 64 or any(char not in "0123456789abcdef" for char in value)):
@@ -662,10 +681,14 @@ def cmd_read(access_token: str, sp_path: str, site_id: str, drive_id: str) -> No
 def cmd_create(access_token: str, sp_path: str, site_id: str, drive_id: str,
                content_file: str, allow_overwrite: bool) -> None:
     sp_path = _normalise_path(sp_path)
-    if _is_ledger_update_path(sp_path):
+    if _is_ledger_update_path(sp_path) or _is_canonical_workbook(sp_path):
         print(
             f"ERROR: Generic create is refused for authoritative ledger {sp_path}; "
-            "use the seer-finance gated bootstrap mechanism",
+            + (
+                "use the update_workbook operation"
+                if _is_canonical_workbook(sp_path)
+                else "use the seer-finance gated bootstrap mechanism"
+            ),
             file=sys.stderr,
         )
         sys.exit(3)
@@ -730,6 +753,13 @@ def cmd_upload(access_token: str, sp_path: str, site_id: str, drive_id: str,
     filename and a retry treats Graph's conflict as a harmless blocked state.
     """
     sp_path = _normalise_path(sp_path)
+    if _is_canonical_workbook(sp_path):
+        print(
+            f"ERROR: Generic upload is refused for canonical workbook path {sp_path}; "
+            "use the update_workbook operation",
+            file=sys.stderr,
+        )
+        sys.exit(3)
     if not mime_type or "/" not in mime_type or "\n" in mime_type:
         print("ERROR: --mime-type must be a valid MIME type", file=sys.stderr)
         sys.exit(3)
@@ -737,9 +767,14 @@ def cmd_upload(access_token: str, sp_path: str, site_id: str, drive_id: str,
     existing = requests.get(_drive_item_url(site_id, drive_id, sp_path), headers=_headers(access_token), timeout=15)
     if existing.status_code == 200:
         item = existing.json()
+        readback_sha256 = _readback_or_exit(
+            access_token, site_id, drive_id, sp_path, content, "upload"
+        )
         print(json.dumps({"status": "exists", "path": sp_path, "url": item.get("webUrl"),
                           "etag": item.get("eTag"), "size": item.get("size"),
-                          "mime_type": mime_type}, sort_keys=True), flush=True)
+                          "mime_type": mime_type,
+                          "content_sha256": hashlib.sha256(content).hexdigest(),
+                          "readback_sha256": readback_sha256}, sort_keys=True), flush=True)
         return
     if existing.status_code not in (404,):
         print(f"ERROR: Upload existence check failed ({existing.status_code}): {existing.text[:300]}", file=sys.stderr)
@@ -753,10 +788,15 @@ def cmd_upload(access_token: str, sp_path: str, site_id: str, drive_id: str,
         print(f"ERROR: Upload failed ({response.status_code}): {response.text[:300]}", file=sys.stderr)
         sys.exit(2)
     item = response.json()
+    readback_sha256 = _readback_or_exit(
+        access_token, site_id, drive_id, sp_path, content, "upload"
+    )
     print(json.dumps({
         "status": "uploaded", "path": sp_path, "url": item.get("webUrl"),
         "etag": item.get("eTag"), "size": item.get("size", len(content)),
         "mime_type": mime_type,
+        "content_sha256": hashlib.sha256(content).hexdigest(),
+        "readback_sha256": readback_sha256,
     }, sort_keys=True), flush=True)
 
 
@@ -764,6 +804,13 @@ def cmd_update(access_token: str, sp_path: str, site_id: str, drive_id: str,
                content_file: str, base_etag: str | None = None,
                expected_source_sha256: str | None = None) -> None:
     sp_path = _normalise_path(sp_path)
+    if _is_canonical_workbook(sp_path):
+        print(
+            f"ERROR: Generic update is refused for canonical workbook path {sp_path}; "
+            "use the update_workbook operation",
+            file=sys.stderr,
+        )
+        sys.exit(3)
     content = _read_content_file(content_file)
     base_etag, expected_source_sha256 = _validate_write_protocol(
         sp_path, base_etag, expected_source_sha256,
@@ -856,10 +903,250 @@ def cmd_update(access_token: str, sp_path: str, site_id: str, drive_id: str,
     _write_proof(item, readback_sha256)
 
 
+def _readback_workbook_or_exit(
+    access_token: str,
+    site_id: str,
+    drive_id: str,
+    sp_path: str,
+    expected_semantic_sha256: str,
+) -> tuple[str, str]:
+    """Read the remote workbook and prove its exact bytes and semantics.
+
+    SharePoint may rewrite package metadata after a successful PUT.  The
+    resulting byte hash is therefore recorded as the remote readback proof,
+    while the semantic hash proves that Office did not alter ledger cells or
+    table definitions.
+    """
+    url = _drive_item_url(site_id, drive_id, sp_path) + ":/content"
+    response = requests.get(url, headers=_headers(access_token), timeout=60)
+    if not response.ok:
+        print(
+            f"ERROR: Workbook readback failed ({response.status_code}): "
+            f"{response.text[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    actual = response.content
+    readback_sha256 = hashlib.sha256(actual).hexdigest()
+    try:
+        actual_semantic = workbook_semantic_sha256(actual)
+    except Exception as exc:
+        print(
+            f"ERROR: Workbook readback is not a valid XLSX package: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if actual_semantic != expected_semantic_sha256:
+        print(
+            f"ERROR: Workbook semantic readback mismatch for {sp_path} "
+            f"(expected {expected_semantic_sha256}, received {actual_semantic})",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return readback_sha256, actual_semantic
+
+
+def _write_workbook_proof(
+    item: dict,
+    readback_sha256: str,
+    semantic_digest: str,
+    content_sha256: str,
+) -> None:
+    """Emit the machine-readable proof consumed by the queue processor."""
+    resulting_etag = _item_etag(item)
+    print("SP_WRITE_PROOF: " + json.dumps({
+        "etag": resulting_etag,
+        "resulting_etag": resulting_etag,
+        "readback_sha256": readback_sha256,
+        "semantic_sha256": semantic_digest,
+        "semantic_workbook_sha256": semantic_digest,
+        "readback_semantic_workbook_sha256": semantic_digest,
+        "content_sha256": content_sha256,
+    }, sort_keys=True))
+
+
+def cmd_update_workbook(
+    access_token: str,
+    sp_path: str,
+    site_id: str,
+    drive_id: str,
+    content_file: str,
+    content_sha256: str | None = None,
+    base_etag: str | None = None,
+    expected_source_sha256: str | None = None,
+    semantic_sha256: str | None = None,
+    semantic_workbook_sha256: str | None = None,
+) -> None:
+    """Replace one canonical workbook in place with a conditional Graph PUT."""
+    sp_path = _normalise_path(sp_path)
+    if not _is_canonical_workbook(sp_path):
+        print(
+            "ERROR: update_workbook is restricted to the canonical Expense and "
+            "Finance workbook paths",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+
+    base_etag = str(base_etag or "").strip()
+    expected_source_sha256 = str(expected_source_sha256 or "").strip().lower()
+    content_sha256 = str(content_sha256 or "").strip().lower()
+    semantic_sha256 = str(
+        semantic_sha256 or semantic_workbook_sha256 or ""
+    ).strip().lower()
+    missing = [
+        flag
+        for flag, value in (
+            ("--content-sha256", content_sha256),
+            ("--base-etag", base_etag),
+            ("--expected-source-sha256", expected_source_sha256),
+            ("--semantic-sha256", semantic_sha256),
+        )
+        if not value
+    ]
+    if missing:
+        print(
+            f"ERROR: update_workbook requires {' and '.join(missing)}",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+    if not is_sha256(content_sha256):
+        print("ERROR: --content-sha256 must be a SHA-256 hex digest", file=sys.stderr)
+        sys.exit(3)
+    if not is_sha256(expected_source_sha256):
+        print(
+            "ERROR: --expected-source-sha256 must be a SHA-256 hex digest",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+    if not is_sha256(semantic_sha256):
+        print("ERROR: --semantic-sha256 must be a SHA-256 hex digest", file=sys.stderr)
+        sys.exit(3)
+
+    content = _read_content_file(content_file)
+    actual_content_sha256 = hashlib.sha256(content).hexdigest()
+    if actual_content_sha256 != content_sha256:
+        print(
+            "ERROR: Workbook content hash mismatch; refusing to write "
+            f"(expected {content_sha256}, received {actual_content_sha256})",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+    try:
+        actual_semantic = workbook_semantic_sha256(content)
+    except Exception as exc:
+        print(f"ERROR: Invalid XLSX workbook content: {exc}", file=sys.stderr)
+        sys.exit(3)
+    if actual_semantic != semantic_sha256:
+        print(
+            "ERROR: Workbook semantic hash mismatch; refusing to write "
+            f"(expected {semantic_sha256}, received {actual_semantic})",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+
+    existing_response = _get_item_metadata(access_token, site_id, drive_id, sp_path)
+    if existing_response.status_code == 404:
+        print(f"ERROR: File not found: {sp_path}", file=sys.stderr)
+        sys.exit(5)
+    if not existing_response.ok:
+        print(
+            f"ERROR: Could not read workbook metadata ({existing_response.status_code}): "
+            f"{existing_response.text[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    current_etag = _item_etag(existing_response.json(), existing_response)
+    if not current_etag or current_etag != base_etag:
+        print(
+            f"ERROR: Workbook update conflict for {sp_path}: supplied base eTag "
+            f"does not match remote eTag ({base_etag!r} != {current_etag!r}); "
+            "no write sent",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    # The source hash is checked against the same conditional version that
+    # will receive the PUT.  A CDN response with a conflicting eTag is stale
+    # and must never be used as source evidence.
+    source_headers = _headers(access_token)
+    source_headers["If-Match"] = base_etag
+    source_response = requests.get(
+        _drive_item_url(site_id, drive_id, sp_path) + ":/content",
+        headers=source_headers,
+        timeout=60,
+    )
+    if not source_response.ok:
+        print(
+            f"ERROR: Could not read workbook source ({source_response.status_code}): "
+            f"{source_response.text[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    source_response_etag = _item_etag({}, source_response)
+    if source_response_etag and source_response_etag != base_etag:
+        print(
+            f"ERROR: Workbook source response eTag {source_response_etag!r} "
+            f"does not match supplied base eTag {base_etag!r}; no write sent",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    actual_source_sha256 = hashlib.sha256(source_response.content).hexdigest()
+    if actual_source_sha256 != expected_source_sha256:
+        print(
+            f"ERROR: Workbook source hash conflict for {sp_path}: expected "
+            f"{expected_source_sha256}, received {actual_source_sha256}; no write sent",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    write_url = _drive_item_url(site_id, drive_id, sp_path) + ":/content"
+    headers = _headers(access_token)
+    headers["Content-Type"] = XLSX_CONTENT_TYPE
+    headers["If-Match"] = base_etag
+    response = requests.put(write_url, headers=headers, data=content, timeout=60)
+    if not response.ok:
+        print(
+            f"ERROR: Workbook update failed ({response.status_code}): "
+            f"{response.text[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    item = response.json()
+    resulting_etag = _item_etag(item, response)
+    if not resulting_etag:
+        print(
+            "ERROR: Workbook update returned no resulting eTag; write proof is incomplete",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    readback_sha256, readback_semantic = _readback_workbook_or_exit(
+        access_token, site_id, drive_id, sp_path, semantic_sha256
+    )
+    print(f"✓ Updated workbook: {sp_path}")
+    print(f"  Size:    {len(content):,} bytes submitted")
+    print(f"  eTag:    {resulting_etag}")
+    print(f"  Readback SHA-256: {readback_sha256}")
+    _write_workbook_proof(
+        {**item, "eTag": resulting_etag},
+        readback_sha256,
+        readback_semantic,
+        content_sha256,
+    )
+
+
 def cmd_append(access_token: str, sp_path: str, site_id: str, drive_id: str,
                content_file: str, base_etag: str | None = None,
                expected_source_sha256: str | None = None) -> None:
     sp_path    = _normalise_path(sp_path)
+    if _is_canonical_workbook(sp_path):
+        print(
+            f"ERROR: Generic append is refused for canonical workbook path {sp_path}; "
+            "use the update_workbook operation",
+            file=sys.stderr,
+        )
+        sys.exit(3)
     new_chunk  = _read_content_file(content_file)
     base_etag, expected_source_sha256 = _validate_write_protocol(
         sp_path, base_etag, expected_source_sha256,
@@ -1090,7 +1377,7 @@ def main() -> None:
         print("ERROR: A SharePoint path is required for this command.", file=sys.stderr)
         sys.exit(3)
 
-    if args.command in ("create", "update", "append", "upload") and not args.content_file:
+    if args.command in ("create", "update", "append", "update_workbook", "upload") and not args.content_file:
         print(
             f"ERROR: --content-file is required for '{args.command}'.\n"
             "Write your content to /tmp/oc-sp-content.txt first, then pass --content-file /tmp/oc-sp-content.txt",
@@ -1127,6 +1414,12 @@ def main() -> None:
         cmd_update(
             access_token, sp_path, site_id, drive_id, args.content_file,
             args.base_etag, args.expected_source_sha256,
+        )
+    elif args.command == "update_workbook":
+        cmd_update_workbook(
+            access_token, sp_path, site_id, drive_id, args.content_file,
+            args.content_sha256, args.base_etag, args.expected_source_sha256,
+            args.semantic_sha256,
         )
     elif args.command == "append":
         cmd_append(

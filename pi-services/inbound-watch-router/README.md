@@ -57,12 +57,15 @@ The old name can stay as a compatibility shell, but the operating model is now a
 
 Expense capture and review cross the public seer-finance SharePoint boundary:
 
-- `/Expenses/Expense ledger.md` is the authoritative expense review document.
-- `/Finance/Finance ledger.md` is the authoritative finance ledger document.
+- `/Expenses/Expense ledger.xlsx` is the authoritative expense review workbook.
+- `/Finance/Finance ledger.xlsx` is the authoritative finance ledger workbook.
 - The watcher retains only source projections, bounded retry queues and
   outcome/health state locally.
-- Routine writes are bounded no-TOTP background operations and must report
-  verified readback before they become `logged`, `duplicate`, or `written`.
+- Routine writes use the seer-finance `update_workbook` boundary with complete
+  binary/source/semantic hashes and must report exact remote readback plus
+  Office semantic identity before they become `logged`, `duplicate`, or
+  `written`.
 
 An unavailable or unverified boundary is a blocker, not permission to fall
-back to a local Markdown, JSON or database ledger.
+back to a local Markdown, JSON or database ledger or to direct queue-file
+access.

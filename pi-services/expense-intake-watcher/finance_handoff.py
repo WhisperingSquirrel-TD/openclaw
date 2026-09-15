@@ -7,6 +7,7 @@ outcome state are recovery state and are never consulted as business truth.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Mapping
 
 from sharepoint_boundary import (
@@ -14,7 +15,6 @@ from sharepoint_boundary import (
     FINANCE_LEDGER_PATH,
     SharePointBoundary,
     SharePointBoundaryError,
-    write_verified,
 )
 
 
@@ -46,52 +46,44 @@ def _validate_candidate(candidate: Mapping[str, Any]) -> None:
         raise TransactionValidationError("amount_pence must be a non-negative integer")
 
 
-def append_validated_expense(
+def update_validated_expense(
     boundary: SharePointBoundary,
     candidate: Mapping[str, Any],
 ) -> BoundaryResult:
-    """Offer one complete expense to ``/Finance/Finance ledger.md``.
+    """Offer one complete expense to ``/Finance/Finance ledger.xlsx``.
 
     The boundary owns validation against the existing document, source-ref
-    idempotency, bounded write policy, and verified readback.  We deliberately
-    do not accept a local path argument: a local transactions file cannot be
-    the business authority after cutover.
+    idempotency, table-preserving workbook update, and verified readback. We
+    deliberately do not accept a local path argument: a local transactions
+    file cannot be the business authority after cutover.
     """
     _validate_candidate(candidate)
     source_ref = str(candidate["source_ref"])
-    public_handoff = getattr(boundary, "append_validated_expense", None)
+    # Enrichment workers are allowed to provide accounting facts without
+    # inventing a second identity.  Derive a stable transaction id from the
+    # already-required source reference; retries then address the same visible
+    # workbook row instead of failing validation or creating duplicates.
+    normalized = dict(candidate)
+    if normalized.get("txn_id") in (None, ""):
+        normalized["txn_id"] = (
+            "expense-" + hashlib.sha256(source_ref.encode("utf-8")).hexdigest()[:24]
+        )
+    public_handoff = getattr(boundary, "update_validated_expense", None)
     if callable(public_handoff):
-        result = public_handoff(dict(candidate))
+        result = public_handoff(normalized)
         if not isinstance(result, BoundaryResult):
             raise SharePointBoundaryError("seer-finance finance handoff returned an invalid result")
         return result
-    # The public boundary accepts structured JSON content so that it can apply
-    # its own schema and append/idempotency rules without the watcher parsing
-    # or rewriting a finance document.
-    import json
-
-    content = json.dumps(
-        {"kind": "expense_handoff", "source_ref": source_ref, "candidate": dict(candidate)},
-        sort_keys=True,
+    return BoundaryResult(
+        operation="update_workbook",
+        path=FINANCE_LEDGER_PATH,
+        accepted=False,
+        verified=False,
+        blocker=(
+            "seer-finance structured finance workbook boundary is unavailable "
+            f"for source_ref {source_ref}"
+        ),
     )
-    result = write_verified(
-        FINANCE_LEDGER_PATH,
-        content,
-        operation="append",
-        boundary=boundary,
-    )
-    if result.complete and not result.canonical_ref:
-        return BoundaryResult(
-            operation=result.operation,
-            path=result.path,
-            accepted=result.accepted,
-            verified=result.verified,
-            canonical_ref=f"{FINANCE_LEDGER_PATH}#source_ref:{source_ref}",
-            content=result.content,
-            blocker=result.blocker,
-        )
-    return result
-
 
 def capture_review_expense(
     boundary: SharePointBoundary,

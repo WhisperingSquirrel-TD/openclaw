@@ -13,7 +13,7 @@ class EnrichmentQueueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             queue = Path(tmp) / "queue.json"
             kwargs = dict(source_id="obcn-42", source_surface="microsoft_external",
-                          canonical_ref="/Expenses/Expense ledger.md#pending:obcn-42", blocker="body hidden")
+                          canonical_ref="/Expenses/Expense ledger.xlsx#pending:obcn-42", blocker="body hidden")
             self.assertTrue(enqueue(queue, **kwargs))
             self.assertFalse(enqueue(queue, **kwargs))
             item = json.loads(queue.read_text(encoding="utf-8"))["items"][0]
@@ -25,7 +25,7 @@ class EnrichmentQueueTests(unittest.TestCase):
             queue = Path(tmp) / "queue.json"
             self.assertTrue(enqueue(
                 queue, source_id="telegram:bad-time", source_surface="telegram_inbound",
-                canonical_ref="/Expenses/Expense ledger.md#pending:telegram:bad-time", blocker="invalid timestamp",
+                          canonical_ref="/Expenses/Expense ledger.xlsx#pending:telegram:bad-time", blocker="invalid timestamp",
                 observed_at="2026-08-10T16:00:00Z", raw_source_timestamp="+058577-08-15T00:40:00.000Z",
                 source_timestamp_status="invalid_future",
             ))
@@ -38,7 +38,7 @@ class EnrichmentQueueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 enqueue(Path(tmp) / "queue.json", source_id="", source_surface="teams_recent",
-                        canonical_ref="/Expenses/Expense ledger.md#pending:x", blocker="body hidden")
+                          canonical_ref="/Expenses/Expense ledger.xlsx#pending:x", blocker="body hidden")
 
 
 if __name__ == "__main__":

@@ -40,15 +40,16 @@ Pi-native watch-layer monitor for inbound/outbound operational surfaces, with ex
 Expense business records are not local files.  The watcher sends source-linked
 capture, review and finance handoff through the public seer-finance boundary:
 
-- authoritative expense review: `/Expenses/Expense ledger.md`
-- authoritative finance ledger: `/Finance/Finance ledger.md`
+- authoritative expense review: `/Expenses/Expense ledger.xlsx`
+- authoritative finance ledger: `/Finance/Finance ledger.xlsx`
 - verified SharePoint readback is required before `logged`, `duplicate`, or
   `written` is claimed
 - local queues, monitored outcomes and replay manifests are recovery/operational
   state only
-- canonical mutations use seer-finance's base-etag and
-  expected-source-sha256 concurrency proof; the watcher does not synthesize or
-  bypass that protocol
+- canonical mutations use seer-finance's `update_workbook` boundary with
+  complete `content_base64`, `content_sha256`, native `base_etag`,
+  `expected_source_sha256`, and `semantic_sha256` proof; the watcher does not
+  synthesize, bypass, or write the transport queue directly
 
 Routine bounded writes use the background no-TOTP SharePoint writer.  This is
 not deployment proof: an unavailable boundary remains `blocked` and is never
@@ -98,6 +99,8 @@ with the exact downstream outcome preserved beneath that state.
 
 ## Current limits
 
+- canonical workbook cache/readback is exact XLSX bytes up to 64 MB; watcher
+  runtime state remains bounded at 8 MB and is never used as ledger authority
 - full-body email extraction still depends on the trusted reader route succeeding
 - WhatsApp thread inference for unlabeled direct `Me:` lines is heuristic because the export format does not carry an explicit peer/thread id on those lines
 - WhatsApp can only create `blocked` / `coverage_incomplete` signals from the recent feed when richer media/audio/source access is unavailable

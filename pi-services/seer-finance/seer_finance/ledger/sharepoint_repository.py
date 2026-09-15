@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import json
 import uuid
+import base64
+import hashlib
+from dataclasses import fields
 from datetime import date, datetime, timezone
 from typing import Any, Mapping
 
@@ -21,12 +24,8 @@ from .expense_repository import (
     _ALLOWED_TRANSITIONS,
     _validated_facts,
 )
-from .sharepoint_contract import (
-    EXPENSE_LEDGER_PATH,
-    SharePointDocumentStore,
-    document_content,
-    parse_document,
-)
+from .sharepoint_contract import EXPENSE_LEDGER_PATH, SharePointDocumentStore
+from .workbook_codec import WorkbookCodec, WorkbookCodecError
 
 
 class SharePointExpenseRepository:
@@ -42,8 +41,9 @@ class SharePointExpenseRepository:
         _require_nonempty(source_surface, "source_surface")
         _require_nonempty(source_ref, "source_ref")
         facts = _validated_facts(facts)
-        state = self._read_state()
+        state, snapshot = self._read_state_snapshot()
         existing = next((item for item in state["expenses"] if item["source_ref"] == source_ref), None)
+        changed = False
         if existing is None:
             now = _now()
             values = {
@@ -70,6 +70,7 @@ class SharePointExpenseRepository:
             state["expenses"].append(values)
             self._event(state, values["expense_id"], "capture", None,
                         ExpenseStatus.NEEDS_REVIEW.value, "applied", None)
+            changed = True
         else:
             conflicts = {
                 key: value for key, value in facts.items()
@@ -93,14 +94,18 @@ class SharePointExpenseRepository:
                     for item in state["collisions"]
                 ):
                     state["collisions"].append(collision)
+                    changed = True
             for key, value in facts.items():
                 if value is not None and existing.get(key) is None:
                     existing[key] = value
+                    changed = True
             if conflicts:
                 # Ensure an identical collision retry is still a successful
                 # readback operation, without appending another event.
                 pass
-        self._write_state(state, source_ref=source_ref)
+        if not changed:
+            return _expense(existing)
+        self._write_state(state, source_ref=source_ref, snapshot=snapshot)
         found = next(item for item in state["expenses"] if item["source_ref"] == source_ref)
         return _expense(found)
 
@@ -109,19 +114,19 @@ class SharePointExpenseRepository:
             target = ExpenseStatus(to_status)
         except ValueError as exc:
             raise InvalidTransitionError(f"unknown expense status {to_status!r}") from exc
-        state = self._read_state()
+        state, snapshot = self._read_state_snapshot()
         row = self._row(state, expense_id)
         current = ExpenseStatus(row["status"])
         if target not in _ALLOWED_TRANSITIONS[current]:
             self._event(state, expense_id, "transition", current.value, target.value,
                         "rejected", "invalid_transition")
-            self._write_state(state, source_ref=row["source_ref"])
+            self._write_state(state, source_ref=row["source_ref"], snapshot=snapshot)
             raise InvalidTransitionError(f"cannot transition {current.value} to {target.value}")
         row["status"] = target.value
         row["updated_at"] = _now()
         self._event(state, expense_id, "transition", current.value, target.value,
                     "applied", None)
-        self._write_state(state, source_ref=row["source_ref"])
+        self._write_state(state, source_ref=row["source_ref"], snapshot=snapshot)
         return _expense(row)
 
     def get(self, expense_id: str) -> Expense:
@@ -129,25 +134,25 @@ class SharePointExpenseRepository:
 
     def finalize_ledger_write(self, expense_id: str, finance_ledger_ref: str) -> Expense:
         _require_nonempty(finance_ledger_ref, "finance_ledger_ref")
-        state = self._read_state()
+        state, snapshot = self._read_state_snapshot()
         row = self._row(state, expense_id)
         current = ExpenseStatus(row["status"])
         if current is not ExpenseStatus.LEDGER_READY:
             self._event(state, expense_id, "transition", current.value,
                         ExpenseStatus.LEDGER_WRITTEN.value, "rejected", "invalid_transition")
-            self._write_state(state, source_ref=row["source_ref"])
+            self._write_state(state, source_ref=row["source_ref"], snapshot=snapshot)
             raise InvalidTransitionError(f"cannot transition {current.value} to ledger_written")
         if row["finance_ledger_ref"] is not None:
             self._event(state, expense_id, "transition", current.value,
                         ExpenseStatus.LEDGER_WRITTEN.value, "rejected",
                         "finance_reference_already_set")
-            self._write_state(state, source_ref=row["source_ref"])
+            self._write_state(state, source_ref=row["source_ref"], snapshot=snapshot)
             raise ExpenseRepositoryError("finance_ledger_ref is already set")
         if any(item["expense_id"] == expense_id for item in state["collisions"]):
             self._event(state, expense_id, "transition", current.value,
                         ExpenseStatus.LEDGER_WRITTEN.value, "rejected",
                         "capture_collision_unresolved")
-            self._write_state(state, source_ref=row["source_ref"])
+            self._write_state(state, source_ref=row["source_ref"], snapshot=snapshot)
             raise ExpenseRepositoryError("expense has unresolved capture collisions")
         if any(
             item.get("finance_ledger_ref") == finance_ledger_ref
@@ -157,14 +162,14 @@ class SharePointExpenseRepository:
             self._event(state, expense_id, "transition", current.value,
                         ExpenseStatus.LEDGER_WRITTEN.value, "rejected",
                         "finance_reference_conflict")
-            self._write_state(state, source_ref=row["source_ref"])
+            self._write_state(state, source_ref=row["source_ref"], snapshot=snapshot)
             raise ExpenseRepositoryError("finance_ledger_ref conflicts with another expense")
         row["finance_ledger_ref"] = finance_ledger_ref
         row["status"] = ExpenseStatus.LEDGER_WRITTEN.value
         row["updated_at"] = _now()
         self._event(state, expense_id, "transition", current.value,
                     ExpenseStatus.LEDGER_WRITTEN.value, "applied", None)
-        self._write_state(state, source_ref=row["source_ref"])
+        self._write_state(state, source_ref=row["source_ref"], snapshot=snapshot)
         return _expense(row)
 
     def record_receipt_evidence(self, *, source_ref: str, evidence_kind: str,
@@ -180,7 +185,7 @@ class SharePointExpenseRepository:
             or any(character not in "0123456789abcdef" for character in sha256)
         ):
             raise ValueError("sha256 must be 64 lowercase hexadecimal characters when supplied")
-        state = self._read_state()
+        state, snapshot = self._read_state_snapshot()
         self._find_source(state, source_ref)
         key = (source_ref, evidence_kind, sha256 or "", sharepoint_path or "", sharepoint_etag or "")
         existing = next(
@@ -205,7 +210,7 @@ class SharePointExpenseRepository:
                 "created_at": _now(),
             }
             state["evidence"].append(existing)
-            self._write_state(state, source_ref=source_ref)
+            self._write_state(state, source_ref=source_ref, snapshot=snapshot)
         return _receipt_evidence(existing)
 
     def receipt_evidence(self, source_ref: str) -> list[ReceiptEvidence]:
@@ -225,20 +230,39 @@ class SharePointExpenseRepository:
             if item["status"] in {"needs_review", "blocked"}
         ]
 
-    def _read_state(self) -> dict[str, Any]:
-        content = self.store.read(EXPENSE_LEDGER_PATH)
-        value = parse_document(content, path=EXPENSE_LEDGER_PATH)
+    def _read_state_snapshot(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        snapshot = self.store.read_workbook_snapshot(EXPENSE_LEDGER_PATH)
+        try:
+            value = WorkbookCodec.decode_expense(snapshot["content_bytes"])
+        except WorkbookCodecError as exc:
+            raise ExpenseRepositoryError(
+                f"invalid authoritative SharePoint expense workbook: {exc}"
+            ) from exc
         if value.get("schema_version") != 1:
             raise ExpenseRepositoryError("invalid SharePoint expense ledger schema")
         for key in ("expenses", "events", "collisions", "evidence"):
             if not isinstance(value.get(key), list):
                 raise ExpenseRepositoryError(f"invalid SharePoint expense ledger {key}")
-        return value
+        return value, snapshot
 
-    def _write_state(self, state: dict[str, Any], *, source_ref: str) -> None:
-        self.store.write(
+    def _read_state(self) -> dict[str, Any]:
+        return self._read_state_snapshot()[0]
+
+    def _write_state(
+        self,
+        state: dict[str, Any],
+        *,
+        source_ref: str,
+        snapshot: Mapping[str, Any],
+    ) -> None:
+        content = WorkbookCodec.update_expense(snapshot["content_bytes"], state)
+        self.store.write_workbook(
             path=EXPENSE_LEDGER_PATH,
-            content=document_content("Expense ledger", state),
+            content_base64=base64.b64encode(content).decode("ascii"),
+            content_sha256=hashlib.sha256(content).hexdigest(),
+            base_etag=snapshot["etag"],
+            expected_source_sha256=snapshot["content_sha256"],
+            expected_snapshot=snapshot,
             delivery={"kind": "seer_finance_expense", "source_ref": source_ref},
         )
 
@@ -276,11 +300,13 @@ class SharePointExpenseRepository:
 def _expense(row: Mapping[str, Any]) -> Expense:
     values = dict(row)
     values["status"] = ExpenseStatus(values["status"])
-    return Expense(**values)
+    known = {field.name for field in fields(Expense)}
+    return Expense(**{key: values[key] for key in known})
 
 
 def _receipt_evidence(row: Mapping[str, Any]) -> ReceiptEvidence:
-    return ReceiptEvidence(**dict(row))
+    known = {field.name for field in fields(ReceiptEvidence)}
+    return ReceiptEvidence(**{key: row[key] for key in known})
 
 
 def _capture_snapshot(row: Mapping[str, Any]) -> dict[str, Any]:

@@ -34,8 +34,6 @@ MONITORED_FILE = WORKSPACE / 'memory' / 'monitored-items-state.json'
 MIRROR_EVENTS_FILE = WORKSPACE / 'memory' / 'mirror-events.json'
 ENRICHMENT_QUEUE_FILE = ROOT / '.openclaw' / 'runtime' / 'inbound-watch-router' / 'expense-enrichment-queue.json'
 SHAREPOINT_REPLAY_FILE = ROOT / '.openclaw' / 'runtime' / 'inbound-watch-router' / 'sharepoint-expense-replay.json'
-SHAREPOINT_QUEUE_FILE = ROOT / '.openclaw' / 'sharepoint-queue.json'
-SHAREPOINT_RESULTS_FILE = ROOT / '.openclaw' / 'sharepoint-queue-results.json'
 RECEIPT_SHAREPOINT_ROOT = '/Expenses/Receipts'
 MAX_STATE_FILE_BYTES = 8 * 1024 * 1024
 MAX_LIFECYCLE_HISTORY = 6
@@ -1683,10 +1681,6 @@ def _receipt_file_from_facts(facts: dict[str, Any]) -> Path | None:
     return path if path.is_file() else None
 
 
-def _receipt_upload_id(source_ref: str, sha256: str) -> str:
-    return 'receipt-upload-' + hashlib.sha256(f'{source_ref}|{sha256}'.encode()).hexdigest()[:32]
-
-
 def _replay_manifest_lock_path(replay_path: Path) -> Path:
     """Return the lock shared with the finance capture adapter."""
     return replay_path.with_suffix(replay_path.suffix + '.writer.lock')
@@ -1730,50 +1724,27 @@ def _replay_item_key(item: dict[str, Any]) -> str:
     return json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
-def _read_sharepoint_delivery_results() -> dict[str, dict[str, Any]]:
-    raw = load_json(SHAREPOINT_RESULTS_FILE, [])
-    if not isinstance(raw, list):
-        return {}
-    return {str(item.get('id')): item for item in raw if isinstance(item, dict) and item.get('id')}
+def _upload_receipt_via_boundary(*, boundary: Any, source_ref: str, local_path: Path,
+                                 sha256: str, mime_type: str) -> tuple[str, Any | None]:
+    """Submit receipt evidence only through an authority-owned boundary.
 
-
-def _verified_receipt_delivery(delivery: Any, expected_path: str) -> bool:
-    """Require processed success plus the upload's exact remote readback proof."""
-    if not isinstance(delivery, dict):
-        return False
-    if delivery.get('success') is not True or not delivery.get('processed_at'):
-        return False
-    output = delivery.get('output')
-    if isinstance(output, str):
-        try:
-            output = json.loads(output)
-        except (TypeError, ValueError):
-            return False
-    if not isinstance(output, dict):
-        return False
-    return (
-        output.get('path') == expected_path
-        and isinstance(output.get('etag'), str)
-        and bool(output['etag'].strip())
-        and output.get('status') in {'uploaded', 'exists'}
-    )
-
-
-def _enqueue_receipt_upload(*, upload_id: str, source_ref: str, local_path: Path,
-                            sha256: str, mime_type: str) -> str:
+    The watcher deliberately has no queue-file fallback. A deployment that
+    supports receipts may expose ``upload_receipt_verified`` on the same
+    seer-finance boundary; its complete result must include exact remote
+    readback proof before replay can be retired.
+    """
     safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', local_path.name).strip('._') or 'receipt.bin'
     sp_path = f'{RECEIPT_SHAREPOINT_ROOT}/{sha256}-{safe_name}'
-    queue = load_json(SHAREPOINT_QUEUE_FILE, [])
-    queue = queue if isinstance(queue, list) else []
-    if not any(isinstance(item, dict) and item.get('id') == upload_id for item in queue):
-        queue.append({
-            'id': upload_id, 'operation': 'upload_binary', 'path': sp_path,
-            'source_path': str(local_path), 'mime_type': mime_type,
-            'requested_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-            'delivery': {'kind': 'expense_receipt', 'source_ref': source_ref, 'sha256': sha256},
-        })
-        save_json(SHAREPOINT_QUEUE_FILE, queue)
-    return sp_path
+    uploader = getattr(boundary, 'upload_receipt_verified', None)
+    if not callable(uploader):
+        return sp_path, None
+    return sp_path, uploader(
+        path=sp_path,
+        source_ref=source_ref,
+        local_path=local_path,
+        content_sha256=sha256,
+        mime_type=mime_type,
+    )
 
 
 def process_expense_replay(summary: dict[str, int], *, replay_path: Path = SHAREPOINT_REPLAY_FILE) -> list[dict[str, Any]]:
@@ -1817,9 +1788,9 @@ def process_expense_replay(summary: dict[str, int], *, replay_path: Path = SHARE
     if malformed_states:
         log('expense replay item malformed; preserving manifest unchanged')
         return malformed_states
-    deliveries = _read_sharepoint_delivery_results()
     successful_items: list[dict[str, Any]] = []
     states: list[dict[str, Any]] = []
+    boundary = resolve_boundary()
     for item in items:
         source_ref = item['source_ref']
         source_surface = item['source_surface']
@@ -1841,22 +1812,25 @@ def process_expense_replay(summary: dict[str, int], *, replay_path: Path = SHARE
                 or mimetypes.guess_type(receipt.name)[0]
                 or 'application/octet-stream'
             )
-            upload_id = _receipt_upload_id(source_ref, digest)
-            sp_path = _enqueue_receipt_upload(
-                upload_id=upload_id,
+            sp_path, delivery = _upload_receipt_via_boundary(
+                boundary=boundary,
                 source_ref=source_ref,
                 local_path=receipt,
                 sha256=digest,
                 mime_type=mime_type,
             )
-            delivery = deliveries.get(upload_id)
-            if not _verified_receipt_delivery(delivery, sp_path):
+            if (
+                delivery is None
+                or not getattr(delivery, 'complete', False)
+                or not getattr(delivery, 'canonical_ref', None)
+            ):
+                blocker = getattr(delivery, 'blocker', None) if delivery is not None else None
                 states.append({
                     'state': 'blocked',
                     'source_ref': source_ref,
                     'canonical_ref': captured.canonical_ref,
-                    'blocker': 'sharepoint_receipt_upload_pending',
-                    'queue_id': upload_id,
+                    'blocker': blocker or 'seer-finance receipt boundary unavailable or readback pending',
+                    'receipt_path': sp_path,
                 })
                 continue
         summary['replay_delivered'] = summary.get('replay_delivered', 0) + 1

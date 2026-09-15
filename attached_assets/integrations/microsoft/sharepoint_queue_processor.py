@@ -26,12 +26,23 @@ L1 passes each complete object to ``enqueue_operation`` (no exec/TOTP needed):
 [
   {
     "id": "unique-id",
-    "operation": "create" | "update" | "append",
+    "operation": "create" | "update" | "append" | "update_workbook",
     "path": "/Stackstone CRM/Opportunities/Harken Health.md",
     "content": "Markdown content to write",
     "base_etag": "\"{current-version}\"",  # required for authoritative ledgers
     "expected_source_sha256": "<sha256 of content read before update>",
     "content_sha256": "<sha256 of the exact queued replacement content>",
+    "requested_at": "2026-04-09T10:00:00Z"
+  },
+  {
+    "id": "unique-workbook-id",
+    "operation": "update_workbook",
+    "path": "/Finance/Finance ledger.xlsx",
+    "content_base64": "<base64 of exact XLSX bytes>",
+    "content_sha256": "<sha256 of those exact bytes>",
+    "base_etag": "\"{current-version}\"",
+    "expected_source_sha256": "<sha256 of exact XLSX bytes read before update>",
+    "semantic_sha256": "<sha256 of workbook cells/tables>",
     "requested_at": "2026-04-09T10:00:00Z"
   },
   {
@@ -52,6 +63,7 @@ CRON SCHEDULE: every 1 minute (installed by install-forked-openclaw.sh)
 """
 
 import json
+import hashlib
 import os
 import re
 import subprocess
@@ -72,7 +84,7 @@ LOG_FILE    = STATE_DIR / "integrations/microsoft/sp-queue-processor.log"
 SP_SCRIPT   = STATE_DIR / "integrations/microsoft-l1/sharepoint.py"
 LOG_MAX     = 500
 
-WRITE_OPERATIONS         = {"create", "update", "append"}
+WRITE_OPERATIONS         = {"create", "update", "append", "update_workbook"}
 SKILL_RELEASE_OPERATIONS = {"publish_skill"}  # audited in-place canonical skill publisher
 MOVE_OPERATIONS          = {"move"}           # relocate/rename, no delete permission
 FOLDER_DELETE_OPERATIONS = {"delete_folder"}  # empty folders only — files never deleted
@@ -108,6 +120,14 @@ def _is_authoritative_update_path(path: str) -> bool:
     return str(path or "").strip().strip("/").casefold() in AUTHORITATIVE_UPDATE_PATHS
 
 
+def _workbook_semantic_field(op: dict) -> str:
+    """Read the shared schema name plus the finance agent's legacy alias."""
+    value = op.get("semantic_sha256")
+    if value in (None, ""):
+        value = op.get("semantic_workbook_sha256")
+    return str(value or "").strip()
+
+
 def _validate_update_protocol(op: dict) -> tuple[bool, str]:
     """Validate the queue-side optimistic concurrency contract."""
     operation = str(op.get("operation", "")).lower()
@@ -116,6 +136,53 @@ def _validate_update_protocol(op: dict) -> tuple[bool, str]:
             "Generic create is refused for authoritative ledger paths; "
             "use the seer-finance gated bootstrap mechanism"
         )
+    if operation in {"create", "upload", "upload_binary"} and _is_canonical_workbook_path(
+        op.get("path", "")
+    ):
+        return False, (
+            "Generic create/upload is refused for canonical workbook paths; "
+            "use the update_workbook operation"
+        )
+    if operation in {"update", "append"} and _is_canonical_workbook_path(
+        op.get("path", "")
+    ):
+        return False, (
+            "Generic update/append is refused for canonical workbook paths; "
+            "use the update_workbook operation"
+        )
+    if operation == "update_workbook":
+        if not _is_canonical_workbook_path(op.get("path", "")):
+            return False, (
+                "update_workbook is restricted to the canonical Expense and "
+                "Finance workbook paths"
+            )
+        missing = [
+            field
+            for field in (
+                "content_base64",
+                "content_sha256",
+                "base_etag",
+                "expected_source_sha256",
+            )
+            if not str(op.get(field, "")).strip()
+        ]
+        if not _workbook_semantic_field(op):
+            missing.append("semantic_sha256")
+        if missing:
+            return False, (
+                "Canonical workbook update requires "
+                + ", ".join(repr(field) for field in missing)
+                + "; re-read the workbook and retry from its current version"
+            )
+        for field in (
+            "content_sha256",
+            "expected_source_sha256",
+        ):
+            if not _is_sha256(op.get(field)):
+                return False, f"{field} must be a SHA-256 hex digest"
+        if not _is_sha256(_workbook_semantic_field(op)):
+            return False, "semantic_sha256 must be a SHA-256 hex digest"
+        return True, ""
     if operation not in {"update", "append"}:
         return True, ""
     if _is_authoritative_update_path(op.get("path", "")):
@@ -171,6 +238,11 @@ try:
     from sharepoint_binary_extractor import extract_text as _extract_binary_text  # type: ignore
 except ImportError:
     _extract_binary_text = None  # type: ignore
+from sharepoint_workbook import (  # type: ignore
+    is_canonical_workbook_path as _is_canonical_workbook_path,
+    is_sha256 as _is_sha256,
+    semantic_sha256 as _workbook_semantic_sha256,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +654,15 @@ def _run_binary_upload_operation(op: dict) -> tuple[bool, str]:
         return False, "upload_binary requires path, source_path and mime_type"
     if not source_path.is_file():
         return False, f"Original binary unavailable: {source_path}"
+    expected_hash = str(op.get("content_sha256", "")).strip().lower()
+    if not _is_sha256(expected_hash):
+        return False, "upload_binary requires a valid content_sha256"
+    actual_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    if actual_hash != expected_hash:
+        return False, (
+            "upload_binary content_sha256 does not match the original binary "
+            f"(expected {expected_hash}, received {actual_hash})"
+        )
     if not SP_SCRIPT.exists():
         return False, f"sharepoint.py not found at {SP_SCRIPT}"
     try:
@@ -590,11 +671,136 @@ def _run_binary_upload_operation(op: dict) -> tuple[bool, str]:
             capture_output=True, text=True, timeout=90,
         )
         output = (result.stdout + result.stderr).strip()
-        return result.returncode == 0, output
+        if result.returncode != 0:
+            return False, output
+        try:
+            proof = json.loads(output)
+        except json.JSONDecodeError:
+            return False, "receipt upload returned no machine-readable JSON proof"
+        if (
+            not isinstance(proof, dict)
+            or proof.get("status") not in {"uploaded", "exists"}
+            or proof.get("path") != sp_path
+            or not isinstance(proof.get("etag"), str)
+            or not proof["etag"].strip()
+            or proof.get("readback_sha256") != expected_hash
+        ):
+            return False, (
+                "receipt upload proof must contain status uploaded/exists, "
+                "the requested path, a resulting eTag, and a readback_sha256 "
+                "matching the original binary"
+            )
+        return True, output
     except subprocess.TimeoutExpired:
         return False, "Timed out after 90 seconds"
     except Exception as exc:
         return False, str(exc)
+
+
+def _run_workbook_update_operation(op: dict) -> tuple[bool, str]:
+    """Execute a canonical XLSX update using the exact queued bytes."""
+    import base64
+    import binascii
+
+    sp_path = str(op.get("path", "")).strip()
+    allowed, rejection = _validate_update_protocol(op)
+    if not allowed:
+        return False, rejection
+    try:
+        content = base64.b64decode(
+            str(op.get("content_base64", "")), validate=True
+        )
+    except (ValueError, binascii.Error) as exc:
+        return False, f"content_base64 is not valid strict base64: {exc}"
+    expected_content_hash = str(op.get("content_sha256", "")).strip().lower()
+    actual_content_hash = hashlib.sha256(content).hexdigest()
+    if actual_content_hash != expected_content_hash:
+        return False, (
+            "content_sha256 does not match the exact decoded XLSX bytes "
+            f"(expected {expected_content_hash}, received {actual_content_hash})"
+        )
+    expected_semantic = _workbook_semantic_field(op).lower()
+    try:
+        actual_semantic = _workbook_semantic_sha256(content)
+    except Exception as exc:
+        return False, f"Invalid XLSX workbook payload: {exc}"
+    if actual_semantic != expected_semantic:
+        return False, (
+            "semantic_sha256 does not match the queued workbook cells/tables "
+            f"(expected {expected_semantic}, received {actual_semantic})"
+        )
+    if not SP_SCRIPT.exists():
+        return False, f"sharepoint.py not found at {SP_SCRIPT}"
+
+    content_file = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            suffix=".xlsx",
+            prefix="oc-sp-workbook-",
+            delete=False,
+            dir="/tmp",
+        ) as tf:
+            tf.write(content)
+            tf.flush()
+            content_file = tf.name
+
+        cmd = [
+            "python3",
+            str(SP_SCRIPT),
+            "update_workbook",
+            sp_path,
+            "--content-file",
+            content_file,
+            "--content-sha256",
+            expected_content_hash,
+            "--base-etag",
+            str(op["base_etag"]),
+            "--expected-source-sha256",
+            str(op["expected_source_sha256"]),
+            "--semantic-sha256",
+            expected_semantic,
+        ]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        output = (result.stdout + result.stderr).strip()
+        if result.returncode != 0:
+            return False, output
+
+        proof = _extract_write_proof(output)
+        readback_hash = str(proof.get("readback_sha256", "")).strip().lower()
+        resulting_etag = str(proof.get("resulting_etag", "")).strip()
+        proof_semantic = str(
+            proof.get("semantic_sha256")
+            or proof.get("semantic_workbook_sha256")
+            or proof.get("readback_semantic_workbook_sha256")
+            or ""
+        ).strip().lower()
+        if (
+            not _is_sha256(readback_hash)
+            or not resulting_etag
+            or proof_semantic != expected_semantic
+        ):
+            return False, (
+                "ERROR: Canonical workbook write proof is missing or invalid; "
+                "expected exact remote readback_sha256, resulting_etag and "
+                f"semantic_sha256={expected_semantic}"
+            )
+        return True, output
+    except subprocess.TimeoutExpired:
+        return False, "Timed out after 90 seconds"
+    except Exception as exc:
+        return False, str(exc)
+    finally:
+        if content_file:
+            try:
+                Path(content_file).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -616,6 +822,8 @@ def _run_write_operation(op: dict) -> tuple[bool, str]:
     protocol_allowed, protocol_rejection = _validate_update_protocol(op)
     if not protocol_allowed:
         return False, protocol_rejection
+    if operation == "update_workbook":
+        return _run_workbook_update_operation(op)
     if not sp_path:
         return False, "Missing 'path' field"
     if not SP_SCRIPT.exists():
@@ -949,6 +1157,17 @@ def main() -> None:
                                 "resulting_etag", _extract_write_proof(output).get("etag")
                             ),
                             "readback_sha256": _extract_write_proof(output).get("readback_sha256"),
+                            "semantic_sha256": _extract_write_proof(output).get("semantic_sha256"),
+                            "semantic_workbook_sha256": _extract_write_proof(output).get(
+                                "semantic_workbook_sha256",
+                                _extract_write_proof(output).get("semantic_sha256"),
+                            ),
+                            "readback_semantic_workbook_sha256": _extract_write_proof(
+                                output
+                            ).get(
+                                "readback_semantic_workbook_sha256",
+                                _extract_write_proof(output).get("semantic_sha256"),
+                            ),
                         }
                         if op_lower in WRITE_OPERATIONS and success else {}
                     ),

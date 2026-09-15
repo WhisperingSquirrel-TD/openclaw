@@ -5,12 +5,17 @@ from __future__ import annotations
 import importlib.util
 import sys
 import json
+import base64
 import hashlib
 import tempfile
 import unittest
-from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
+from datetime import datetime, timezone
 from pathlib import Path
+
+SEER_FINANCE_ROOT = Path(__file__).resolve().parents[1] / "seer-finance"
+if str(SEER_FINANCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SEER_FINANCE_ROOT))
 
 from sharepoint_boundary import (
     BoundaryResult,
@@ -18,6 +23,7 @@ from sharepoint_boundary import (
     SharePointBoundaryError,
     _ReadbackRequiredStore,
     _SeerFinanceBoundaryAdapter,
+    write_verified,
 )
 
 MODULE_PATH = Path(__file__).with_name("watcher.py")
@@ -111,7 +117,7 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 state, summary = WATCHER.default_state(), {}
                 with patch.object(WATCHER, 'capture_sharepoint_candidate') as capture:
                     capture.return_value = BoundaryResult(
-                        operation="capture", path="/Expenses/Expense ledger.md",
+                        operation="capture", path="/Expenses/Expense ledger.xlsx",
                         accepted=True, verified=True,
                         canonical_ref="sharepoint:pending:obcn-42",
                     )
@@ -144,7 +150,7 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
                 with patch.object(WATCHER, 'capture_sharepoint_candidate') as capture:
                     capture.return_value = BoundaryResult(
-                        operation="capture", path="/Expenses/Expense ledger.md",
+                        operation="capture", path="/Expenses/Expense ledger.xlsx",
                         accepted=False, verified=False, blocker="capture unavailable",
                     )
                     WATCHER.process_mirror_expense_events(WATCHER.default_state(), {})
@@ -179,7 +185,7 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
                 with patch.object(WATCHER, "capture_sharepoint_candidate") as capture:
                     capture.return_value = BoundaryResult(
-                        operation="capture", path="/Expenses/Expense ledger.md",
+                        operation="capture", path="/Expenses/Expense ledger.xlsx",
                         accepted=True, verified=False,
                     )
                     WATCHER.process_mirror_expense_events(WATCHER.default_state(), {})
@@ -229,10 +235,10 @@ class ExpenseReplayManifestTests(unittest.TestCase):
                     }), encoding="utf-8")
                 return BoundaryResult(
                     operation="capture",
-                    path="/Expenses/Expense ledger.md",
+                    path="/Expenses/Expense ledger.xlsx",
                     accepted=True,
                     verified=True,
-                    canonical_ref=f"/Expenses/Expense ledger.md#{source_ref}",
+                    canonical_ref=f"/Expenses/Expense ledger.xlsx#{source_ref}",
                 )
 
             with patch.object(WATCHER, "capture_candidate", side_effect=capture_and_interleave):
@@ -270,7 +276,7 @@ class ExpenseReplayManifestTests(unittest.TestCase):
                 }), encoding="utf-8")
                 return BoundaryResult(
                     operation="capture",
-                    path="/Expenses/Expense ledger.md",
+                    path="/Expenses/Expense ledger.xlsx",
                     accepted=True,
                     verified=False,
                     blocker="SharePoint queue result/readback pending",
@@ -302,10 +308,10 @@ class ExpenseReplayManifestTests(unittest.TestCase):
                 replay.write_bytes(malformed)
                 return BoundaryResult(
                     operation="capture",
-                    path="/Expenses/Expense ledger.md",
+                    path="/Expenses/Expense ledger.xlsx",
                     accepted=True,
                     verified=True,
-                    canonical_ref="/Expenses/Expense ledger.md#malformed-interleaving",
+                    canonical_ref="/Expenses/Expense ledger.xlsx#malformed-interleaving",
                 )
 
             with patch.object(WATCHER, "LOG_FILE", root / "watcher.log"), \
@@ -366,12 +372,10 @@ class ExpenseReplayManifestTests(unittest.TestCase):
             self.assertEqual(payload, json.loads(replay.read_text(encoding="utf-8")))
             capture.assert_not_called()
 
-    def test_receipt_replay_requires_processed_result_and_exact_remote_readback(self) -> None:
+    def test_receipt_replay_uses_boundary_and_never_writes_queue_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             replay = root / "replay.json"
-            queue = root / "sharepoint-queue.json"
-            results = root / "sharepoint-results.json"
             receipt = root / "receipt.pdf"
             receipt.write_bytes(b"fixture receipt")
             source_ref = "email:receipt:replay-idempotent"
@@ -386,61 +390,102 @@ class ExpenseReplayManifestTests(unittest.TestCase):
                     },
                 }],
             }), encoding="utf-8")
-            old_paths = WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE
-            try:
-                WATCHER.SHAREPOINT_QUEUE_FILE = queue
-                WATCHER.SHAREPOINT_RESULTS_FILE = results
-                complete_capture = BoundaryResult(
-                    operation="capture",
-                    path="/Expenses/Expense ledger.md",
-                    accepted=True,
-                    verified=True,
-                    canonical_ref="/Expenses/Expense ledger.md#receipt-replay-idempotent",
-                )
-                with patch.object(WATCHER, "capture_candidate", return_value=complete_capture):
-                    first = WATCHER.process_expense_replay({}, replay_path=replay)
-                self.assertEqual("sharepoint_receipt_upload_pending", first[0]["blocker"])
-                upload = json.loads(queue.read_text(encoding="utf-8"))[0]
-                upload_id = upload["id"]
-                expected_path = upload["path"]
+            complete_capture = BoundaryResult(
+                operation="capture",
+                path="/Expenses/Expense ledger.xlsx",
+                accepted=True,
+                verified=True,
+                canonical_ref="/Expenses/Expense ledger.xlsx#receipt-replay-idempotent",
+            )
 
-                # A result without processor completion, or without exact
-                # remote path/version proof, cannot remove recovery state.
-                for result in (
-                    {"id": upload_id, "success": True},
-                    {
-                        "id": upload_id,
-                        "success": True,
-                        "processed_at": "2026-08-10T00:00:00Z",
-                        "output": json.dumps({
-                            "status": "uploaded", "path": "/Expenses/Receipts/stale",
-                            "etag": "etag-stale",
-                        }),
-                    },
-                ):
-                    results.write_text(json.dumps([result]), encoding="utf-8")
-                    with patch.object(WATCHER, "capture_candidate", return_value=complete_capture):
-                        pending = WATCHER.process_expense_replay({}, replay_path=replay)
-                    self.assertEqual("sharepoint_receipt_upload_pending", pending[0]["blocker"])
-                    self.assertEqual(1, len(json.loads(replay.read_text(encoding="utf-8"))["items"]))
+            class ReceiptTransport:
+                store = object()
 
-                results.write_text(json.dumps([{
-                    "id": upload_id,
-                    "success": True,
-                    "processed_at": "2026-08-10T00:00:00Z",
-                    "output": json.dumps({
-                        "status": "uploaded", "path": expected_path, "etag": "etag-exact",
-                    }),
-                }]), encoding="utf-8")
-                with patch.object(WATCHER, "capture_candidate", return_value=complete_capture):
-                    delivered = WATCHER.process_expense_replay({}, replay_path=replay)
-                self.assertEqual("success", delivered[0]["state"])
-                self.assertEqual([], json.loads(replay.read_text(encoding="utf-8"))["items"])
-            finally:
-                WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE = old_paths
+                def __init__(self) -> None:
+                    self.calls = []
+
+                def upload_receipt_verified(self, **kwargs):
+                    self.calls.append(kwargs)
+                    return BoundaryResult(
+                        operation="upload_binary",
+                        path=kwargs["path"],
+                        accepted=True,
+                        verified=True,
+                        canonical_ref=kwargs["path"],
+                    )
+
+            transport = ReceiptTransport()
+            boundary = _SeerFinanceBoundaryAdapter(transport)
+            with (
+                patch.object(WATCHER, "capture_candidate", return_value=complete_capture),
+                patch.object(WATCHER, "resolve_boundary", return_value=boundary),
+            ):
+                delivered = WATCHER.process_expense_replay({}, replay_path=replay)
+            self.assertEqual("success", delivered[0]["state"])
+            self.assertEqual([], json.loads(replay.read_text(encoding="utf-8"))["items"])
+            self.assertFalse((root / "sharepoint-queue.json").exists())
+            self.assertEqual(source_ref, transport.calls[0]["source_ref"])
+            self.assertEqual(receipt, transport.calls[0]["local_path"])
 
 
 class SharePointCacheSafetyTests(unittest.TestCase):
+    def test_generic_write_cannot_target_canonical_workbook(self) -> None:
+        class UnexpectedBoundary:
+            def write_verified(self, *args, **kwargs):
+                raise AssertionError("generic canonical write must not reach transport")
+
+        result = write_verified(
+            "/Finance/Finance ledger.xlsx",
+            "not-an-xlsx-workbook",
+            operation="append",
+            boundary=UnexpectedBoundary(),
+        )
+        self.assertFalse(result.accepted)
+        self.assertFalse(result.verified)
+        self.assertIn("write_workbook_verified", result.blocker or "")
+
+    def test_workbook_boundary_forwards_all_binary_and_semantic_preconditions(self) -> None:
+        class WorkbookTransport:
+            def __init__(self) -> None:
+                self.store = object()
+                self.kwargs = None
+
+            def write_workbook_verified(self, path, content_base64, **kwargs):
+                self.kwargs = (path, content_base64, kwargs)
+                return BoundaryResult(
+                    operation="update_workbook",
+                    path=path,
+                    accepted=True,
+                    verified=True,
+                    canonical_ref=f"{path}#verified",
+                )
+
+        transport = WorkbookTransport()
+        adapter = _SeerFinanceBoundaryAdapter.__new__(_SeerFinanceBoundaryAdapter)
+        adapter.transport = transport
+        result = adapter.write_workbook_verified(
+            "/Finance/Finance ledger.xlsx",
+            "UEsDB...",
+            content_sha256="a" * 64,
+            base_etag='"etag"',
+            expected_source_sha256="b" * 64,
+            semantic_sha256="c" * 64,
+        )
+        self.assertTrue(result.complete)
+        self.assertEqual(
+            (
+                "/Finance/Finance ledger.xlsx",
+                "UEsDB...",
+                {
+                    "content_sha256": "a" * 64,
+                    "base_etag": '"etag"',
+                    "expected_source_sha256": "b" * 64,
+                    "semantic_sha256": "c" * 64,
+                },
+            ),
+            transport.kwargs,
+        )
+
     def test_missing_cache_never_becomes_an_empty_capture_authority(self) -> None:
         class EmptyStore:
             writes = 0
@@ -485,46 +530,252 @@ class SharePointCacheSafetyTests(unittest.TestCase):
 
         transport = ChangingTransport()
         store = _ReadbackRequiredStore(transport)
-        self.assertEqual("version-one", store.read("/Finance/Finance ledger.md"))
+        self.assertEqual("version-one", store.read("/Finance/Finance ledger.xlsx"))
         with self.assertRaises(SharePointBoundaryError):
-            store.write(path="/Finance/Finance ledger.md", content="new document")
+            store.write(path="/Finance/Finance ledger.xlsx", content="new document")
         self.assertEqual(0, transport.store.writes)
 
-    def test_queue_boundary_preserves_concurrent_producers(self) -> None:
+    def test_retired_queue_boundary_never_writes_queue_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             queue = Path(tmp) / "sharepoint-queue.json"
             boundary = QueueBoundary(queue)
             blocked = boundary.write_verified(
-                "/Finance/Finance ledger.md",
+                "/Finance/Finance ledger.xlsx",
                 "unsafe append",
             )
             self.assertFalse(blocked.accepted)
             self.assertFalse(queue.exists())
 
-            def produce(index: int) -> BoundaryResult:
-                content = f"document version {index}"
-                return boundary.write_verified(
-                    "/Finance/Finance ledger.md",
-                    content,
-                    operation="update",
-                    base_etag=f'"etag-{index}"',
-                    expected_source_sha256=hashlib.sha256(content.encode()).hexdigest(),
-                )
 
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                results = list(pool.map(produce, range(8)))
+class SeerRepositoryIntegrationTests(unittest.TestCase):
+    def _transport(self, *, kind: str = "expense"):
+        from seer_finance.ledger.workbook_codec import WorkbookCodec
 
-            self.assertTrue(all(result.accepted and not result.verified for result in results))
-            queued = json.loads(queue.read_text(encoding="utf-8"))
-            self.assertEqual(8, len({item["id"] for item in queued}))
-            self.assertEqual(
-                {f'"etag-{index}"' for index in range(8)},
-                {item["base_etag"] for item in queued},
+        if kind == "finance":
+            initial = WorkbookCodec.encode_finance({
+                "schema_version": 1,
+                "transactions": [],
+            })
+        else:
+            initial = WorkbookCodec.encode_expense({
+                "schema_version": 1,
+                "expenses": [],
+                "events": [],
+                "collisions": [],
+                "evidence": [],
+            })
+
+        class WorkbookStore:
+            def __init__(self) -> None:
+                self.content = initial
+                self.etag = '"initial-etag"'
+                self.writes = 0
+                self.snapshot_reads = 0
+                self.change_before_write = False
+
+            def read_workbook_snapshot(self, path: str) -> dict:
+                self.snapshot_reads += 1
+                content = self.content
+                etag = self.etag
+                if self.change_before_write and self.snapshot_reads > 1:
+                    content = initial + b"changed"
+                    etag = '"changed-etag"'
+                return {
+                    "path": path,
+                    "content_bytes": content,
+                    "content_sha256": hashlib.sha256(content).hexdigest(),
+                    "etag": etag,
+                    "version": "version-1",
+                }
+
+            def write_workbook(self, **kwargs):
+                self.writes += 1
+                self.content = base64.b64decode(kwargs["content_base64"])
+                self.etag = '"updated-etag"'
+                return f'{kwargs["path"]}#updated'
+
+        class Transport:
+            def __init__(self) -> None:
+                self.store = WorkbookStore()
+
+        return Transport()
+
+    def test_adapter_runs_actual_seer_expense_repository_against_workbook_store(self) -> None:
+        from seer_finance.ledger.workbook_codec import WorkbookCodec
+
+        transport = self._transport()
+        adapter = _SeerFinanceBoundaryAdapter(transport)
+        result = adapter.capture_candidate(
+            source_surface="email",
+            source_ref="email:repository-integration",
+            facts={
+                "supplier": "Acme",
+                "amount_pence": 1200,
+                "currency": "GBP",
+                "expense_date": "2026-08-10",
+                "category": "software",
+            },
+        )
+        self.assertTrue(result.complete)
+        self.assertTrue(result.canonical_ref.startswith("/Expenses/Expense ledger.xlsx#"))
+        self.assertEqual(1, transport.store.writes)
+        state = WorkbookCodec.decode(transport.store.content, kind="expense")
+        self.assertEqual("email:repository-integration", state["expenses"][0]["source_ref"])
+        self.assertGreaterEqual(transport.store.snapshot_reads, 2)
+
+    def test_adapter_runs_actual_seer_finance_writer_against_workbook_store(self) -> None:
+        from seer_finance.ledger.workbook_codec import WorkbookCodec
+
+        transport = self._transport(kind="finance")
+        result = _SeerFinanceBoundaryAdapter(transport).update_validated_expense({
+            "txn_id": "txn:repository-integration",
+            "date": "2026-08-10",
+            "direction": "expense",
+            "amount_pence": 1200,
+            "description": "Acme software",
+            "counterparty": "Acme",
+            "category": "software",
+            "source_ref": "email:finance-repository-integration",
+        })
+        self.assertTrue(result.complete)
+        self.assertEqual("sharepoint:txn:repository-integration", result.canonical_ref)
+        state = WorkbookCodec.decode(transport.store.content, kind="finance")
+        self.assertEqual(
+            "email:finance-repository-integration",
+            state["transactions"][0]["source_ref"],
+        )
+        self.assertGreaterEqual(transport.store.snapshot_reads, 2)
+
+    def test_workbook_snapshot_change_blocks_actual_repository_write(self) -> None:
+        transport = self._transport()
+        transport.store.change_before_write = True
+        result = _SeerFinanceBoundaryAdapter(transport).capture_candidate(
+            source_surface="email",
+            source_ref="email:stale-repository-integration",
+            facts={"supplier": "Acme"},
+        )
+        self.assertTrue(result.accepted)
+        self.assertFalse(result.verified)
+        self.assertIn("pending readback", result.blocker or "")
+        self.assertEqual(0, transport.store.writes)
+
+    def test_repeated_capture_uses_real_store_proof_without_duplicate_queue(self) -> None:
+        from seer_finance.ledger.sharepoint_contract import (
+            EXPENSE_LEDGER_PATH,
+            SharePointDocumentStore,
+        )
+        from seer_finance.ledger.workbook_codec import WorkbookCodec
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            queue = root / "queue.json"
+            results = root / "results.json"
+            initial = WorkbookCodec.encode_expense({
+                "schema_version": 1,
+                "expenses": [],
+                "events": [],
+                "collisions": [],
+                "evidence": [],
+            })
+            target = cache / "Expenses" / "Expense ledger.xlsx"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(initial)
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            (cache / ".manifest.json").write_text(json.dumps({
+                "cached": {
+                    "Expenses/Expense ledger.xlsx": {
+                        "sp_path": EXPENSE_LEDGER_PATH,
+                        "etag": "etag-0",
+                        "version": "v0",
+                        "synced_at": now,
+                        "content_sha256": hashlib.sha256(initial).hexdigest(),
+                        "semantic_sha256": WorkbookCodec.semantic_hash(initial),
+                    },
+                },
+            }), encoding="utf-8")
+            store = SharePointDocumentStore(
+                queue_path=queue,
+                results_path=results,
+                cache_root=cache,
             )
-            self.assertEqual(
-                {hashlib.sha256(f"document version {index}".encode()).hexdigest() for index in range(8)},
-                {item["expected_source_sha256"] for item in queued},
+            adapter = _SeerFinanceBoundaryAdapter(type("Transport", (), {"store": store})())
+            facts = {
+                "supplier": "Acme",
+                "amount_pence": 1200,
+                "currency": "GBP",
+                "expense_date": "2026-08-10",
+                "category": "software",
+            }
+
+            first = adapter.capture_candidate(
+                source_surface="email",
+                source_ref="email:real-store-repeat",
+                facts=facts,
             )
+            self.assertTrue(first.accepted)
+            self.assertFalse(first.verified)
+            operation = json.loads(queue.read_text(encoding="utf-8"))[0]
+            self.assertEqual("update_workbook", operation["operation"])
+            self.assertEqual("etag-0", operation["base_etag"])
+            self.assertEqual("v0", operation["base_version"])
+            self.assertEqual(
+                hashlib.sha256(initial).hexdigest(),
+                operation["expected_source_sha256"],
+            )
+
+            second = adapter.capture_candidate(
+                source_surface="email",
+                source_ref="email:real-store-repeat",
+                facts=facts,
+            )
+            self.assertTrue(second.accepted)
+            self.assertFalse(second.verified)
+            self.assertEqual(
+                [operation["id"]],
+                [item["id"] for item in json.loads(queue.read_text(encoding="utf-8"))],
+            )
+
+            desired = base64.b64decode(operation["content_base64"])
+            target.write_bytes(desired)
+            updated = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            (cache / ".manifest.json").write_text(json.dumps({
+                "cached": {
+                    "Expenses/Expense ledger.xlsx": {
+                        "sp_path": EXPENSE_LEDGER_PATH,
+                        "etag": "etag-1",
+                        "version": "v1",
+                        "synced_at": updated,
+                        "content_sha256": hashlib.sha256(desired).hexdigest(),
+                        "semantic_sha256": WorkbookCodec.semantic_hash(desired),
+                    },
+                },
+            }), encoding="utf-8")
+            results.write_text(json.dumps([{
+                "id": operation["id"],
+                "path": EXPENSE_LEDGER_PATH,
+                "success": True,
+                "processed_at": updated,
+                "resulting_etag": "etag-1",
+                "resulting_version": "v1",
+                "readback_sha256": hashlib.sha256(desired).hexdigest(),
+                "readback_semantic_workbook_sha256": WorkbookCodec.semantic_hash(desired),
+            }]), encoding="utf-8")
+            queue.write_text("[]", encoding="utf-8")
+
+            third = adapter.capture_candidate(
+                source_surface="email",
+                source_ref="email:real-store-repeat",
+                facts=facts,
+            )
+            self.assertTrue(third.complete)
+            self.assertTrue(third.canonical_ref.startswith(f"{EXPENSE_LEDGER_PATH}#"))
+            decoded = WorkbookCodec.decode_expense(desired)
+            self.assertEqual(
+                ["email:real-store-repeat"],
+                [item["source_ref"] for item in decoded["expenses"]],
+            )
+            self.assertEqual([], json.loads(queue.read_text(encoding="utf-8")))
 
 
 class MirrorTimestampAndTelegramGuardTests(unittest.TestCase):

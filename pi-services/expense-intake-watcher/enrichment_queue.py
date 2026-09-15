@@ -2,8 +2,8 @@
 
 The queue holds only unresolved financial facts and recovery metadata. It is
 not a second expense ledger: canonical expense review is SharePoint
-``/Expenses/Expense ledger.md`` and finance posting is SharePoint
-``/Finance/Finance ledger.md``.
+``/Expenses/Expense ledger.xlsx`` and finance posting is SharePoint
+``/Finance/Finance ledger.xlsx``.
 """
 from __future__ import annotations
 

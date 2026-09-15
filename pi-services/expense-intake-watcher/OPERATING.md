@@ -23,11 +23,11 @@ trusted/external email + sent views + WhatsApp + Teams
   -> openclaw-mirror-router (15-minute source normalisation/classification)
   -> memory/mirror-events.json (stable source ID + surface + flags)
   -> expense-intake-watcher (deterministic source capture)
-  -> SharePoint /Expenses/Expense ledger.md (authoritative expense review)
+   -> SharePoint /Expenses/Expense ledger.xlsx (authoritative expense review)
   -> monitored-items-state.json (source-level proof)
   -> expense-enrichment-queue.json (explicit missing financial facts)
   -> expense-enrichment-resolution.timer (validated finance handoff)
-  -> SharePoint /Finance/Finance ledger.md (authoritative finance ledger)
+   -> SharePoint /Finance/Finance ledger.xlsx (authoritative finance ledger)
 ```
 
 Trusted inbox and WhatsApp inputs also retain the watcher’s established direct
@@ -58,9 +58,9 @@ verified readback from the relevant SharePoint document.
 - Enrichment resolution: `expense-enrichment-resolution.timer`
 - Canonical runtime state: `~/.openclaw/runtime/inbound-watch-router/state.json`
 - Retired legacy units/state: archived under `pi-services/expense-intake-watcher/backups/`; no compatibility state writer remains.
-- Canonical expense review document: `/Expenses/Expense ledger.md`
+- Canonical expense review workbook: `/Expenses/Expense ledger.xlsx`
 - Source proof: `~/.openclaw/workspace/memory/monitored-items-state.json`
-- Canonical finance ledger document: `/Finance/Finance ledger.md`
+- Canonical finance ledger workbook: `/Finance/Finance ledger.xlsx`
 - Local queues/outcomes are recovery and operational state only, never business authority.
 
 ## Safe operator checks

@@ -22,11 +22,11 @@ class FakeBoundary:
         self.verified = verified
         self.paths: list[str] = []
 
-    def write_verified(self, path: str, content: str, *, operation: str = "append") -> BoundaryResult:
-        self.paths.append(path)
+    def update_validated_expense(self, candidate: dict[str, object]) -> BoundaryResult:
+        self.paths.append(FINANCE_LEDGER_PATH)
         return BoundaryResult(
-            operation=operation,
-            path=path,
+            operation="update_workbook",
+            path=FINANCE_LEDGER_PATH,
             accepted=True,
             verified=self.verified,
             blocker=None if self.verified else "readback pending",

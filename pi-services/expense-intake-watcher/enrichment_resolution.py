@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from finance_handoff import append_validated_expense
+from finance_handoff import update_validated_expense
 from sharepoint_boundary import SharePointBoundary, resolve_boundary
 
 
@@ -71,7 +71,7 @@ def resolve_ready_items(
             result["waiting"] += 1
             continue
         try:
-            handoff = append_validated_expense(authority, transaction)
+            handoff = update_validated_expense(authority, transaction)
         except Exception as exc:
             item["state"] = "blocked"
             item["blocker"] = (
