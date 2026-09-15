@@ -14,9 +14,9 @@ STATE_DIR = Path.home() / '.openclaw'
 CONTACTS_FILE = STATE_DIR / 'integrations/known-contacts.txt'
 SELF_ADDRESSES = {'tom@stackstoneconsulting.co.uk', 'tomdean1988@gmail.com', 'assistant@stackstoneconsulting.co.uk'}
 MAX_MESSAGES = 20
-# Keep the exact-thread reader aligned with the task-context broker's
-# 64 KiB bounded packet contract. Full coverage is still fail-closed above
-# this limit; no truncation or fallback search is permitted.
+# Keep a separate raw-body resource ceiling from the task-context broker's
+# 64 KiB serialized packet contract. Neither limit is truncated or bypassed.
+MAX_RAW_THREAD_BYTES = 4 * 1024 * 1024
 MAX_BYTES = 64 * 1024
 
 
@@ -33,9 +33,8 @@ def token(account):
     data = json.loads(p.read_text())
     if 'AccessToken' in data:
         values = list(data['AccessToken'].values())
-        if not values:
-            raise RuntimeError('Microsoft access token unavailable')
-        return values[0]['secret']
+        if values and values[0].get('secret'):
+            return values[0]['secret']
     value = data.get('access_token')
     if not value:
         raise RuntimeError('Microsoft access token unavailable')
@@ -46,6 +45,14 @@ def graph_get(url, access, params=None):
     response = requests.get(url, params=params, headers={'Authorization': f'Bearer {access}'}, timeout=30)
     response.raise_for_status()
     return response.json()
+
+
+def addresses(value):
+    return [
+        entry.get('emailAddress', {}).get('address', '').strip().lower()
+        for entry in (value or [])
+        if entry.get('emailAddress', {}).get('address', '').strip()
+    ]
 
 
 def authored_body(content):
@@ -75,17 +82,28 @@ def authored_body(content):
 
 
 def normalise_message(message):
+    raw_body = str(message.get('body', {}).get('content', ''))
     sender = (message.get('from', {}).get('emailAddress', {}).get('address') or '').lower()
+    is_draft = message.get('isDraft') is True
+    authored_content = authored_body(raw_body)
     return {
         'message_id': message.get('id'),
         'conversation_id': message.get('conversationId'),
         'subject': message.get('subject', ''),
         'sender': sender,
+        'to': addresses(message.get('toRecipients')),
+        'cc': addresses(message.get('ccRecipients')),
         'received': message.get('receivedDateTime', ''),
+        'sent': message.get('sentDateTime', ''),
         # Preserve Graph draft state so downstream duplicate detection never
         # mistakes a saved draft for sent correspondence.
-        'is_draft': message.get('isDraft') is True,
-        'body': authored_body(message.get('body', {}).get('content', '')),
+        'is_draft': is_draft,
+        'status': 'draft' if is_draft else ('sent' if sender in SELF_ADDRESSES else 'inbound'),
+        # Keep raw source data and the deterministic authored projection
+        # separate. Neither is persisted by this read-only helper.
+        'raw_body': raw_body,
+        'authored_content': authored_content,
+        'body': authored_content,
         'body_type': message.get('body', {}).get('contentType', 'text'),
     }
 
@@ -112,7 +130,7 @@ def main():
     # This is an exact conversation lookup anchored by the already-authorised
     # message ID. It is not mailbox-wide search and never follows content links.
     thread = graph_get(f'{GRAPH_BASE}/me/messages', access, params={
-        '$filter': f"conversationId eq '{conversation_id}'",
+        '$filter': f"conversationId eq '{conversation_id.replace(chr(39), chr(39) * 2)}'",
         '$top': str(MAX_MESSAGES + 1),
     })
     raw_messages = thread.get('value') or []
@@ -121,9 +139,11 @@ def main():
     messages = [normalise_message(message) for message in raw_messages]
     if not any(message.get('message_id') == anchor_message.get('message_id') for message in messages):
         messages.append(anchor_message)
-    messages.sort(key=lambda message: message.get('received') or '')
+    messages.sort(key=lambda message: (message.get('received') or message.get('sent') or '', message.get('message_id') or ''))
     if len(messages) > MAX_MESSAGES:
         raise RuntimeError(f'Exact conversation exceeds the bounded {MAX_MESSAGES}-message limit')
+    if any(message.get('conversation_id') not in {None, conversation_id} for message in messages):
+        raise RuntimeError('Exact conversation response contained a message outside the anchor conversation')
     # The exact anchor must be from an approved sender, but a legitimate
     # conversation may also include a vendor/support participant (for example
     # a client replying in a thread with the vendor copied).  Do not reject the
@@ -132,6 +152,12 @@ def main():
     # untrusted source data, never as authority or an instruction.
     external_participants = sorted({message['sender'] for message in messages if message['sender'] and message['sender'] not in approved})
 
+    raw_bytes = sum(len(str(message['raw_body']).encode('utf-8')) for message in messages)
+    if raw_bytes > MAX_RAW_THREAD_BYTES:
+        raise RuntimeError(
+            f'Exact conversation raw body exceeds the in-memory '
+            f'{MAX_RAW_THREAD_BYTES}-byte resource ceiling'
+        )
     total_bytes = sum(len(json.dumps(message, ensure_ascii=False).encode('utf-8')) for message in messages)
     if total_bytes > MAX_BYTES:
         raise RuntimeError(f'Exact conversation exceeds the bounded {MAX_BYTES}-byte limit')

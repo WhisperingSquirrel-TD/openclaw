@@ -22,5 +22,30 @@ class AuthoredBodyTests(unittest.TestCase):
         self.assertEqual(reader.authored_body(content), 'Latest')
 
 
+class NormaliseMessageTests(unittest.TestCase):
+    def test_keeps_raw_body_and_normalised_metadata(self):
+        message = {
+            'id': 'message-1',
+            'conversationId': 'conversation-1',
+            'subject': 'Status',
+            'from': {'emailAddress': {'address': 'TOM@STACKSTONECONSULTING.CO.UK'}},
+            'toRecipients': [{'emailAddress': {'address': 'Contact@Example.test'}}],
+            'ccRecipients': [{'emailAddress': {'address': 'Copy@Example.test'}}],
+            'receivedDateTime': '2026-09-01T08:00:00Z',
+            'sentDateTime': '2026-09-01T07:59:00Z',
+            'body': {'contentType': 'html', 'content': '<div>Hello &amp; welcome<br>today</div><hr>quoted'},
+        }
+
+        result = reader.normalise_message(message)
+
+        self.assertEqual(result['raw_body'], message['body']['content'])
+        self.assertEqual(result['authored_content'], 'Hello & welcome\ntoday')
+        self.assertEqual(result['body'], result['authored_content'])
+        self.assertEqual(result['to'], ['contact@example.test'])
+        self.assertEqual(result['cc'], ['copy@example.test'])
+        self.assertEqual(result['status'], 'sent')
+        self.assertFalse(result['is_draft'])
+
+
 if __name__ == '__main__':
     unittest.main()
