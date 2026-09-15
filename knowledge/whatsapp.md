@@ -38,6 +38,14 @@ or per-account:
 
 Periodically scans WhatsApp watch-mode transcripts for actionable items using a cheap AI model, then surfaces them as Telegram inline keyboard cards.
 
+### Recent-feed window
+
+Routine WhatsApp checks use `WHATSAPP_RECENT.md`, a semantic **48-hour**
+rolling window generated from the structured watch transcript. Do not substitute
+the legacy full `WHATSAPP_LOG.md` for routine checks, and do not widen the
+window to 72 hours: a wider or stale mirror is `coverage incomplete` rather
+than evidence that an item was absent.
+
 Config in `openclaw.json` under `channels.whatsapp`:
 
 ```json

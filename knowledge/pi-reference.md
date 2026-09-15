@@ -7,16 +7,16 @@ This is the consolidated map of where things live on the Pi and how to debug the
 
 ## Email integration files
 
-| File                                                      | Purpose                                                                                   |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `~/.openclaw/integrations/known-contacts.txt`             | Shared trusted contacts list — read by all pollers. One email per line.                   |
-| `~/.openclaw/integrations/microsoft/poll.py`              | Microsoft Graph email poller — parameterised, serves both personal and assistant accounts |
-| `~/.openclaw/integrations/microsoft/token-microsoft.json` | Personal Microsoft OAuth token (tom@stackstoneconsulting.co.uk)                           |
+| File                                                      | Purpose                                                                                                                                                                                                                                       |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `~/.openclaw/integrations/known-contacts.txt`             | Shared trusted contacts list — read by all pollers. One email per line.                                                                                                                                                                       |
+| `~/.openclaw/integrations/microsoft/poll.py`              | Microsoft Graph email poller — parameterised, serves both personal and assistant accounts                                                                                                                                                     |
+| `~/.openclaw/integrations/microsoft/token-microsoft.json` | Personal Microsoft OAuth token (tom@stackstoneconsulting.co.uk)                                                                                                                                                                               |
 | `~/.openclaw/integrations/microsoft/token-assistant.json` | **Canonical** assistant account OAuth token (assistant@stackstoneconsulting.co.uk) — used by SharePoint, send.py, email + calendar pollers. See [microsoft.md](./integrations/microsoft.md#microsoft-oauth--unified-scope-strategy-important) |
-| `~/.openclaw/integrations/microsoft-l1/token.json`        | Legacy assistant token path (older setups) — prefer `token-assistant.json` above          |
-| `~/.openclaw/integrations/google/gmail_poll.py`           | Gmail email poller script                                                                 |
-| `~/.openclaw/integrations/google/gmail-credentials.json`  | Gmail OAuth app credentials (from Google Cloud Console)                                   |
-| `~/.openclaw/integrations/google/gmail-token.json`        | Gmail OAuth token (delete and re-run poller to re-auth)                                   |
+| `~/.openclaw/integrations/microsoft-l1/token.json`        | Legacy assistant token path (older setups) — prefer `token-assistant.json` above                                                                                                                                                              |
+| `~/.openclaw/integrations/google/gmail_poll.py`           | Gmail email poller script                                                                                                                                                                                                                     |
+| `~/.openclaw/integrations/google/gmail-credentials.json`  | Gmail OAuth app credentials (from Google Cloud Console)                                                                                                                                                                                       |
+| `~/.openclaw/integrations/google/gmail-token.json`        | Gmail OAuth token (run `gmail_poll.py --auth` to re-authorise safely)                                                                                                                                                                         |
 
 See [Integrations: Microsoft](./integrations/microsoft.md) and [Google](./integrations/google.md) for auth details.
 
@@ -53,43 +53,44 @@ See [Security](./security.md) and [TOTP](./totp.md).
 
 ## All log files — always use these, journald does NOT work for user services on this Pi
 
-| What                        | Log path                                                                          |
-| --------------------------- | --------------------------------------------------------------------------------- |
-| **Gateway (L1)**            | `~/.openclaw/gateway.log`                                                         |
-| Daily model reset           | `~/.openclaw/workspace/memory/daily-reset.log`                                    |
-| Garmin poller               | `~/.openclaw/workspace/memory/poll-garmin-log.txt`                                |
-| CRM poller                  | `~/.openclaw/workspace/memory/poll-crm-log.txt`                                   |
-| SharePoint cache poller     | `~/.openclaw/integrations/microsoft/sp-cache-poller.log`                          |
-| SharePoint queue processor  | `~/.openclaw/integrations/microsoft/sp-queue-processor.log`                       |
-| SharePoint housekeeping     | `~/.openclaw/integrations/microsoft/sp-housekeeping.log`                          |
-| Stackstone report poller    | `~/.openclaw/integrations/stackstone/poller.log`                                  |
-| Stackstone enquiry poller   | `~/.openclaw/integrations/stackstone/enquiry-poller.log`                          |
-| YouTube channel poller      | `~/.openclaw/integrations/youtube/channel-poller.log`                             |
-| AI briefing pipeline        | `~/.openclaw/integrations/ai-briefing/pipeline.log`                               |
-| Health check                | `~/.openclaw/integrations/health/health-check.log`                                |
-| Stackstone poll (cron)      | `/tmp/l1-stackstone-poll.log`                                                     |
+| What                       | Log path                                                    |
+| -------------------------- | ----------------------------------------------------------- |
+| **Gateway (L1)**           | `~/.openclaw/gateway.log`                                   |
+| Daily model reset          | `~/.openclaw/workspace/memory/daily-reset.log`              |
+| Garmin poller              | `~/.openclaw/workspace/memory/poll-garmin-log.txt`          |
+| CRM poller                 | `~/.openclaw/workspace/memory/poll-crm-log.txt`             |
+| SharePoint cache poller    | `~/.openclaw/integrations/microsoft/sp-cache-poller.log`    |
+| SharePoint queue processor | `~/.openclaw/integrations/microsoft/sp-queue-processor.log` |
+| SharePoint housekeeping    | `~/.openclaw/integrations/microsoft/sp-housekeeping.log`    |
+| Stackstone report poller   | `~/.openclaw/integrations/stackstone/poller.log`            |
+| Stackstone enquiry poller  | `~/.openclaw/integrations/stackstone/enquiry-poller.log`    |
+| YouTube channel poller     | `~/.openclaw/integrations/youtube/channel-poller.log`       |
+| AI briefing pipeline       | `~/.openclaw/integrations/ai-briefing/pipeline.log`         |
+| Health check               | `~/.openclaw/integrations/health/health-check.log`          |
+| Stackstone poll (cron)     | `/tmp/l1-stackstone-poll.log`                               |
 
 **Live tail of gateway** (watch what happens when you send L1 a message in Telegram):
+
 ```bash
 tail -f ~/.openclaw/gateway.log
 ```
 
 ## Key paths
 
-| What                            | Path                                                                |
-| ------------------------------- | ------------------------------------------------------------------- |
-| Main config (locked)            | `~/.openclaw/openclaw.json`                                         |
-| API keys / secrets              | `~/.openclaw/.env`                                                  |
-| System skills (10 core)         | `~/.openclaw/skills/`                                               |
-| Workspace skills (32 custom)    | `~/.openclaw/workspace/skills/`                                     |
-| L1 memory files                 | `~/.openclaw/workspace/memory/`                                     |
-| Session transcripts             | `~/.openclaw/agents/main/sessions/`                                 |
-| All integrations                | `~/.openclaw/integrations/`                                         |
-| Microsoft tokens                | `~/.openclaw/integrations/microsoft/token-*.json`                   |
-| Google OAuth tokens             | `~/.openclaw/oauth/google/`                                         |
-| Daily reset script              | `~/.openclaw/integrations/provider-switch/daily-reset.py`           |
-| SharePoint manifest/cache       | `~/.openclaw/integrations/microsoft/sharepoint-manifest.json`       |
-| SharePoint write queue          | `~/.openclaw/integrations/microsoft/sharepoint-queue.json`          |
+| What                         | Path                                                          |
+| ---------------------------- | ------------------------------------------------------------- |
+| Main config (locked)         | `~/.openclaw/openclaw.json`                                   |
+| API keys / secrets           | `~/.openclaw/.env`                                            |
+| System skills (10 core)      | `~/.openclaw/skills/`                                         |
+| Workspace skills (32 custom) | `~/.openclaw/workspace/skills/`                               |
+| L1 memory files              | `~/.openclaw/workspace/memory/`                               |
+| Session transcripts          | `~/.openclaw/agents/main/sessions/`                           |
+| All integrations             | `~/.openclaw/integrations/`                                   |
+| Microsoft tokens             | `~/.openclaw/integrations/microsoft/token-*.json`             |
+| Google OAuth tokens          | `~/.openclaw/oauth/google/`                                   |
+| Daily reset script           | `~/.openclaw/integrations/provider-switch/daily-reset.py`     |
+| SharePoint manifest/cache    | `~/.openclaw/integrations/microsoft/sharepoint-manifest.json` |
+| SharePoint write queue       | `~/.openclaw/integrations/microsoft/sharepoint-queue.json`    |
 
 See [Skills path configuration](./integrations/skills.md) for the `skills.paths` requirement.
 
@@ -106,17 +107,18 @@ not valid for these workbooks.
 
 ## Systemd user services on this Pi
 
-| Service                              | Purpose                          |
-| ------------------------------------ | -------------------------------- |
-| `openclaw-gateway.service`           | Main L1 gateway                  |
-| `openclaw-mgmt-bot.service`          | Telegram management bot          |
-| `openclaw-email-assistant.service`   | Email assistant channel          |
-| `openclaw-email-gmail.service`       | Gmail poller                     |
-| `openclaw-email-microsoft.service`   | Microsoft mail poller            |
-| `openclaw-calendar-google.service`   | Google Calendar poller           |
-| `openclaw-calendar-microsoft.service`| Microsoft Calendar poller        |
+| Service                               | Purpose                   |
+| ------------------------------------- | ------------------------- |
+| `openclaw-gateway.service`            | Main L1 gateway           |
+| `openclaw-mgmt-bot.service`           | Telegram management bot   |
+| `openclaw-email-assistant.service`    | Email assistant channel   |
+| `openclaw-email-gmail.service`        | Gmail poller              |
+| `openclaw-email-microsoft.service`    | Microsoft mail poller     |
+| `openclaw-calendar-google.service`    | Google Calendar poller    |
+| `openclaw-calendar-microsoft.service` | Microsoft Calendar poller |
 
 **Commands:**
+
 ```bash
 systemctl --user status openclaw-gateway.service
 systemctl --user restart openclaw-gateway.service
@@ -166,6 +168,7 @@ systemctl --user restart openclaw-gateway.service
 ```
 
 **Always validate JSON before restarting:**
+
 ```bash
 python3 -c "import json; json.load(open('/home/tomdean88/.openclaw/openclaw.json')); print('OK')"
 ```

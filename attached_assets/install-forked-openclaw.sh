@@ -1127,6 +1127,9 @@ fi
 # ---------------------------------------------------------------------------
 # System health check
 # Runs at 06:55 daily — BEFORE the morning briefing active-hours window (07:00).
+# Pre-existing declaration under review; no owner/runtime approval evidence is
+# established. Leave unchanged pending reconciliation; do not use this window
+# for new jobs.
 # Checks all cron logs and feed files for staleness / errors. It also invokes
 # `openclaw skilzvolt user-count`, which reuses the existing encrypted OAuth
 # connection and records only aggregate signup counts.
@@ -1442,6 +1445,9 @@ fi
 # Weekly collect → rank → synthesize pipeline.
 # Writes ~/.openclaw/ai-briefing/AI_BRIEFING_CURRENT.md for L1 to read.
 # Cron runs every Monday at 06:00.
+# Pre-existing declaration under review; no owner/runtime approval evidence is
+# established. Leave unchanged pending reconciliation; do not use this window
+# for new jobs.
 # On-demand: python3 ~/.openclaw/integrations/ai-briefing/run.py
 # ---------------------------------------------------------------------------
 AI_BRIEFING_SRC_DIR="$HOME/openclaw/attached_assets/integrations/ai-briefing"
@@ -1693,8 +1699,10 @@ if [ ! -f "$GMAIL_CREDS" ]; then
     warn "  2. Create OAuth 2.0 Client ID (Desktop app)"
     warn "  3. Download credentials JSON → $GMAIL_CREDS"
     warn "  4. pip3 install google-auth google-auth-oauthlib google-api-python-client"
-    warn "  5. Run once manually: python3 $INTEGRATIONS_DST/google/gmail_poll.py"
-    warn "     (opens browser for consent, saves token automatically)"
+    warn "  5. Run once manually: python3 $INTEGRATIONS_DST/google/gmail_poll.py --auth"
+    warn "     Open the printed consent URL on the phone, then paste the complete"
+    warn "     http://localhost:8766/ callback URL into the waiting prompt."
+    warn "     The token is saved only after successful auth; do not delete an existing token."
 else
     info "Gmail credentials file found — poller ready to run"
 fi
@@ -1723,6 +1731,19 @@ if [ -f "$INTEGRATIONS_DST/config-check/check.py" ]; then
     warn "Running config drift check..."
     python3 "$INTEGRATIONS_DST/config-check/check.py" || true
 fi
+
+# ---------------------------------------------------------------------------
+# Legacy expense watcher units
+#
+# `pi-services/systemd-user/expense-intake-watcher.{service,timer}` are retained
+# as a recoverable, legacy opt-in fallback.  The central mirror-router is the
+# intended ordered trigger, but its live unit/source identity is not established
+# by this checkout.  Therefore this installer does not install or enable either
+# legacy unit, and it must not disable or migrate any unit already present on a
+# Pi.  An operator may opt in only after the read-only identity/rollback gates
+# in docs/audits/openclaw-product/runtime-contract-repair.md are satisfied.
+# ---------------------------------------------------------------------------
+info "Legacy expense watcher units remain opt-in only; installer will not install or enable them"
 
 # Step 11c: Email poller systemd user services
 # These run the Python pollers as managed background services — they survive
@@ -1906,7 +1927,10 @@ if [ -f "$GM_CREDS" ] && [ -f "$GM_TOKEN" ]; then
         info "Gmail email poller running (systemd service)" || \
         warn "Gmail email poller failed to start — check $GM_LOG"
 elif [ -f "$GM_CREDS" ]; then
-    warn "Gmail poller enabled but not started — run it once manually to complete OAuth"
+    warn "Gmail poller enabled but not started — complete phone-first OAuth:"
+    warn "  python3 $INTEGRATIONS_DST/google/gmail_poll.py --auth"
+    warn "  Paste the complete http://localhost:8766/ callback URL when prompted."
+    warn "  Do not delete an existing token; retry --auth and preserve it until replacement succeeds."
 else
     info "Gmail poller not started (credentials not configured yet)"
 fi
@@ -1981,10 +2005,11 @@ if [ -n "$GCAL_CREDS" ] && [ -f "$GCAL_TOKEN" ]; then
 elif [ -n "$GCAL_CREDS" ]; then
     warn "Google Calendar: credentials found but token.json missing — OAuth not yet done."
     warn "  The Calendar scope is SEPARATE from Gmail — even if Gmail works, calendar"
-    warn "  needs its own one-time authorization. Do this from the Pi's browser (or SSH):"
-    warn "  python3 $GCAL_POLLER"
-    warn "  If the Pi has no browser: run that script on your desktop instead,"
-    warn "  then SCP the token.json to: $GCAL_TOKEN"
+    warn "  needs its own one-time phone-first authorization:"
+    warn "  python3 $GCAL_POLLER --auth"
+    warn "  Open the printed consent URL on the phone, then paste the complete"
+    warn "  http://localhost:8765/ callback URL into the waiting prompt."
+    warn "  The token is saved only after successful auth; do not delete an existing token."
 else
     warn "Google Calendar: no credentials file found."
     warn "  Checked: $GCAL_GOOGLE_DIR/credentials.json"

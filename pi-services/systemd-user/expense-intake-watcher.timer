@@ -1,5 +1,11 @@
 [Unit]
-Description=Run inbound watch router every 5 minutes (bounded SharePoint handoff)
+Description=LEGACY / OPT-IN ONLY — inbound watch router fallback (5 minutes)
+
+# SOURCE STATUS: legacy opt-in / retired from the canonical trigger.  The
+# canonical installer deliberately does not install
+# or enable this timer: the central mirror-router owns the ordered trigger.
+# Retain this declaration for an approved rollback until the live timer/source
+# identity is verified.  Do not infer live state from this checked-in file.
 
 [Timer]
 OnBootSec=2min

@@ -2,6 +2,13 @@
 
 Audit date: 2026-09-15.
 
+## Subsequent remediation
+
+The source repairs and governed skill-review submissions made after this audit
+are tracked in [Source repair status](source-repair-status.md). The findings
+below record the audit baseline, not an assertion that every defect remains
+unfixed. Deployment and live end-to-end verification remain outstanding.
+
 ## Status and scope
 
 **The current-skill/source audit is complete. Live operational verification and

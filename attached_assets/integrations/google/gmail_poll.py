@@ -18,15 +18,22 @@ SETUP:
   1. Create a Google Cloud project, enable Gmail API
   2. APIs & Services → Credentials → OAuth 2.0 Client ID (Desktop app)
   3. Download credentials JSON → ~/.openclaw/integrations/google/gmail-credentials.json
-  4. Run this script once manually — it will open a browser for OAuth consent
-     and save a token to ~/.openclaw/integrations/google/gmail-token.json
+  4. Run `python3 gmail_poll.py --auth`, open the printed consent URL on the
+     phone, and paste the full localhost callback URL into the waiting prompt.
+     The token is saved to ~/.openclaw/integrations/google/gmail-token.json.
   Requires: pip install google-auth google-auth-oauthlib google-api-python-client
 """
 import time
 import base64
 import email as email_lib
+import argparse
+import hmac
+import os
+import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 try:
     from google.oauth2.credentials import Credentials
@@ -50,6 +57,8 @@ ALERT_FILE        = STATE_DIR / "workspace/memory/email-alert.md"
 LOG_FILE          = STATE_DIR / "workspace/memory/poll-gmail-log.txt"
 
 SCOPES                = ["https://www.googleapis.com/auth/gmail.readonly"]
+AUTH_PORT             = 8766   # Google Desktop OAuth loopback redirect port
+AUTH_HOST             = "localhost"
 POLL_INTERVAL_KNOWN   = 120   # faster when a known-contact email found (matches Microsoft poller)
 POLL_INTERVAL_GENERAL = 300   # standard interval
 MAX_RESULTS           = 25
@@ -116,31 +125,210 @@ def write_atomic(path: Path, content: str):
 # Auth — called each poll cycle so token refresh failures are caught cleanly
 # ---------------------------------------------------------------------------
 
+def _auth_instructions():
+    """Print the safe, interactive route needed to re-authorise a headless host."""
+    log("FLAG TO TOM: Gmail needs re-authorisation.")
+    log("  Run this on the gateway host (SSH in first if needed):")
+    log(f"    python3 {__file__} --auth")
+    log("  Open the printed Google consent URL on the phone, then paste the complete")
+    log(f"  final {AUTH_HOST}:{AUTH_PORT} callback URL into the waiting auth prompt.")
+    log("  The callback is validated locally; the OAuth library performs the token exchange.")
+
+
+def _validate_callback_url(
+    callback_url: str,
+    expected_state: str,
+    expected_port: int = AUTH_PORT,
+) -> None:
+    """Validate the Google loopback callback before exchanging it for tokens."""
+
+    try:
+        parsed = urlsplit(callback_url)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Malformed OAuth callback URL") from exc
+
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != AUTH_HOST
+        or port != expected_port
+        or parsed.path != "/"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise ValueError("OAuth callback must be the expected localhost loopback URL")
+
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if query.get("error"):
+        raise ValueError("Google OAuth consent was not granted")
+
+    code_values = query.get("code", [])
+    state_values = query.get("state", [])
+    if len(code_values) != 1 or not code_values[0]:
+        raise ValueError("OAuth callback is missing its authorization code")
+    if len(state_values) != 1 or not state_values[0]:
+        raise ValueError("OAuth callback is missing its state")
+    if not hmac.compare_digest(state_values[0], expected_state):
+        raise ValueError("OAuth callback state does not match this authorization attempt")
+
+
+def _oauthlib_authorization_response(callback_url: str, expected_state: str) -> str:
+    """Return the validated loopback callback in oauthlib's accepted form.
+
+    oauthlib's secure-transport guard rejects an HTTP authorization response,
+    even though Google installed-app loopback redirects are intentionally HTTP.
+    ``InstalledAppFlow.run_local_server`` rewrites the already-received local
+    callback to HTTPS before calling ``fetch_token`` for this parser-only
+    compatibility reason.  Validate the original untrusted URL first and keep
+    the rewrite limited to this exact localhost callback; no global TLS checks
+    or network transport settings are changed.
+    """
+
+    _validate_callback_url(callback_url, expected_state)
+    return urlunsplit(
+        ("https", f"{AUTH_HOST}:{AUTH_PORT}", "/", urlsplit(callback_url).query, "")
+    )
+
+
+def _complete_phone_auth(flow, read_callback=input, write_output=print):
+    """Complete Gmail OAuth from a phone's copied loopback callback."""
+
+    flow.redirect_uri = f"http://{AUTH_HOST}:{AUTH_PORT}/"
+    authorization_url, state = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+    )
+    write_output("Open this Google consent URL on the phone:")
+    write_output(authorization_url)
+    write_output(
+        f"After consent, paste the complete final callback URL "
+        f"(http://{AUTH_HOST}:{AUTH_PORT}/...) into this prompt."
+    )
+    callback_url = read_callback("Callback URL: ").strip()
+    authorization_response = _oauthlib_authorization_response(callback_url, state)
+    flow.fetch_token(authorization_response=authorization_response)
+    return flow.credentials
+
+
+def _write_token_file(path: Path, credentials) -> None:
+    """Atomically write a token with owner-only permissions."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            os.chmod(temporary.fileno(), 0o600)
+            temporary.write(credentials.to_json())
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _require_refresh_token(credentials):
+    """Require a refresh-capable credential before replacing an unattended token."""
+
+    if not getattr(credentials, "refresh_token", None):
+        raise ValueError(
+            "Google OAuth did not return a refresh token; existing token was retained"
+        )
+    return credentials
+
+
+def do_auth(read_callback=input, write_output=print):
+    """Run Gmail OAuth interactively without attempting auth in systemd."""
+
+    write_output("\n=== Gmail OAuth Setup ===")
+    if not CREDENTIALS_FILE.exists():
+        write_output(f"ERROR: gmail-credentials.json not found at {CREDENTIALS_FILE}")
+        sys.exit(1)
+
+    try:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(CREDENTIALS_FILE),
+            SCOPES,
+            autogenerate_code_verifier=True,
+        )
+        creds = _require_refresh_token(
+            _complete_phone_auth(
+                flow,
+                read_callback=read_callback,
+                write_output=write_output,
+            )
+        )
+        _write_token_file(TOKEN_FILE, creds)
+        write_output(f"\nSUCCESS — token saved to {TOKEN_FILE}")
+        write_output("Restart the service: systemctl --user restart openclaw-email-gmail.service")
+        log(f"OAuth complete via --auth flag. Token saved to {TOKEN_FILE}")
+    except Exception:
+        # Do not echo provider responses: they can include callback material.
+        write_output("\nERROR: OAuth flow failed; no token was written.")
+        sys.exit(1)
+
+
 def get_service():
     creds = None
     if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        except Exception as e:
+            log(f"WARNING: Could not read token file: {e} — treating as missing")
+            creds = None
     if not creds or not creds.valid:
+        if creds and creds.expired and not creds.refresh_token:
+            log(
+                "ERROR: Gmail credentials are expired and have no refresh "
+                "token; unattended polling requires a refresh token."
+            )
+            _auth_instructions()
+            return None
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
-                TOKEN_FILE.write_text(creds.to_json())
+                _require_refresh_token(creds)
+                _write_token_file(TOKEN_FILE, creds)
                 log("Token refreshed successfully")
             except Exception as e:
                 log(f"ERROR: Token refresh failed: {e} — will retry next cycle")
+                if "invalid_grant" in str(e).lower():
+                    log("Gmail refresh token was rejected by Google.")
+                    _auth_instructions()
                 return None
         else:
             if not CREDENTIALS_FILE.exists():
                 log(f"ERROR: gmail-credentials.json not found at {CREDENTIALS_FILE}")
                 return None
+            # A systemd service has no safe way to collect a user's consent
+            # callback.  Keep interactive OAuth behind the explicit --auth
+            # command rather than opening an unbounded local server here.
+            if not sys.stdin.isatty():
+                log("ERROR: Gmail token missing and running as a service (no TTY).")
+                _auth_instructions()
+                return None
             try:
-                flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-                creds = flow.run_local_server(port=0)
-                TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-                TOKEN_FILE.write_text(creds.to_json())
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(CREDENTIALS_FILE),
+                    SCOPES,
+                    autogenerate_code_verifier=True,
+                )
+                creds = _require_refresh_token(_complete_phone_auth(flow))
+                _write_token_file(TOKEN_FILE, creds)
                 log("OAuth consent complete — token saved")
-            except Exception as e:
-                log(f"ERROR: OAuth flow failed: {e}")
+            except Exception:
+                log("ERROR: OAuth flow failed; token was not written.")
+                _auth_instructions()
                 return None
     try:
         return build("gmail", "v1", credentials=creds, cache_discovery=False)
@@ -383,6 +571,18 @@ def rebuild_external_md(external_inbox: list):
 # ---------------------------------------------------------------------------
 
 def main():
+    parser = argparse.ArgumentParser(description="Gmail API email poller for OpenClaw")
+    parser.add_argument(
+        "--auth",
+        action="store_true",
+        help="Run interactive OAuth setup and paste the full localhost callback URL",
+    )
+    args = parser.parse_args()
+
+    if args.auth:
+        do_auth()
+        return
+
     log("Gmail poller starting")
 
     while True:

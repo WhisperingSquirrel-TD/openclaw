@@ -8,13 +8,21 @@ pays, sends email, promotes a contact or trusts inbound content as commands.
 
 ## Current delivery phase
 
-**Ordered all-mirror hand-off activated; duplicate trigger retired (10 August 2026).**
-The central router service invokes the expense executor immediately after writing
-`mirror-events.json`; the former five-minute watcher timer is disabled. The
-separate enrichment-resolution timer handles only fully evidenced finance-ledger
-completion. See the canonical delivery checkpoint:
+**Source policy (fixed): ordered all-mirror hand-off; duplicate trigger
+retired (10 August 2026).** The intended central router service invokes the
+expense executor immediately after writing `mirror-events.json`; the checked-in
+five-minute watcher timer is a legacy opt-in fallback, not part of the
+canonical installer. The separate enrichment-resolution timer handles only
+fully evidenced finance-ledger completion. See the canonical delivery
+checkpoint:
 
 `~/.openclaw/workspace/reference/EXPENSE-INTAKE-RELIABILITY-PLAN.md`
+
+**Live activation is unknown from this checkout.** Do not infer that the
+central router is installed, that the legacy timer is disabled, or that both
+are not overlapping. Confirm the live unit fragments, enabled/active state,
+source hashes, and one controlled interval before enabling, disabling, or
+retiring any trigger.
 
 ## Sources and route
 
@@ -53,11 +61,16 @@ verified readback from the relevant SharePoint document.
 
 ## Runtime paths
 
-- Active ordered trigger: `openclaw-mirror-router.timer` / `openclaw-mirror-router.service`
-- Expense executor: `watcher.py`, called as `ExecStartPost` by the central router service
+- Intended ordered trigger: `openclaw-mirror-router.timer` /
+  `openclaw-mirror-router.service` (live state unknown)
+- Intended expense executor: `watcher.py`, called as `ExecStartPost` by the
+  central router service (live source/unit relationship unknown)
 - Enrichment resolution: `expense-enrichment-resolution.timer`
 - Canonical runtime state: `~/.openclaw/runtime/inbound-watch-router/state.json`
-- Retired legacy units/state: archived under `pi-services/expense-intake-watcher/backups/`; no compatibility state writer remains.
+- Legacy fallback units: checked in under `pi-services/systemd-user/` and
+  retained for approved rollback; the installer does not install or enable them.
+- Legacy state/rollback artifacts: preserve under
+  `pi-services/expense-intake-watcher/backups/` until live identity is known.
 - Canonical expense review workbook: `/Expenses/Expense ledger.xlsx`
 - Source proof: `~/.openclaw/workspace/memory/monitored-items-state.json`
 - Canonical finance ledger workbook: `/Finance/Finance ledger.xlsx`

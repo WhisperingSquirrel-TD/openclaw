@@ -470,22 +470,36 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
   }
 
   it("handles transparent env wrappers in allowlist mode", async () => {
-    const { runCommand, sendInvokeResult } = await runSystemInvoke({
-      preferMacAppExecHost: false,
-      security: "allowlist",
-      command: ["env", "tr", "a", "b"],
-    });
-    if (process.platform === "win32") {
-      expect(runCommand).not.toHaveBeenCalled();
-      expectInvokeErrorMessage(sendInvokeResult, { message: "allowlist miss" });
-      return;
+    const previousPath = process.env.PATH;
+    // Safe-bin trust intentionally accepts only OS-managed directories. Keep this fixture
+    // independent of environments such as Nix that put a shadow `tr` earlier on PATH.
+    if (process.platform !== "win32") {
+      process.env.PATH = ["/usr/bin", "/bin"].join(path.delimiter);
     }
+    try {
+      const { runCommand, sendInvokeResult } = await runSystemInvoke({
+        preferMacAppExecHost: false,
+        security: "allowlist",
+        command: ["env", "tr", "a", "b"],
+      });
+      if (process.platform === "win32") {
+        expect(runCommand).not.toHaveBeenCalled();
+        expectInvokeErrorMessage(sendInvokeResult, { message: "allowlist miss" });
+        return;
+      }
 
-    const runArgs = vi.mocked(runCommand).mock.calls[0]?.[0] as string[] | undefined;
-    expect(runArgs).toBeDefined();
-    expect(runArgs?.[0]).toMatch(/(^|[/\\])tr$/);
-    expect(runArgs?.slice(1)).toEqual(["a", "b"]);
-    expectInvokeOk(sendInvokeResult);
+      const runArgs = vi.mocked(runCommand).mock.calls[0]?.[0] as string[] | undefined;
+      expect(runArgs).toBeDefined();
+      expect(runArgs?.[0]).toMatch(/(^|[/\\])tr$/);
+      expect(runArgs?.slice(1)).toEqual(["a", "b"]);
+      expectInvokeOk(sendInvokeResult);
+    } finally {
+      if (previousPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = previousPath;
+      }
+    }
   });
 
   it("denies semantic env wrappers in allowlist mode", async () => {

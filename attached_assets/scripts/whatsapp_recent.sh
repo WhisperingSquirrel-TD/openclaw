@@ -6,24 +6,85 @@ RECENT_MD="$WORKSPACE/WHATSAPP_RECENT.md"
 WINDOW_JSON="$WORKSPACE/memory/whatsapp-recent-window.json"
 RAW_JSONL="$HOME/.openclaw/credentials/whatsapp/watch-transcripts/whatsapp-watch-default.jsonl"
 CONTACTS_MD="$WORKSPACE/contacts.md"
-HOURS=72
+# The approved whatsapp-check contract is a semantic 48-hour rolling window.
+# Keep this value aligned with the generated header and window sidecar; do not
+# widen routine checks to the legacy/full-log horizon.
+HOURS=48
 MAX_LINES=1200
 DIRECT_THREAD_RECENT_LINES=8
 GROUP_MAX_LINES=500
 
-if [ ! -f "$RAW_JSONL" ]; then
-  cat > "$RECENT_MD" << EOF
+mkdir -p "$WORKSPACE" "$(dirname "$WINDOW_JSON")"
+
+write_incomplete_window() {
+  local status="$1"
+  local reason="$2"
+  local generated_at
+  local tmp
+  generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  tmp="$(mktemp "${WINDOW_JSON}.tmp.XXXXXX")"
+  if ! cat > "$tmp" << EOF
+{
+  "schema_version": 1,
+  "window_hours": ${HOURS},
+  "generated_at": "${generated_at}",
+  "earliest_retained_source_timestamp": null,
+  "latest_retained_source_timestamp": null,
+  "retained_message_count": null,
+  "source_message_count": null,
+  "source_parse_error_count": null,
+  "truncated": null,
+  "source_status": "${status}",
+  "coverage_status": "incomplete",
+  "coverage_complete": false,
+  "coverage_reason": "${reason}"
+}
+EOF
+  then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv -f "$tmp" "$WINDOW_JSON"
+}
+
+write_incomplete_recent() {
+  local status="$1"
+  local tmp
+  tmp="$(mktemp "${RECENT_MD}.tmp.XXXXXX")"
+  if [ "$status" = "missing" ]; then
+    cat > "$tmp" << EOF
 # WhatsApp Recent (last ${HOURS}h)
 _Updated: $(date '+%Y-%m-%d %H:%M') — raw transcript source missing. Full log: WHATSAPP_LOG.md_
 
-_(no messages in the last ${HOURS} hours)_
+_(coverage incomplete: source unavailable; message absence is not verified)_
 EOF
+  else
+    cat > "$tmp" << EOF
+# WhatsApp Recent (last ${HOURS}h)
+_Updated: $(date '+%Y-%m-%d %H:%M') — raw transcript source could not be read or rendered. Full log: WHATSAPP_LOG.md_
+
+_(coverage incomplete: source unavailable; message absence is not verified)_
+EOF
+  fi
+  mv -f "$tmp" "$RECENT_MD"
+}
+
+if [ ! -e "$RAW_JSONL" ]; then
+  write_incomplete_window "missing" "raw_transcript_missing"
+  write_incomplete_recent "missing"
   exit 0
 fi
 
-python3 - <<'PY' > "$RECENT_MD"
+if [ ! -f "$RAW_JSONL" ]; then
+  write_incomplete_window "failed" "raw_transcript_not_a_regular_file"
+  write_incomplete_recent "failed"
+  exit 1
+fi
+
+RECENT_TMP="$(mktemp "${RECENT_MD}.tmp.XXXXXX")"
+if ! python3 - <<'PY' > "$RECENT_TMP"
 from __future__ import annotations
-import json, re
+import json, os, re, tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -31,7 +92,9 @@ workspace = Path.home() / '.openclaw' / 'workspace'
 raw_jsonl = Path.home() / '.openclaw' / 'credentials' / 'whatsapp' / 'watch-transcripts' / 'whatsapp-watch-default.jsonl'
 window_json = workspace / 'memory' / 'whatsapp-recent-window.json'
 contacts_md = workspace / 'contacts.md'
-hours = 72
+# Keep the renderer and sidecar on the same approved semantic window as the
+# shell header above.
+hours = 48
 max_lines = 1200
 direct_thread_recent_lines = 8
 group_max_lines = 500
@@ -114,21 +177,27 @@ def render_body(obj: dict) -> str:
 contact_map = load_contact_map(contacts_md)
 inferred_names_by_number = {}
 objs = []
+parse_errors = 0
 for line in raw_jsonl.read_text(encoding='utf-8').splitlines():
     if not line.strip():
         continue
     try:
         obj = json.loads(line)
+        if not isinstance(obj, dict):
+            raise ValueError('transcript record is not an object')
     except Exception:
+        parse_errors += 1
         continue
     if obj.get('channel') != 'whatsapp':
         continue
     ts_raw = obj.get('timestamp')
     if not ts_raw:
+        parse_errors += 1
         continue
     try:
         dt = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
     except Exception:
+        parse_errors += 1
         continue
     if dt < cutoff:
         continue
@@ -197,21 +266,47 @@ for line, dt in merged:
 retained = sorted(unique.items(), key=lambda pair: pair[1])
 lines = [line for line, _ in retained]
 window_json.parent.mkdir(parents=True, exist_ok=True)
-window_json.write_text(json.dumps({
+sidecar = {
     'schema_version': 1,
+    'window_hours': hours,
     'generated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
     'earliest_retained_source_timestamp': retained[0][1].astimezone(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z') if retained else None,
     'latest_retained_source_timestamp': retained[-1][1].astimezone(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z') if retained else None,
     'retained_message_count': len(retained),
     'source_message_count': len(objs),
+    'source_parse_error_count': parse_errors,
     'truncated': len(retained) < len(rendered),
-}, indent=2) + '\n')
+    'source_status': 'ok' if parse_errors == 0 else 'failed',
+    'coverage_status': 'complete' if parse_errors == 0 else 'incomplete',
+    'coverage_complete': parse_errors == 0,
+    'coverage_reason': None if parse_errors == 0 else 'invalid_transcript_records',
+}
+with tempfile.NamedTemporaryFile(
+    mode='w',
+    encoding='utf-8',
+    dir=window_json.parent,
+    prefix=f'.{window_json.name}.tmp-',
+    delete=False,
+) as handle:
+    json.dump(sidecar, handle, indent=2)
+    handle.write('\n')
+    sidecar_tmp = handle.name
+os.replace(sidecar_tmp, window_json)
 updated = datetime.now().strftime('%Y-%m-%d %H:%M')
 print(f'# WhatsApp Recent (last {hours}h)')
 print(f'_Updated: {updated} — showing last {hours} hours (max {max_lines} lines, with direct-thread preservation). Source: structured WhatsApp transcript stream; legacy full log: WHATSAPP_LOG.md_')
 print()
 if lines:
     print('\n'.join(lines))
+elif parse_errors:
+    print('_(coverage incomplete: transcript records could not be parsed; message absence is not verified)_')
 else:
     print(f'_(no messages in the last {hours} hours)_')
 PY
+then
+  rm -f "$RECENT_TMP"
+  write_incomplete_window "failed" "raw_transcript_read_or_render_failed"
+  write_incomplete_recent "failed"
+  exit 1
+fi
+mv -f "$RECENT_TMP" "$RECENT_MD"

@@ -1892,15 +1892,15 @@ def _load_vercel_creds() -> tuple[str, str]:
 
 
 def _dev_env() -> dict:
-    """Return an env dict that adds npm/node global bin dirs to PATH.
+    """Return the minimal non-secret environment allowed to run repository code.
 
-    The mgmt-bot runs as a systemd service with a minimal PATH, so tools
-    installed globally via npm (like vercel) are invisible without this.
-    We extend PATH with all common npm global bin locations so every
-    dev subprocess can find node tools regardless of how they were installed.
+    Repository commands, npm lifecycle scripts, and Git hooks must not inherit
+    the management bot's broad systemd environment.  Keep only execution,
+    locale, and temporary-directory settings needed by normal developer tools.
     """
-    env  = os.environ.copy()
+    env: dict[str, str] = {}
     home = str(Path.home())
+    env["HOME"] = os.environ.get("HOME", home)
     extra = [
         f"{home}/.npm-global/bin",     # npm prefix = ~/.npm-global
         f"{home}/.local/bin",           # pip / manual installs
@@ -1909,8 +1909,20 @@ def _dev_env() -> dict:
         "/usr/bin",
         "/bin",
     ]
-    existing = env.get("PATH", "")
+    existing = os.environ.get("PATH", "")
     env["PATH"] = ":".join(extra) + (":" + existing if existing else "")
+    for key in ("LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TMP", "TEMP"):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+
+    # Ignore user/system Git and npm configuration, including any configured
+    # helper, template, hook, or environment-derived config override.
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["npm_config_userconfig"] = os.devnull
+    env["npm_config_globalconfig"] = os.devnull
     return env
 
 
@@ -2984,6 +2996,226 @@ _GITHUB_URL_PREFIX = "https://github.com/"
 
 _NPM_PACKAGE_RE = re.compile(r'^[\w@][\w@./-]*$')
 
+# This is passed to Git with `-c`, so it applies only to the one subprocess
+# and is never written into a repository or a user's Git config.  The helper
+# reads the token from its inherited environment at execution time; its command
+# text deliberately contains no credential value.  It also refuses to supply
+# the GitHub token to any host other than github.com.
+_SCOPED_GIT_CREDENTIAL_HELPER = (
+    '!f() { operation="$1"; [ "$operation" = "get" ] || exit 0; host=""; protocol=""; '
+    'while IFS= read -r line && [ -n "$line" ]; do '
+    'case "$line" in host=*) host="${line#host=}";; '
+    'protocol=*) protocol="${line#protocol=}";; esac; done; '
+    'if [ "$protocol" = "https" ] && [ "$host" = "github.com" ] '
+    '&& [ -n "$GITHUB_TOKEN" ]; then '
+    'printf "username=x-access-token\\npassword=%s\\n\\n" "$GITHUB_TOKEN"; fi; '
+    '}; f'
+)
+
+_GIT_URL_USERINFO_RE = re.compile(r'(?i)(https?://)[^/\s@]+@')
+_GIT_TOKEN_QUERY_RE = re.compile(
+    r'(?i)([?&](?:access_)?token|[?&](?:github_)?pat|[?&]password)=([^&#\s]+)'
+)
+_GIT_TOKEN_QUERY_KEYS = {"token", "access_token", "pat", "github_pat", "password"}
+_GITHUB_REPO_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_GIT_SAFE_CONFIG = [
+    "-c", "credential.helper=",
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "core.fsmonitor=false",
+    "-c", "core.fsmonitorHookVersion=",
+    "-c", "init.templateDir=",
+    "-c", "core.attributesFile=/dev/null",
+    "-c", "filter.lfs.clean=",
+    "-c", "filter.lfs.smudge=",
+    "-c", "filter.lfs.process=",
+    "-c", "filter.lfs.required=false",
+    "-c", "protocol.allow=never",
+    "-c", "protocol.https.allow=always",
+    "-c", "protocol.file.allow=never",
+    "-c", "protocol.ext.allow=never",
+    "-c", "remote.origin.uploadpack=git-upload-pack",
+    "-c", "remote.origin.receivepack=git-receive-pack",
+    "-c", "remote.origin.proxy=",
+]
+
+
+def _redact_sensitive_text(value: object, credential: str = "") -> str:
+    """Remove credential values and credential-bearing URLs from diagnostics."""
+    text = str(value)
+    if credential:
+        text = text.replace(credential, "[REDACTED]")
+        encoded_credential = urllib.parse.quote(credential, safe="")
+        if encoded_credential != credential:
+            text = text.replace(encoded_credential, "[REDACTED]")
+    text = _GIT_URL_USERINFO_RE.sub(r"\1[REDACTED]@", text)
+    return _GIT_TOKEN_QUERY_RE.sub(r"\1=[REDACTED]", text)
+
+
+def _is_canonical_github_clone_url(url: object) -> bool:
+    """Accept only clean https://github.com/owner/repo(.git) clone URLs."""
+    if not isinstance(url, str) or not url.startswith(_GITHUB_URL_PREFIX):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "github.com"
+        or "@" in parsed.netloc
+        or parsed.query
+        or parsed.fragment
+    ):
+        return False
+    parts = parsed.path.split("/")
+    if len(parts) != 3 or parts[0] or not parts[1] or not parts[2]:
+        return False
+    owner, repo = parts[1], parts[2]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    return bool(
+        repo
+        and _GITHUB_REPO_SEGMENT_RE.fullmatch(owner)
+        and _GITHUB_REPO_SEGMENT_RE.fullmatch(repo)
+    )
+
+
+def _git_command_with_scoped_credentials(command: list, env: dict) -> list:
+    """Return a hardened Git command with optional in-memory GitHub credentials."""
+    if not command or command[0] != "git":
+        return command
+    result = ["git", *_GIT_SAFE_CONFIG]
+    if env.get("GITHUB_TOKEN"):
+        # This applies only to the current invocation and replaces any helper
+        # configured elsewhere; no `git config` mutation is made.
+        result.extend([
+            "-c", f"credential.helper={_SCOPED_GIT_CREDENTIAL_HELPER}",
+            "-c", "credential.useHttpPath=true",
+        ])
+    return [*result, *command[1:]]
+
+
+def _git_network_env(clean_env: dict, github_token: str) -> dict:
+    """Create the only child environment allowed to carry a GitHub token."""
+    env = dict(clean_env)
+    # Permit only HTTPS Git transport while authentication is available.
+    env["GIT_ALLOW_PROTOCOL"] = "https"
+    if github_token:
+        env["GITHUB_TOKEN"] = github_token
+    return env
+
+
+def _clean_legacy_github_origin(url: str) -> str:
+    """Strip URL credentials/token query parameters from a GitHub remote URL."""
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+    except ValueError:
+        return url.strip()
+    if parsed.scheme != "https" or (parsed.hostname or "").lower() != "github.com":
+        return url.strip()
+
+    netloc = parsed.netloc.rsplit("@", 1)[-1]
+    query = "&".join(
+        part for part in parsed.query.split("&")
+        if urllib.parse.unquote_plus(part.split("=", 1)[0]).lower()
+        not in _GIT_TOKEN_QUERY_KEYS
+    )
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, netloc, parsed.path, query, parsed.fragment)
+    )
+
+
+def _scrub_legacy_github_origin(project_dir: Path, env: dict) -> tuple[bool, str]:
+    """Remove an old credential-bearing GitHub origin without exposing it."""
+    try:
+        get_result = subprocess.run(
+            _git_command_with_scoped_credentials(
+                ["git", "remote", "get-url", "origin"], env
+            ),
+            cwd=str(project_dir), capture_output=True, text=True, timeout=30, env=env,
+        )
+    except Exception as exc:
+        return False, _redact_sensitive_text(exc, env.get("GITHUB_TOKEN", ""))
+
+    # A repository without an origin is handled by Git's normal operation error.
+    if get_result.returncode != 0:
+        return True, ""
+    original = get_result.stdout.strip()
+    clean = _clean_legacy_github_origin(original)
+    if clean == original:
+        return True, ""
+
+    try:
+        set_result = subprocess.run(
+            _git_command_with_scoped_credentials(
+                ["git", "remote", "set-url", "origin", clean], env
+            ),
+            cwd=str(project_dir), capture_output=True, text=True, timeout=30, env=env,
+        )
+    except Exception as exc:
+        return False, _redact_sensitive_text(exc, env.get("GITHUB_TOKEN", ""))
+    if set_result.returncode == 0:
+        return True, ""
+    detail = (set_result.stdout + set_result.stderr).strip()
+    return False, _redact_sensitive_text(detail, env.get("GITHUB_TOKEN", ""))
+
+
+def _has_canonical_github_origin(project_dir: Path, env: dict) -> tuple[bool, str]:
+    """Verify that a remote operation targets the approved GitHub HTTPS form."""
+    try:
+        result = subprocess.run(
+            _git_command_with_scoped_credentials(
+                ["git", "remote", "get-url", "origin"], env
+            ),
+            cwd=str(project_dir), capture_output=True, text=True, timeout=30, env=env,
+        )
+    except Exception as exc:
+        return False, _redact_sensitive_text(exc, env.get("GITHUB_TOKEN", ""))
+    if result.returncode != 0:
+        detail = (result.stdout + result.stderr).strip()
+        return False, _redact_sensitive_text(detail, env.get("GITHUB_TOKEN", ""))
+    if _is_canonical_github_clone_url(result.stdout.strip()):
+        return True, ""
+    return False, "origin is not a canonical GitHub HTTPS URL"
+
+
+def _safe_git_config_value(
+    project_dir: Path, env: dict, scope: str, key: str
+) -> str:
+    """Read one Git identity value without helpers, includes, or token access."""
+    read_env = dict(env)
+    if scope == "--global":
+        # The clean repo environment intentionally suppresses global config.
+        # Restore only the default global-config location for this read, while
+        # retaining the minimal environment and disabling config includes.
+        read_env.pop("GIT_CONFIG_GLOBAL", None)
+    try:
+        result = subprocess.run(
+            _git_command_with_scoped_credentials(
+                ["git", "config", scope, "--no-includes", "--get", key], read_env
+            ),
+            cwd=str(project_dir), capture_output=True, text=True, timeout=30, env=read_env,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    value = result.stdout.strip()
+    return value if value and "\x00" not in value and "\n" not in value else ""
+
+
+def _git_commit_identity_config(project_dir: Path, env: dict) -> list:
+    """Supply global identity only when a repository has not set its own."""
+    config: list[str] = []
+    for key in ("user.name", "user.email"):
+        local_value = _safe_git_config_value(project_dir, env, "--local", key)
+        if local_value:
+            continue
+        global_value = _safe_git_config_value(project_dir, env, "--global", key)
+        if global_value:
+            config.extend(["-c", f"{key}={global_value}"])
+    return config
+
 
 def _dev_cmd_paused() -> bool:
     return DEV_CMD_PAUSE_FLAG.exists()
@@ -3016,23 +3248,56 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
     project_dir = STATE_DIR / "workspace" / "projects" / project
     cmd_file.unlink(missing_ok=True)   # consume immediately
 
-    send(token, chat_id,
-         f"🔧 *Dev-cmd — {project}*\n"
-         f"`{operation}`"
-         + (f"\n_{message}_" if message else ""))
-
     env = _dev_env()
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+    network_env = _git_network_env(env, github_token)
+    send(token, chat_id, _redact_sensitive_text(
+        f"🔧 *Dev-cmd — {project}*\n"
+        f"`{operation}`"
+        + (f"\n_{message}_" if message else ""),
+        github_token,
+    ))
+
+    def _run(
+        cmd: list, run_env: dict, cwd: Path | None = None, timeout: int = 120
+    ) -> tuple[int, str]:
+        r = subprocess.run(_git_command_with_scoped_credentials(cmd, run_env),
+                           cwd=str(cwd or project_dir),
+                           capture_output=True, text=True, timeout=timeout, env=run_env)
+        return r.returncode, _redact_sensitive_text(
+            (r.stdout + r.stderr).strip(), github_token
+        )
 
     def run(cmd: list, cwd: Path | None = None, timeout: int = 120) -> tuple[int, str]:
-        r = subprocess.run(cmd, cwd=str(cwd or project_dir),
-                           capture_output=True, text=True, timeout=timeout, env=env)
-        return r.returncode, (r.stdout + r.stderr).strip()
+        """Run local Git or repository/npm code with the clean environment."""
+        return _run(cmd, env, cwd, timeout)
+
+    def run_network(cmd: list, cwd: Path | None = None,
+                    timeout: int = 120) -> tuple[int, str]:
+        """Run the narrow, hook-disabled Git network phase with token access."""
+        return _run(cmd, network_env, cwd, timeout)
 
     def ok(detail: str = "") -> None:
-        send(token, chat_id, f"✅ `{operation}` done" + (f"\n```{detail[-800:]}```" if detail else ""))
+        safe_detail = _redact_sensitive_text(detail, github_token)
+        send(token, chat_id,
+             f"✅ `{operation}` done" + (f"\n```{safe_detail[-800:]}```" if safe_detail else ""))
 
     def fail(reason: str) -> None:
-        send(token, chat_id, f"❌ `{operation}` failed\n```{reason[-1200:]}```")
+        safe_reason = _redact_sensitive_text(reason, github_token)
+        send(token, chat_id, f"❌ `{operation}` failed\n```{safe_reason[-1200:]}```")
+
+    def scrub_origin_or_fail() -> bool:
+        scrubbed, detail = _scrub_legacy_github_origin(project_dir, env)
+        if not scrubbed:
+            fail("Unable to remove credentials from the GitHub origin"
+                 + (f": {detail}" if detail else ""))
+            return False
+        canonical, detail = _has_canonical_github_origin(project_dir, env)
+        if not canonical:
+            fail("Git remote access requires a canonical GitHub HTTPS origin"
+                 + (f": {detail}" if detail else ""))
+            return False
+        return True
 
     # ── Validate project path ────────────────────────────────────────────────
     if not _validate_project_path(project_dir):
@@ -3044,20 +3309,25 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
     if operation == "git_clone":
         url    = args.get("url", "")
         branch = args.get("branch", "main")
-        if not url.startswith(_GITHUB_URL_PREFIX):
-            fail(f"git_clone: url must start with {_GITHUB_URL_PREFIX}")
+        if not _is_canonical_github_clone_url(url):
+            fail("git_clone: url must be a canonical "
+                 "https://github.com/owner/repo(.git) URL without credentials, "
+                 "query parameters, or fragments")
             return
-        token_val = os.environ.get("GITHUB_TOKEN", "")
-        if token_val:
-            auth_url = url.replace("https://", f"https://{token_val}@")
-        else:
-            auth_url = url
         projects_root = STATE_DIR / "workspace" / "projects"
         projects_root.mkdir(parents=True, exist_ok=True)
-        rc, out = run(["git", "clone", "--branch", branch, auth_url, str(project_dir)],
-                      cwd=projects_root, timeout=120)
+        rc, out = run_network(
+            ["git", "clone", "--no-checkout", "--branch", branch, url, str(project_dir)],
+            cwd=projects_root, timeout=120,
+        )
         if rc == 0:
-            ok(out)
+            if not scrub_origin_or_fail():
+                return
+            rc, checkout_out = run(["git", "checkout", "--force", branch], timeout=120)
+            if rc == 0:
+                ok("\n".join(part for part in (out, checkout_out) if part))
+            else:
+                fail(checkout_out)
         else:
             fail(out)
 
@@ -3065,7 +3335,11 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
         if not project_dir.exists():
             fail(f"Project dir not found: {project_dir}")
             return
-        rc, out = run(["git", "pull"])
+        if not scrub_origin_or_fail():
+            return
+        rc, out = run_network(["git", "fetch", "origin"])
+        if rc == 0:
+            rc, out = run(["git", "merge", "FETCH_HEAD"])
         if rc == 0:
             ok(out)
         else:
@@ -3085,10 +3359,13 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
     elif operation == "git_commit_push":
         msg    = args.get("message", "chore: update").strip()
         branch = args.get("branch", "")
+        if not scrub_origin_or_fail():
+            return
         rc, out = run(["git", "add", "-A"])
         if rc != 0:
             fail(out); return
-        rc, out = run(["git", "commit", "-m", msg])
+        identity_config = _git_commit_identity_config(project_dir, env)
+        rc, out = run(["git", *identity_config, "commit", "-m", msg])
         if rc != 0 and "nothing to commit" not in out:
             fail(out); return
         push_args = ["git", "push", "-u", "origin"]
@@ -3097,40 +3374,19 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
         else:
             push_args.append("HEAD")
 
-        # Inject token into remote URL for authenticated push, restore after
-        token_val = os.environ.get("GITHUB_TOKEN", "")
-        def _set_auth_url() -> str:
-            """Set token-embedded remote URL; returns original URL."""
-            orig = subprocess.run(["git", "remote", "get-url", "origin"],
-                                  cwd=str(project_dir), capture_output=True, text=True).stdout.strip()
-            if token_val and "github.com" in orig and f"{token_val}@" not in orig:
-                subprocess.run(["git", "remote", "set-url", "origin",
-                                orig.replace("https://", f"https://{token_val}@")],
-                               cwd=str(project_dir), capture_output=True)
-            return orig
-
-        def _restore_url(orig: str) -> None:
-            if token_val:
-                clean = subprocess.run(["git", "remote", "get-url", "origin"],
-                                       cwd=str(project_dir), capture_output=True,
-                                       text=True).stdout.strip().replace(f"{token_val}@", "")
-                subprocess.run(["git", "remote", "set-url", "origin", clean],
-                               cwd=str(project_dir), capture_output=True)
-
-        orig_url = _set_auth_url()
-        rc, out  = run(push_args)
+        rc, out  = run_network(push_args)
 
         # Auto-recover: if remote is ahead, pull --rebase then retry once
         if rc != 0 and ("fetch first" in out or "rejected" in out):
             send(token, chat_id,
-                 f"⚠️ Push rejected (remote ahead) — running `git pull --rebase` then retrying…")
-            pr_rc, pr_out = run(["git", "pull", "--rebase"], timeout=60)
+                 f"⚠️ Push rejected (remote ahead) — fetching then rebasing before retrying…")
+            pr_rc, pr_out = run_network(["git", "fetch", "origin"], timeout=60)
+            if pr_rc == 0:
+                pr_rc, pr_out = run(["git", "rebase", "FETCH_HEAD"], timeout=60)
             if pr_rc != 0:
-                _restore_url(orig_url)
-                fail(f"pull --rebase failed — resolve conflicts manually:\n{pr_out}"); return
-            rc, out = run(push_args)
+                fail(f"fetch/rebase failed — resolve conflicts manually:\n{pr_out}"); return
+            rc, out = run_network(push_args)
 
-        _restore_url(orig_url)
         if rc == 0:
             ok(out)
         else:
@@ -3140,18 +3396,22 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
         branch = args.get("branch", "").strip()
         if not branch:
             fail("git_merge_main: branch arg required"); return
+        if not scrub_origin_or_fail():
+            return
         rc, out = run(["git", "checkout", "main"])
         if rc != 0:
             fail(out); return
         # Pull latest main before merging to avoid push rejection
-        rc, out = run(["git", "pull", "--rebase"], timeout=60)
+        rc, out = run_network(["git", "fetch", "origin"], timeout=60)
+        if rc == 0:
+            rc, out = run(["git", "rebase", "FETCH_HEAD"], timeout=60)
         if rc != 0:
-            fail(f"git pull --rebase on main failed:\n{out}"); return
+            fail(f"git fetch/rebase on main failed:\n{out}"); return
         rc, out = run(["git", "merge", branch, "--no-ff",
                        "-m", f"Merge {branch} into main (approved via Telegram)"])
         if rc != 0:
             fail(out); return
-        rc, out = run(["git", "push", "origin", "main"])
+        rc, out = run_network(["git", "push", "origin", "main"])
         if rc == 0:
             ok(out)
         else:
@@ -3161,9 +3421,11 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
         branch = args.get("branch", "").strip()
         if not branch:
             fail("git_delete_branch: branch arg required"); return
+        if not scrub_origin_or_fail():
+            return
         run(["git", "checkout", "main"])
         run(["git", "branch", "-D", branch])
-        rc, out = run(["git", "push", "origin", "--delete", branch])
+        rc, out = run_network(["git", "push", "origin", "--delete", branch])
         ok(f"Branch {branch} deleted" + (f"\n{out}" if out else ""))
 
     elif operation == "npm_install":
@@ -3213,8 +3475,10 @@ def _check_dev_cmds(token: str, chat_id: str) -> None:
         try:
             _execute_dev_cmd(token, chat_id, cmd_file)
         except Exception as e:
-            print(f"[mgmt-bot] Dev-cmd error ({cmd_file}): {e}", file=sys.stderr)
-            send(token, chat_id, f"⚠️ Dev-cmd crashed on `{cmd_file.parent.name}`: {e}")
+            safe_error = _redact_sensitive_text(e, os.environ.get("GITHUB_TOKEN", ""))
+            print(f"[mgmt-bot] Dev-cmd error ({cmd_file}): {safe_error}", file=sys.stderr)
+            send(token, chat_id,
+                 f"⚠️ Dev-cmd crashed on `{cmd_file.parent.name}`: {safe_error}")
             cmd_file.unlink(missing_ok=True)
 
 

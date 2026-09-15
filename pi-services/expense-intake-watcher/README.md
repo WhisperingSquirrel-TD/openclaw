@@ -2,7 +2,11 @@
 
 _Last updated: 2026-06-15 10:47_
 
-This directory remains the **backward-compatible runtime path** for the broader **Inbound Watch Router**.
+This directory remains the **backward-compatible source/runtime path** for the
+broader **Inbound Watch Router**. The checked-in systemd service and five-minute
+timer are **legacy opt-in declarations only**; the canonical installer does not
+install or enable them. Keep them available for rollback until the live unit and
+source identity are verified.
 
 ## Canonical name now
 
@@ -18,7 +22,7 @@ Why:
 
 The current working path is intentionally unchanged:
 
-- `/home/tomdean88/openclaw/pi-services/expense-intake-watcher/watcher.py`
+- `$HOME/openclaw/pi-services/expense-intake-watcher/watcher.py`
 
 That avoids breaking:
 
@@ -28,16 +32,19 @@ That avoids breaking:
 
 ## Runtime state
 
-State is dual-written for transition safety:
+The source-controlled watcher writes canonical state only:
 
 - canonical: `~/.openclaw/runtime/inbound-watch-router/`
-- legacy compatibility: `~/.openclaw/runtime/expense-intake-watcher/`
+
+Any legacy state directory found on a live Pi is an evidence/rollback concern,
+not proof that the legacy timer is active. Do not delete it until the live
+source, scheduler, consumer graph, and rollback gates have been checked.
 
 ## Actual role
 
 Pi-native watch-layer monitor for inbound/outbound operational surfaces, with expense handling as the strongest automatic route.
 
-Expense business records are not local files.  The watcher sends source-linked
+Expense business records are not local files. The watcher sends source-linked
 capture, review and finance handoff through the public seer-finance boundary:
 
 - authoritative expense review: `/Expenses/Expense ledger.xlsx`
@@ -51,7 +58,7 @@ capture, review and finance handoff through the public seer-finance boundary:
   `expected_source_sha256`, and `semantic_sha256` proof; the watcher does not
   synthesize, bypass, or write the transport queue directly
 
-Routine bounded writes use the background no-TOTP SharePoint writer.  This is
+Routine bounded writes use the background no-TOTP SharePoint writer. This is
 not deployment proof: an unavailable boundary remains `blocked` and is never
 silently replaced by a local document, JSON ledger or SQLite database.
 
@@ -61,7 +68,8 @@ Current sources:
 - `/home/tomdean88/.openclaw/workspace/MICROSOFT_INBOX.md`
 - `/home/tomdean88/.openclaw/workspace/ASSISTANT_INBOX.md`
 - both **Inbox** and **Sent Items** sections from those files
-- `/home/tomdean88/.openclaw/workspace/WHATSAPP_RECENT.md`
+- `/home/tomdean88/.openclaw/workspace/WHATSAPP_RECENT.md` (approved rolling
+  48-hour semantic window)
 
 Primary flags:
 

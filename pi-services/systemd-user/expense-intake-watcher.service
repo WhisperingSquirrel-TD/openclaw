@@ -2,8 +2,14 @@
 Description=Inbound watch router (SharePoint-authoritative expense boundary)
 After=network-online.target
 
+# SOURCE STATUS: legacy opt-in / retired from the canonical trigger.  The
+# canonical installer deliberately does not install
+# or enable this unit: the central mirror-router owns the ordered trigger.
+# Retain this declaration for an approved rollback until the live unit/source
+# identity is verified.  Do not infer live state from this checked-in file.
+
 [Service]
 Type=oneshot
-Environment=SEER_FINANCE_CODE_ROOT=/home/tomdean88/openclaw/pi-services/seer-finance
-ExecStart=/usr/bin/python3 /home/tomdean88/openclaw/pi-services/expense-intake-watcher/watcher.py
-WorkingDirectory=/home/tomdean88/openclaw/pi-services/expense-intake-watcher
+Environment=SEER_FINANCE_CODE_ROOT=%h/openclaw/pi-services/seer-finance
+ExecStart=/usr/bin/python3 %h/openclaw/pi-services/expense-intake-watcher/watcher.py
+WorkingDirectory=%h/openclaw/pi-services/expense-intake-watcher

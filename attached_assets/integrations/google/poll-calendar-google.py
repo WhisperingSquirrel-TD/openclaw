@@ -10,8 +10,9 @@ Auth files (already on Pi from previous setup):
   ~/.openclaw/integrations/google/token.json         — saved OAuth token (auto-refreshed)
 
 First-run (if token.json is missing or expired):
-  python3 ~/.openclaw/integrations/google/poll-calendar-google.py
-  It will open a browser for OAuth consent and save the token automatically.
+  python3 ~/.openclaw/integrations/google/poll-calendar-google.py --auth
+  Open the printed consent URL on the phone and paste the full localhost
+  callback URL into the waiting prompt.  The token is saved automatically.
 
 Requires:
   pip3 install --break-system-packages google-auth google-auth-oauthlib google-api-python-client
@@ -19,10 +20,13 @@ Requires:
 
 import sys
 import os
+import hmac
+import tempfile
 import time
 import argparse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 try:
     from google.oauth2.credentials import Credentials
@@ -57,7 +61,8 @@ TOKEN_FILE = _GOOGLE_DIR / "token.json"
 SCOPES        = ["https://www.googleapis.com/auth/calendar.readonly"]
 POLL_INTERVAL = 900   # 15 minutes
 LOOK_AHEAD    = 14    # days
-AUTH_PORT     = 8765  # fixed port so SSH tunnelling works: ssh -L 8765:localhost:8765 pi@<ip>
+AUTH_PORT     = 8765  # Google Desktop OAuth loopback redirect port
+AUTH_HOST     = "localhost"
 
 LOG_MAX_LINES = 1000
 LOG_TRIM_TO   = 800
@@ -94,60 +99,179 @@ def log(msg: str):
 # Auth
 # ---------------------------------------------------------------------------
 
-_PI_IP_HINT = os.environ.get("PI_IP", "<pi-ip>")
-
-
 def _auth_instructions():
-    """Print the exact commands needed to re-authorise on a headless Pi."""
+    """Print the safe, interactive route needed to re-authorise a headless host."""
     log("FLAG TO TOM: Google Calendar needs re-authorisation.")
-    log("  Run this on the Pi (SSH in first):")
+    log("  Run this on the gateway host (SSH in first if needed):")
     log(f"    python3 {__file__} --auth")
-    log(f"  That starts an OAuth server on port {AUTH_PORT}. In a SEPARATE terminal on your desktop:")
-    log(f"    ssh -L {AUTH_PORT}:localhost:{AUTH_PORT} pi@{_PI_IP_HINT}")
-    log(f"  Then open the URL the script prints in your desktop browser.")
-    log(f"  After authorising, the token is saved and the service resumes automatically.")
+    log("  Open the printed Google consent URL on the phone, then paste the complete")
+    log(f"  final {AUTH_HOST}:{AUTH_PORT} callback URL into the waiting auth prompt.")
+    log("  The callback is validated locally; the OAuth library performs the token exchange.")
 
 
-def do_auth():
+def _validate_callback_url(
+    callback_url: str,
+    expected_state: str,
+    expected_port: int = AUTH_PORT,
+) -> None:
+    """Validate a Google loopback callback before exchanging it for tokens.
+
+    Installed-app OAuth uses a loopback redirect.  A pasted callback is
+    untrusted input, so keep the accepted origin exact and bind it to the
+    state generated for this authorization attempt.  In particular, this does
+    not accept arbitrary URLs, fragments, OOB values, or a code without state.
     """
-    Interactive OAuth flow for headless Pi.
-    Starts a local server on AUTH_PORT so the user can tunnel in via SSH.
+
+    try:
+        parsed = urlsplit(callback_url)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Malformed OAuth callback URL") from exc
+
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != AUTH_HOST
+        or port != expected_port
+        or parsed.path != "/"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise ValueError("OAuth callback must be the expected localhost loopback URL")
+
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if query.get("error"):
+        raise ValueError("Google OAuth consent was not granted")
+
+    code_values = query.get("code", [])
+    state_values = query.get("state", [])
+    if len(code_values) != 1 or not code_values[0]:
+        raise ValueError("OAuth callback is missing its authorization code")
+    if len(state_values) != 1 or not state_values[0]:
+        raise ValueError("OAuth callback is missing its state")
+    if not hmac.compare_digest(state_values[0], expected_state):
+        raise ValueError("OAuth callback state does not match this authorization attempt")
+
+
+def _oauthlib_authorization_response(callback_url: str, expected_state: str) -> str:
+    """Return the validated loopback callback in oauthlib's accepted form.
+
+    oauthlib's secure-transport guard rejects an HTTP authorization response,
+    even though Google installed-app loopback redirects are intentionally HTTP.
+    ``InstalledAppFlow.run_local_server`` works around the parser by rewriting
+    the already-received local callback to HTTPS before calling ``fetch_token``.
+    Keep that compatibility rewrite narrow: validate the original untrusted
+    HTTP URL first, then rewrite only this exact localhost callback.  This does
+    not disable TLS checks globally or change any network transport.
+    """
+
+    _validate_callback_url(callback_url, expected_state)
+    return urlunsplit(
+        ("https", f"{AUTH_HOST}:{AUTH_PORT}", "/", urlsplit(callback_url).query, "")
+    )
+
+
+def _complete_phone_auth(flow, read_callback=input, write_output=print):
+    """Complete an installed-app OAuth flow from a phone's loopback callback.
+
+    Google still redirects to the Desktop OAuth client's loopback URI.  The
+    phone cannot resolve its own ``localhost`` to the gateway host, so the
+    operator copies the full final URL into this process instead.  The OAuth
+    library performs the normal authorization-code exchange and PKCE/state
+    checks; no deprecated out-of-band redirect is used.
+    """
+
+    # Keep the redirect URI on the same installed-app loopback route used by
+    # run_local_server, but complete the callback from stdin instead of
+    # requiring the phone to reach the gateway host.
+    flow.redirect_uri = f"http://{AUTH_HOST}:{AUTH_PORT}/"
+    authorization_url, state = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+    )
+    write_output("Open this Google consent URL on the phone:")
+    write_output(authorization_url)
+    write_output(
+        f"After consent, paste the complete final callback URL "
+        f"(http://{AUTH_HOST}:{AUTH_PORT}/...) into this prompt."
+    )
+    callback_url = read_callback("Callback URL: ").strip()
+    authorization_response = _oauthlib_authorization_response(callback_url, state)
+    flow.fetch_token(authorization_response=authorization_response)
+    return flow.credentials
+
+
+def _write_token_file(path: Path, credentials) -> None:
+    """Atomically write a token with owner-only permissions."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            os.chmod(temporary.fileno(), 0o600)
+            temporary.write(credentials.to_json())
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _require_refresh_token(credentials):
+    """Require a refresh-capable credential before replacing an unattended token."""
+
+    if not getattr(credentials, "refresh_token", None):
+        raise ValueError(
+            "Google OAuth did not return a refresh token; existing token was retained"
+        )
+    return credentials
+
+
+def do_auth(read_callback=input, write_output=print):
+    """
+    Interactive OAuth flow for a headless gateway.
+    Uses the provider's normal localhost redirect and a pasted callback URL.
     Call this via: python3 poll-calendar-google.py --auth
     """
-    print(f"\n=== Google Calendar OAuth Setup ===")
-    print(f"This will start an OAuth server on port {AUTH_PORT}.")
-    print(f"")
-    print(f"If you are SSH'd into the Pi, open a SECOND terminal on your desktop and run:")
-    print(f"  ssh -L {AUTH_PORT}:localhost:{AUTH_PORT} pi@{_PI_IP_HINT}")
-    print(f"Then open the URL shown below in your desktop browser.")
-    print(f"")
-
-    if TOKEN_FILE.exists():
-        print(f"Deleting existing token: {TOKEN_FILE}")
-        TOKEN_FILE.unlink()
+    write_output("\n=== Google Calendar OAuth Setup ===")
 
     if not CREDENTIALS_FILE.exists():
-        print(f"ERROR: Credentials file not found.")
-        print(f"  Checked: {CREDENTIALS_FILE}")
-        print(f"  Checked: {_GOOGLE_DIR}/gmail-credentials.json")
-        print(f"  Download from Google Cloud Console → APIs & Services → Credentials")
+        write_output("ERROR: Credentials file not found.")
+        write_output(f"  Checked: {CREDENTIALS_FILE}")
+        write_output(f"  Checked: {_GOOGLE_DIR}/gmail-credentials.json")
+        write_output("  Download from Google Cloud Console → APIs & Services → Credentials")
         sys.exit(1)
 
     try:
-        flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-        creds = flow.run_local_server(
-            port=AUTH_PORT,
-            open_browser=False,
-            success_message="Authorisation complete — you can close this tab and the SSH tunnel.",
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(CREDENTIALS_FILE),
+            SCOPES,
+            autogenerate_code_verifier=True,
         )
-        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        TOKEN_FILE.write_text(creds.to_json())
-        print(f"\nSUCCESS — token saved to {TOKEN_FILE}")
-        print(f"Restart the service: systemctl --user restart openclaw-calendar-google.service")
+        creds = _require_refresh_token(
+            _complete_phone_auth(
+                flow,
+                read_callback=read_callback,
+                write_output=write_output,
+            )
+        )
+        _write_token_file(TOKEN_FILE, creds)
+        write_output(f"\nSUCCESS — token saved to {TOKEN_FILE}")
+        write_output("Restart the service: systemctl --user restart openclaw-calendar-google.service")
         log(f"OAuth complete via --auth flag. Token saved to {TOKEN_FILE}")
-    except Exception as e:
-        print(f"\nERROR: OAuth flow failed: {e}")
-        print(f"Make sure the SSH tunnel is open on port {AUTH_PORT} before running this.")
+    except Exception:
+        # Do not echo provider responses: they can include callback material.
+        write_output("\nERROR: OAuth flow failed; no token was written.")
         sys.exit(1)
 
 
@@ -164,16 +288,26 @@ def get_service():
             creds = None
 
     if not creds or not creds.valid:
+        if creds and creds.expired and not creds.refresh_token:
+            log(
+                "ERROR: Google Calendar credentials are expired and have no "
+                "refresh token; unattended polling requires a refresh token."
+            )
+            _auth_instructions()
+            return None
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
-                TOKEN_FILE.write_text(creds.to_json())
+                _require_refresh_token(creds)
+                _write_token_file(TOKEN_FILE, creds)
                 log("Token refreshed successfully")
             except Exception as e:
                 log(f"ERROR: Token refresh failed: {e}")
                 if "invalid_grant" in str(e).lower():
-                    TOKEN_FILE.unlink(missing_ok=True)
-                    log("Deleted stale token.json (invalid_grant — refresh token revoked by Google).")
+                    log(
+                        "Google rejected the refresh token (invalid_grant); "
+                        "existing token.json was retained. Run --auth to replace it."
+                    )
                 _auth_instructions()
                 return None
         else:
@@ -191,13 +325,16 @@ def get_service():
                 return None
             # Interactive fallback (should not normally reach here — use --auth flag)
             try:
-                flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-                creds = flow.run_local_server(port=AUTH_PORT, open_browser=False)
-                TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-                TOKEN_FILE.write_text(creds.to_json())
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(CREDENTIALS_FILE),
+                    SCOPES,
+                    autogenerate_code_verifier=True,
+                )
+                creds = _require_refresh_token(_complete_phone_auth(flow))
+                _write_token_file(TOKEN_FILE, creds)
                 log(f"OAuth complete — token saved to {TOKEN_FILE}")
-            except Exception as e:
-                log(f"ERROR: OAuth flow failed: {e}")
+            except Exception:
+                log("ERROR: OAuth flow failed; token was not written.")
                 _auth_instructions()
                 return None
 
@@ -366,8 +503,7 @@ def main():
         "--auth",
         action="store_true",
         help=(
-            f"Run interactive OAuth setup on port {AUTH_PORT}. "
-            f"SSH-tunnel first: ssh -L {AUTH_PORT}:localhost:{AUTH_PORT} pi@<pi-ip>"
+            "Run interactive OAuth setup and paste the full localhost callback URL"
         ),
     )
     args = parser.parse_args()

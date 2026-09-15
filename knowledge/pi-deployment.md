@@ -102,4 +102,12 @@ It also applies the [token-efficiency config](./token-efficiency.md) defaults.
 
 ## Scheduling constraint — avoid 06:xx and 07:xx
 
-The CRM runs at 06:00 every morning and another job runs at 07:00. No background jobs should be scheduled in the 06:xx or 07:xx windows. All timed tasks should be scheduled at 08:00 or later. The Garmin poller is set to 09:00 for this reason. **Enforce this for any new pollers or cron jobs added in future.**
+The CRM runs at 06:00 every morning and another job runs at 07:00. No **new**
+background jobs should be scheduled in the 06:xx or 07:xx windows. All new
+timed tasks should be scheduled at 08:00 or later. The installer contains
+pre-existing 06:55 health-check and Monday 06:00 AI-briefing declarations; the
+repository has no owner approval evidence for them. They remain unchanged
+pending owner/runtime reconciliation, are not a scheduling template, and this
+repair must not move them. The schedule inconsistency remains explicitly
+pending. The Garmin poller is set to 09:00 for this reason. **Enforce this for
+any new pollers or cron jobs added in future.**
