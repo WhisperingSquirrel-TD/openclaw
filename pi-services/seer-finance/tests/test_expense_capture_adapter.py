@@ -49,6 +49,58 @@ class ExpenseCaptureAdapterTests(unittest.TestCase):
         self.assertEqual('2026-08-10T12:00:00Z', saved['items'][0]['facts']['source_timestamp'])
         self.assertIn('sqlite_capture_failed', saved['items'][0]['blocker'])
 
+    def test_failure_preserves_receipt_transport_for_replay(self):
+        bad_database = self.root / 'not-a-db-parent' / 'ledger.sqlite3'
+        bad_database.parent.write_text('not a directory', encoding='utf-8')
+        receipt = self.root / 'receipt.pdf'
+        receipt.write_bytes(b'fixture receipt')
+
+        result = capture_candidate(
+            source_surface='email',
+            source_ref='mail:receipt:1',
+            facts={
+                'source_timestamp': '2026-08-10T12:00:00Z',
+                'receipt_path': str(receipt),
+                'receipt_mime_type': 'application/pdf',
+                'receipt_filename': receipt.name,
+            },
+            database=bad_database,
+            replay_path=self.replay,
+        )
+
+        self.assertEqual('replayed', result.outcome)
+        saved = json.loads(self.replay.read_text(encoding='utf-8'))
+        replay_facts = saved['items'][0]['facts']
+        self.assertEqual(str(receipt), replay_facts['receipt_path'])
+        self.assertEqual('application/pdf', replay_facts['receipt_mime_type'])
+        self.assertEqual(receipt.name, replay_facts['receipt_filename'])
+
+    def test_replay_retry_enriches_existing_item_without_duplicate(self):
+        bad_database = self.root / 'not-a-db-parent' / 'ledger.sqlite3'
+        bad_database.parent.write_text('not a directory', encoding='utf-8')
+        receipt = self.root / 'receipt.png'
+        receipt.write_bytes(b'fixture receipt')
+
+        capture_candidate(
+            source_surface='email',
+            source_ref='mail:receipt:2',
+            facts={'source_timestamp': '2026-08-10T12:00:00Z'},
+            database=bad_database,
+            replay_path=self.replay,
+        )
+        result = capture_candidate(
+            source_surface='email',
+            source_ref='mail:receipt:2',
+            facts={'receipt_path': str(receipt), 'receipt_mime_type': 'image/png'},
+            database=bad_database,
+            replay_path=self.replay,
+        )
+
+        self.assertEqual('replayed', result.outcome)
+        saved = json.loads(self.replay.read_text(encoding='utf-8'))
+        self.assertEqual(1, len(saved['items']))
+        self.assertEqual(str(receipt), saved['items'][0]['facts']['receipt_path'])
+
     def test_explicit_income_does_not_create_an_expense_or_replay_record(self):
         result = capture_candidate(source_surface='tide', source_ref='tide:income:1',
                                    facts={'direction': 'income', 'amount_pence': 4000},

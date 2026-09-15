@@ -1,0 +1,35 @@
+{
+  "audit_artifact": "openclaw-product",
+  "manifest_source": "MANIFEST.json",
+  "download_check_source": "download-check.json",
+  "remote_snapshot": {
+    "commit_sha": "faa717afeb66322a79e5eb20ebf8b27fec83042d",
+    "stated_relation": "verified branch is one commit ahead of main",
+    "stated_scope": "exclusively review-input additions",
+    "local_object_available": false,
+    "note": "The exact commit relation is recorded from the supplied review provenance; the commit object is not present in this checkout, so this audit does not use local Git reachability as live-state proof."
+  },
+  "manifest_entry_count": 226,
+  "snapshot_file_count_checked": 226,
+  "manifest_bytes_total": 2542148,
+  "observed_bytes_total": 2542148,
+  "all_byte_sizes_match": true,
+  "byte_mismatches": [],
+  "download_check_entry_count": 226,
+  "download_check_status_counts": {
+    "429": 114,
+    "ok": 112
+  },
+  "download_check_git_blob_mismatches": [],
+  "extra_snapshot_metadata_files": [
+    "MANIFEST.json",
+    "download-check.json"
+  ],
+  "local_counterpart_search": {
+    "tracked_file_count": 7862,
+    "intake_repair_file_count": 32,
+    "exact_content_hash_matches": 36,
+    "same_relative_path_candidates": 69
+  },
+  "no_live_state_claim": true
+}

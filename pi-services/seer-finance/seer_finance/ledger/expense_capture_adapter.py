@@ -50,22 +50,48 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
 
 def _append_replay(path: Path, *, source_surface: str, source_ref: str,
                    facts: Mapping[str, Any], blocker: str) -> None:
-    try:
-        current = json.loads(path.read_text(encoding='utf-8'))
-    except FileNotFoundError:
-        current = {'schema_version': 1, 'items': []}
-    if not isinstance(current, dict) or not isinstance(current.get('items'), list):
-        raise RuntimeError('replay manifest malformed')
-    if not any(isinstance(item, dict) and item.get('source_ref') == source_ref for item in current['items']):
-        current['items'].append({
-            'source_surface': source_surface,
-            'source_ref': source_ref,
-            'facts': dict(facts),
-            'blocker': blocker,
-            'observed_at': _now(),
-        })
-    current['updated_at'] = _now()
-    _atomic_json(path, current)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + '.writer.lock')
+    with lock_path.open('a+') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                current = json.loads(path.read_text(encoding='utf-8'))
+            except FileNotFoundError:
+                current = {'schema_version': 1, 'items': []}
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError('replay manifest malformed') from exc
+            if not isinstance(current, dict) or not isinstance(current.get('items'), list):
+                raise RuntimeError('replay manifest malformed')
+            existing = next(
+                (
+                    item for item in current['items']
+                    if isinstance(item, dict) and item.get('source_ref') == source_ref
+                ),
+                None,
+            )
+            if existing is None:
+                current['items'].append({
+                    'source_surface': source_surface,
+                    'source_ref': source_ref,
+                    'facts': dict(facts),
+                    'blocker': blocker,
+                    'observed_at': _now(),
+                })
+            else:
+                # A retry for the same source is idempotent, but a later
+                # attempt may have transport metadata that was unavailable on
+                # the first failure.  Retain existing facts and only enrich
+                # fields that were previously absent.
+                existing_facts = existing.get('facts')
+                if isinstance(existing_facts, dict):
+                    for key, value in facts.items():
+                        if value is not None and existing_facts.get(key) is None:
+                            existing_facts[key] = value
+            current['updated_at'] = _now()
+            _atomic_json(path, current)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def capture_candidate(*, source_surface: str, source_ref: str,
@@ -77,7 +103,8 @@ def capture_candidate(*, source_surface: str, source_ref: str,
         raise ValueError('source_surface is required')
     if not isinstance(source_ref, str) or not source_ref.strip():
         raise ValueError('source_ref is required')
-    safe_facts = dict(facts or {})
+    replay_facts = dict(facts or {})
+    safe_facts = dict(replay_facts)
     # Receipt transport metadata is deliberately not an expense fact.  It is
     # consumed by the replay worker after capture to create immutable evidence.
     for transport_key in ("receipt_path", "receipt_local_path", "receipt_mime_type", "receipt_filename"):
@@ -86,6 +113,7 @@ def capture_candidate(*, source_surface: str, source_ref: str,
     # income/non-expense source must route it to finance reconciliation while
     # preserving its upstream evidence; it must never become an expense row.
     direction = safe_facts.pop('direction', None)
+    replay_facts.pop('direction', None)
     if direction is not None and direction != 'expense':
         return CaptureResult('accounting_only', None, source_ref,
                              f'explicit_non_expense_direction:{direction}')
@@ -113,5 +141,5 @@ def capture_candidate(*, source_surface: str, source_ref: str,
     except Exception as exc:
         blocker = f'sqlite_capture_failed:{type(exc).__name__}:{exc}'
         _append_replay(replay, source_surface=source_surface, source_ref=source_ref,
-                       facts=safe_facts, blocker=blocker)
+                       facts=replay_facts, blocker=blocker)
         return CaptureResult('replayed', None, source_ref, blocker)

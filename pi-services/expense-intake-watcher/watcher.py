@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import fcntl
 import os
 import json
 import mimetypes
@@ -1118,6 +1119,19 @@ def capture_sqlite_candidate(*, source_surface: str, source_ref: str, source_tim
     return result
 
 
+def _capture_persisted(result: Any) -> bool:
+    """Treat a capture as persisted only when the adapter returned its ID."""
+    return result.outcome == 'captured' and bool(result.expense_id)
+
+
+def _capture_blocker(result: Any) -> str:
+    if result.blocker:
+        return result.blocker
+    if result.outcome == 'captured' and not result.expense_id:
+        return 'sqlite_capture_missing_expense_id'
+    return 'sqlite_capture_not_persisted'
+
+
 def mark_state(state: dict[str, Any], key: str, route: str, status: str, detail: str | None = None) -> None:
     state.setdefault('item_states', {})[key] = {
         'route': route,
@@ -1468,14 +1482,17 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
     reader_detail = 'trusted reader extracted body/attachments' if reader else 'trusted reader unavailable; autonomous retry required'
     capture = capture_sqlite_candidate(source_surface=f'email:{entry.account}:{entry.section}', source_ref=key,
                                        source_timestamp=entry.date_str, supplier=entry.party, evidence_ref=f'{entry.mailbox_path}:{entry.message_id}')
-    if capture.outcome == 'captured':
+    if _capture_persisted(capture):
         routed_detail = f'Captured in SQLite expense_id={capture.expense_id}; {reader_detail}'
         blocker = ('Captured in SQLite; explicit review/enrichment is required before finance posting'
                    if reader else
                    'Captured in SQLite; trusted reader failed, so body/attachment enrichment will retry autonomously')
+    elif capture.outcome == 'captured':
+        routed_detail = 'SQLite capture returned no expense ID; durable capture is not claimed'
+        blocker = 'SQLite capture returned no expense ID'
     else:
         routed_detail = f'SQLite capture failed; durable replay preserved; {reader_detail}'
-        blocker = f'Durable SQLite replay pending autonomous retry: {capture.blocker}'
+        blocker = f'Durable SQLite replay pending autonomous retry: {_capture_blocker(capture)}'
     advance_item_lifecycle(state, key, 'email', 'routed', routed_detail)
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
     advance_item_lifecycle(state, key, 'email', 'blocked', blocker)
@@ -1543,12 +1560,15 @@ def process_whatsapp_entry(state: dict[str, Any], entry: WhatsAppEntry, summary:
     summary['expense_candidates'] += 1
     capture = capture_sqlite_candidate(source_surface='whatsapp_recent', source_ref=key,
                                        source_timestamp=entry.timestamp, supplier=entry.contact, evidence_ref='WHATSAPP_RECENT.md')
-    if capture.outcome == 'captured':
+    if _capture_persisted(capture):
         routed_detail = f'Captured in SQLite expense_id={capture.expense_id}'
         blocker = 'Captured in SQLite; WhatsApp expense signal needs explicit business/payment/evidence review before finance posting'
+    elif capture.outcome == 'captured':
+        routed_detail = 'SQLite capture returned no expense ID; durable capture is not claimed'
+        blocker = 'SQLite capture returned no expense ID'
     else:
         routed_detail = 'SQLite capture failed; durable replay preserved'
-        blocker = f'Durable SQLite replay pending autonomous retry: {capture.blocker}'
+        blocker = f'Durable SQLite replay pending autonomous retry: {_capture_blocker(capture)}'
     advance_item_lifecycle(state, key, 'whatsapp', 'routed', routed_detail)
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
     advance_item_lifecycle(state, key, 'whatsapp', 'blocked', blocker)
@@ -1642,12 +1662,15 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             continue
         capture = capture_sqlite_candidate(source_surface=surface, source_ref=source_id, source_timestamp=safe_source_timestamp,
                                            supplier=subject, evidence_ref=source_ref)
-        if capture.outcome == 'captured':
+        if _capture_persisted(capture):
             canonical_ref = f'sqlite:{capture.expense_id}'
             blocker = 'SQLite capture requires expense enrichment before ledger/evidence completion'
+        elif capture.outcome == 'captured':
+            canonical_ref = None
+            blocker = 'SQLite capture returned no expense ID'
         else:
             canonical_ref = f'sqlite-replay:{source_id}'
-            blocker = f'Durable SQLite replay pending autonomous retry: {capture.blocker}'
+            blocker = f'Durable SQLite replay pending autonomous retry: {_capture_blocker(capture)}'
         outcome = build_outcome(
             source_id=source_id,
             source_surface=surface,
@@ -1677,7 +1700,7 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             'ledger_state': outcome.ledger_state,
             'evidence_state': outcome.evidence_state,
             'blocker': outcome.blocker,
-            'evidence_refs': [source_ref, canonical_ref],
+            'evidence_refs': [ref for ref in (source_ref, canonical_ref) if ref],
             'resolved_at': None,
             'processed_at': None,
             'closed_at': None,
@@ -1697,6 +1720,49 @@ def _receipt_file_from_facts(facts: dict[str, Any]) -> Path | None:
 
 def _receipt_upload_id(source_ref: str, sha256: str) -> str:
     return 'receipt-upload-' + hashlib.sha256(f'{source_ref}|{sha256}'.encode()).hexdigest()[:32]
+
+
+def _replay_manifest_lock_path(replay_path: Path) -> Path:
+    """Return the lock shared with the finance capture adapter."""
+    return replay_path.with_suffix(replay_path.suffix + '.writer.lock')
+
+
+def _load_replay_manifest_strict(replay_path: Path) -> dict[str, Any] | None:
+    """Load a replay manifest without treating malformed data as empty."""
+    try:
+        manifest = json.loads(replay_path.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return {'items': []}
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(manifest, dict) or not isinstance(manifest.get('items'), list):
+        return None
+    return manifest
+
+
+def _replay_item_is_valid(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    source_ref = item.get('source_ref')
+    source_surface = item.get('source_surface')
+    return (
+        isinstance(source_ref, str)
+        and bool(source_ref.strip())
+        and isinstance(source_surface, str)
+        and bool(source_surface.strip())
+        and isinstance(item.get('facts'), dict)
+    )
+
+
+def _replay_manifest_is_valid(manifest: Any) -> bool:
+    return isinstance(manifest, dict) and isinstance(manifest.get('items'), list) and all(
+        _replay_item_is_valid(item) for item in manifest['items']
+    )
+
+
+def _replay_item_key(item: dict[str, Any]) -> str:
+    """Make an exact, stable identity for a persisted replay item."""
+    return json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
 def _read_sharepoint_delivery_results() -> dict[str, dict[str, Any]]:
@@ -1731,34 +1797,54 @@ def process_expense_sqlite_replay(summary: dict[str, int], *, replay_path: Path 
     runtime.  A success is only returned after SQLite and immutable local plus
     SharePoint evidence are present; every other state remains replayable.
     """
-    manifest = load_json(replay_path, {'items': []})
-    items = manifest.get('items', []) if isinstance(manifest, dict) else []
+    if not replay_path.exists():
+        manifest = {'items': []}
+    else:
+        manifest = _load_replay_manifest_strict(replay_path)
+        if manifest is None:
+            log('expense replay manifest malformed; preserving it unchanged')
+            return [{'state': 'blocked', 'blocker': 'replay_manifest_malformed'}]
+    items = manifest.get('items') if isinstance(manifest, dict) else None
     if not isinstance(items, list):
         log('expense replay manifest malformed; preserving it unchanged')
         return [{'state': 'blocked', 'blocker': 'replay_manifest_malformed'}]
-    deliveries = _read_sharepoint_delivery_results()
-    remaining: list[dict[str, Any]] = []
-    states: list[dict[str, Any]] = []
+    malformed_states: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
-            remaining.append(item)
+            malformed_states.append({'state': 'blocked', 'blocker': 'replay_item_malformed'})
             continue
-        source_ref = str(item.get('source_ref') or '').strip()
-        source_surface = str(item.get('source_surface') or '').strip()
-        facts = item.get('facts') if isinstance(item.get('facts'), dict) else {}
-        if not source_ref or not source_surface:
-            remaining.append(item)
-            states.append({'state': 'blocked', 'source_ref': source_ref or None, 'blocker': 'replay_item_missing_source'})
+        source_ref = item.get('source_ref')
+        source_surface = item.get('source_surface')
+        if not isinstance(source_ref, str) or not source_ref.strip() or not isinstance(source_surface, str) or not source_surface.strip():
+            malformed_states.append({
+                'state': 'blocked',
+                'source_ref': source_ref if isinstance(source_ref, str) and source_ref.strip() else None,
+                'blocker': 'replay_item_missing_source',
+            })
             continue
+        if not isinstance(item.get('facts'), dict):
+            malformed_states.append({
+                'state': 'blocked',
+                'source_ref': source_ref,
+                'blocker': 'replay_item_malformed',
+            })
+    if malformed_states:
+        log('expense replay item malformed; preserving manifest unchanged')
+        return malformed_states
+    deliveries = _read_sharepoint_delivery_results()
+    successful_items: list[dict[str, Any]] = []
+    states: list[dict[str, Any]] = []
+    for item in items:
+        source_ref = item['source_ref']
+        source_surface = item['source_surface']
+        facts = item['facts']
         captured = capture_candidate(source_surface=source_surface, source_ref=source_ref,
                                      facts=facts, database=database, replay_path=replay_path)
-        if captured.outcome != 'captured':
-            remaining.append(item)
-            states.append({'state': 'blocked', 'source_ref': source_ref, 'blocker': captured.blocker})
+        if not _capture_persisted(captured):
+            states.append({'state': 'blocked', 'source_ref': source_ref, 'blocker': _capture_blocker(captured)})
             continue
         receipt = _receipt_file_from_facts(facts)
         if receipt is None:
-            remaining.append(item)
             states.append({'state': 'blocked', 'source_ref': source_ref, 'expense_id': captured.expense_id,
                            'blocker': 'original_receipt_binary_unavailable'})
             continue
@@ -1774,7 +1860,6 @@ def process_expense_sqlite_replay(summary: dict[str, int], *, replay_path: Path 
                                               local_path=receipt, sha256=digest, mime_type=mime_type)
             delivery = deliveries.get(upload_id)
             if not delivery or not delivery.get('success'):
-                remaining.append(item)
                 states.append({'state': 'blocked', 'source_ref': source_ref, 'expense_id': captured.expense_id,
                                'blocker': 'sharepoint_upload_pending', 'queue_id': upload_id})
                 continue
@@ -1783,7 +1868,6 @@ def process_expense_sqlite_replay(summary: dict[str, int], *, replay_path: Path 
             except json.JSONDecodeError:
                 proof = {}
             if not proof.get('url') or not proof.get('etag'):
-                remaining.append(item)
                 states.append({'state': 'blocked', 'source_ref': source_ref, 'expense_id': captured.expense_id,
                                'blocker': 'sharepoint_upload_missing_proof', 'queue_id': upload_id})
                 continue
@@ -1792,13 +1876,43 @@ def process_expense_sqlite_replay(summary: dict[str, int], *, replay_path: Path 
                                                sharepoint_url=str(proof['url']), sharepoint_etag=str(proof['etag']),
                                                source_timestamp=str(facts.get('source_timestamp') or '') or None)
             summary['replay_delivered'] = summary.get('replay_delivered', 0) + 1
+            successful_items.append(item)
             states.append({'state': 'success', 'source_ref': source_ref, 'expense_id': captured.expense_id,
                            'sharepoint_url': proof['url'], 'sharepoint_etag': proof['etag']})
         finally:
             repository.close()
-    manifest['items'] = remaining
-    manifest['updated_at'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-    save_json(replay_path, manifest)
+
+    # Capture and evidence delivery intentionally happen before this lock.  The
+    # adapter takes the same lock while appending a failed capture, so holding it
+    # during processing would deadlock the retry path.  Reload under the lock so
+    # appends/enrichments that happened while processing are not overwritten.
+    lock_path = _replay_manifest_lock_path(replay_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open('a+') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            current = _load_replay_manifest_strict(replay_path)
+            if current is None or not _replay_manifest_is_valid(current):
+                log('expense replay manifest malformed; preserving it unchanged')
+                return states
+
+            remove_counts: dict[str, int] = {}
+            for item in successful_items:
+                key = _replay_item_key(item)
+                remove_counts[key] = remove_counts.get(key, 0) + 1
+            kept_items: list[dict[str, Any]] = []
+            for item in current['items']:
+                key = _replay_item_key(item)
+                count = remove_counts.get(key, 0)
+                if count:
+                    remove_counts[key] = count - 1
+                else:
+                    kept_items.append(item)
+            current['items'] = kept_items
+            current['updated_at'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            save_json(replay_path, current)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
     return states
 
 

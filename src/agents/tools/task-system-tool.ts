@@ -81,9 +81,10 @@ function normalizeBaseUrl(raw?: string) {
   } catch {
     throw new ToolInputError("Task system base URL is invalid");
   }
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
   if (
     url.protocol !== "http:" ||
-    !["127.0.0.1", "localhost", "::1"].includes(url.hostname) ||
+    !["127.0.0.1", "localhost", "::1"].includes(hostname) ||
     url.pathname !== "/"
   ) {
     throw new ToolInputError("Task system must use a local HTTP gateway");

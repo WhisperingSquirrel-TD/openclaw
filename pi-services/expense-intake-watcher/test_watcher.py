@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 import sys
 import json
+import hashlib
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -137,6 +139,318 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 self.assertEqual(expenses.read_text(encoding="utf-8"), "# Expenses\n(no insertion marker)\n")
             finally:
                 WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
+
+    def test_capture_without_expense_id_never_claims_sqlite_canonical_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events, expenses, monitored, queue = (
+                root / "events.json",
+                root / "expenses.md",
+                root / "monitored.json",
+                root / "queue.json",
+            )
+            events.write_text(json.dumps({"items": [{
+                "stable_item_key": "teams:expense:no-id",
+                "source_id": "no-id",
+                "surface": "teams_recent",
+                "source_timestamp": "2026-08-10T10:00:00Z",
+                "subject_or_location": "Expense evidence",
+                "raw_evidence_ref": "TEAMS_RECENT.md",
+                "routing_flags": ["EXPENSE"],
+                "reasons": ["cost evidence"],
+            }]}), encoding="utf-8")
+            expenses.write_text("# Expenses\n(no insertion marker)\n", encoding="utf-8")
+            old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
+            try:
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
+                with patch.object(WATCHER, "capture_sqlite_candidate") as capture:
+                    capture.return_value.outcome = "captured"
+                    capture.return_value.expense_id = None
+                    capture.return_value.blocker = None
+                    WATCHER.process_mirror_expense_events(WATCHER.default_state(), {})
+                item = json.loads(monitored.read_text(encoding="utf-8"))["items"][0]
+                self.assertIsNone(item["canonical_ref"])
+                self.assertIn("no expense ID", item["blocker"])
+                self.assertEqual(["TEAMS_RECENT.md"], item["evidence_refs"])
+            finally:
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
+
+
+class ExpenseReplayManifestTests(unittest.TestCase):
+    def test_replay_finalization_preserves_append_and_enrichment_after_processing_began(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            replay = root / "replay.json"
+            database = root / "ledger.sqlite3"
+            bad_database = root / "not-a-db-parent" / "ledger.sqlite3"
+            queue = root / "sharepoint-queue.json"
+            results = root / "sharepoint-results.json"
+            receipt = root / "receipt.pdf"
+            receipt.write_bytes(b"fixture receipt")
+            source_ref = "email:receipt:interleaving"
+            appended_ref = "email:receipt:appended-during-processing"
+            facts = {
+                "receipt_path": str(receipt),
+                "receipt_mime_type": "application/pdf",
+            }
+            replay.write_text(json.dumps({
+                "schema_version": 1,
+                "items": [{
+                    "source_surface": "email",
+                    "source_ref": source_ref,
+                    "facts": facts,
+                }],
+            }), encoding="utf-8")
+            upload_id = WATCHER._receipt_upload_id(
+                source_ref,
+                hashlib.sha256(receipt.read_bytes()).hexdigest(),
+            )
+            results.write_text(json.dumps([{
+                "id": upload_id,
+                "success": True,
+                "output": json.dumps({"url": "https://example.invalid/receipt", "etag": "etag-1"}),
+            }]), encoding="utf-8")
+            old_paths = WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE
+            real_capture = WATCHER.capture_candidate
+            appended = False
+
+            def capture_and_interleave(*args, **kwargs):
+                nonlocal appended
+                captured = real_capture(*args, **kwargs)
+                if not appended:
+                    appended = True
+                    bad_database.parent.write_text("not a directory", encoding="utf-8")
+                    real_capture(
+                        source_surface="email",
+                        source_ref=source_ref,
+                        facts={"supplier": "Enriched after replay started"},
+                        database=bad_database,
+                        replay_path=replay,
+                    )
+                    real_capture(
+                        source_surface="email",
+                        source_ref=appended_ref,
+                        facts={"supplier": "Appended after replay started"},
+                        database=bad_database,
+                        replay_path=replay,
+                    )
+                return captured
+
+            try:
+                WATCHER.SHAREPOINT_QUEUE_FILE = queue
+                WATCHER.SHAREPOINT_RESULTS_FILE = results
+                with patch.object(WATCHER, "capture_candidate", side_effect=capture_and_interleave):
+                    states = WATCHER.process_expense_sqlite_replay(
+                        {},
+                        replay_path=replay,
+                        database=database,
+                    )
+            finally:
+                WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE = old_paths
+
+            self.assertEqual("success", states[0]["state"])
+            saved_items = json.loads(replay.read_text(encoding="utf-8"))["items"]
+            self.assertEqual(
+                [
+                    {
+                        "source_surface": "email",
+                        "source_ref": source_ref,
+                        "facts": {
+                            "receipt_path": str(receipt),
+                            "receipt_mime_type": "application/pdf",
+                            "supplier": "Enriched after replay started",
+                        },
+                    },
+                    {
+                        "source_surface": "email",
+                        "source_ref": appended_ref,
+                        "facts": {"supplier": "Appended after replay started"},
+                        "blocker": unittest.mock.ANY,
+                        "observed_at": unittest.mock.ANY,
+                    },
+                ],
+                saved_items,
+            )
+
+    def test_malformed_manifest_written_during_processing_is_not_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            replay = root / "replay.json"
+            database = root / "ledger.sqlite3"
+            queue = root / "sharepoint-queue.json"
+            results = root / "sharepoint-results.json"
+            receipt = root / "receipt.pdf"
+            receipt.write_bytes(b"fixture receipt")
+            source_ref = "email:receipt:malformed-interleaving"
+            replay.write_text(json.dumps({
+                "schema_version": 1,
+                "items": [{
+                    "source_surface": "email",
+                    "source_ref": source_ref,
+                    "facts": {
+                        "receipt_path": str(receipt),
+                        "receipt_mime_type": "application/pdf",
+                    },
+                }],
+            }), encoding="utf-8")
+            upload_id = WATCHER._receipt_upload_id(
+                source_ref,
+                hashlib.sha256(receipt.read_bytes()).hexdigest(),
+            )
+            results.write_text(json.dumps([{
+                "id": upload_id,
+                "success": True,
+                "output": json.dumps({"url": "https://example.invalid/receipt", "etag": "etag-1"}),
+            }]), encoding="utf-8")
+            malformed = b'{"items": ['
+            old_paths = WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE
+            real_capture = WATCHER.capture_candidate
+
+            def capture_then_corrupt(*args, **kwargs):
+                captured = real_capture(*args, **kwargs)
+                replay.write_bytes(malformed)
+                return captured
+
+            try:
+                WATCHER.SHAREPOINT_QUEUE_FILE = queue
+                WATCHER.SHAREPOINT_RESULTS_FILE = results
+                with patch.object(WATCHER, "LOG_FILE", root / "watcher.log"), \
+                     patch.object(WATCHER, "capture_candidate", side_effect=capture_then_corrupt):
+                    states = WATCHER.process_expense_sqlite_replay(
+                        {},
+                        replay_path=replay,
+                        database=database,
+                    )
+            finally:
+                WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE = old_paths
+
+            self.assertEqual("success", states[0]["state"])
+            self.assertEqual(malformed, replay.read_bytes())
+
+    def test_invalid_replay_json_is_blocked_without_rewriting_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            replay = root / "replay.json"
+            database = root / "ledger.sqlite3"
+            original = b'{"items": ['
+            replay.write_bytes(original)
+
+            with patch.object(WATCHER, "LOG_FILE", root / "watcher.log"):
+                states = WATCHER.process_expense_sqlite_replay(
+                    {},
+                    replay_path=replay,
+                    database=database,
+                )
+
+            self.assertEqual(
+                [{"state": "blocked", "blocker": "replay_manifest_malformed"}],
+                states,
+            )
+            self.assertEqual(original, replay.read_bytes())
+            self.assertFalse(database.exists())
+
+    def test_replay_item_with_malformed_facts_is_preserved_without_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            replay = root / "replay.json"
+            database = root / "ledger.sqlite3"
+            payload = {
+                "schema_version": 1,
+                "items": [{
+                    "source_surface": "email",
+                    "source_ref": "email:receipt:malformed",
+                    "facts": ["not", "an", "object"],
+                }],
+            }
+            replay.write_text(json.dumps(payload), encoding="utf-8")
+
+            with patch.object(WATCHER, "LOG_FILE", root / "watcher.log"):
+                states = WATCHER.process_expense_sqlite_replay(
+                    {},
+                    replay_path=replay,
+                    database=database,
+                )
+
+            self.assertEqual(
+                [{
+                    "state": "blocked",
+                    "source_ref": "email:receipt:malformed",
+                    "blocker": "replay_item_malformed",
+                }],
+                states,
+            )
+            self.assertEqual(payload, json.loads(replay.read_text(encoding="utf-8")))
+            self.assertFalse(database.exists())
+
+    def test_receipt_replay_delivery_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            replay = root / "replay.json"
+            database = root / "ledger.sqlite3"
+            queue = root / "sharepoint-queue.json"
+            results = root / "sharepoint-results.json"
+            receipt = root / "receipt.pdf"
+            receipt.write_bytes(b"fixture receipt")
+            source_ref = "email:receipt:replay-idempotent"
+            replay.write_text(json.dumps({
+                "schema_version": 1,
+                "items": [{
+                    "source_surface": "email",
+                    "source_ref": source_ref,
+                    "facts": {
+                        "receipt_path": str(receipt),
+                        "receipt_mime_type": "application/pdf",
+                    },
+                }],
+            }), encoding="utf-8")
+            old_paths = (
+                WATCHER.SHAREPOINT_QUEUE_FILE,
+                WATCHER.SHAREPOINT_RESULTS_FILE,
+            )
+            try:
+                WATCHER.SHAREPOINT_QUEUE_FILE = queue
+                WATCHER.SHAREPOINT_RESULTS_FILE = results
+                first = WATCHER.process_expense_sqlite_replay(
+                    {},
+                    replay_path=replay,
+                    database=database,
+                )
+                self.assertEqual("sharepoint_upload_pending", first[0]["blocker"])
+                upload_id = WATCHER._receipt_upload_id(
+                    source_ref,
+                    hashlib.sha256(receipt.read_bytes()).hexdigest(),
+                )
+                self.assertEqual(upload_id, json.loads(queue.read_text(encoding="utf-8"))[0]["id"])
+                results.write_text(json.dumps([{
+                    "id": upload_id,
+                    "success": True,
+                    "output": json.dumps({"url": "https://example.invalid/receipt", "etag": "etag-1"}),
+                }]), encoding="utf-8")
+                second = WATCHER.process_expense_sqlite_replay(
+                    {},
+                    replay_path=replay,
+                    database=database,
+                )
+                third = WATCHER.process_expense_sqlite_replay(
+                    {},
+                    replay_path=replay,
+                    database=database,
+                )
+            finally:
+                WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE = old_paths
+
+            self.assertEqual("success", second[0]["state"])
+            self.assertEqual([], third)
+            self.assertEqual([], json.loads(replay.read_text(encoding="utf-8"))["items"])
+            self.assertEqual(1, len(json.loads(queue.read_text(encoding="utf-8"))))
+            with sqlite3.connect(database) as connection:
+                self.assertEqual(
+                    2,
+                    connection.execute(
+                        "SELECT count(*) FROM receipt_evidence WHERE source_ref = ?",
+                        (source_ref,),
+                    ).fetchone()[0],
+                )
 
 
 class MirrorTimestampAndTelegramGuardTests(unittest.TestCase):

@@ -18,6 +18,30 @@ afterEach(async () => {
 });
 
 describe("task_system brief_intake bridge", () => {
+  it("accepts an IPv6 loopback gateway URL", async () => {
+    let observedUrl: string | undefined;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      observedUrl = String(input);
+      return new Response(JSON.stringify({ status: "ok" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const tool = createTaskSystemTool({
+      defaultBaseUrl: "http://[::1]:4312",
+      defaultAuthToken: "test-token",
+    });
+
+    try {
+      await tool.execute("test-call", { action: "summary" });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(observedUrl).toBe("http://[::1]:4312/task-board/summary");
+  });
+
   it("forwards the chat fresh-Outlook brief unchanged to the bounded intake route", async () => {
     const expectedPayload = {
       brief:
