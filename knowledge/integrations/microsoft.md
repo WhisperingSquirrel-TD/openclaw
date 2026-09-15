@@ -56,7 +56,10 @@ Entity-by-entity CRM normalisation using the Anthropic batch API (50% cost savin
 
 **Two-phase cron model:**
 - First nightly run: discovers entities, builds one Anthropic batch request per entity, submits batch, saves state
-- Second nightly run: collects batch results, executes safe writes via `sharepoint-queue.json`, writes report to Telegram
+- Second nightly run: collects batch results, submits safe writes through the
+  locked `sharepoint_queue_processor.enqueue_operation` producer, and writes
+  the report to Telegram. The agent/housekeeping code must never directly edit
+  `sharepoint-queue.json`.
 
 **Decision classes (mirrors the crm-sharepoint skill):**
 - `safe` — auto-executed in execute mode (renaming to canonical date format, creating missing Current.md, updating stale Current.md)
@@ -95,8 +98,8 @@ Entity-by-entity CRM normalisation using the Anthropic batch API (50% cost savin
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `~/.openclaw/workspace/SHAREPOINT_INDEX.md`                 | Full document tree: all paths, sizes, cached vs. skipped status                                                               |
 | `~/.openclaw/workspace/sharepoint-cache/<SP-path>`          | Local mirror of `.md`/`.txt` files (≤500 KB). Read directly — no queue needed. Each file starts with a sync-timestamp header. |
-| `~/.openclaw/workspace/sharepoint-cache/.manifest.json`     | Per-file cache status (path, cached, reason_skipped, last_synced)                                                             |
-| `~/.openclaw/sharepoint-queue.json`                         | Write queue — L1 writes JSON entries directly (no exec/TOTP). Processor runs every 1 min.                                     |
+| `~/.openclaw/workspace/sharepoint-cache/.manifest.json`     | Per-file cache status plus exact source eTag, content version and SHA-256 used by version-checked writers                     |
+| `~/.openclaw/sharepoint-queue.json`                         | Processor-owned queue state. Producers must call the locked `enqueue_operation` contract; agents never edit this file directly. |
 | `~/.openclaw/workspace/SHAREPOINT_RESULT.md`                | Write results — check ~1 min after queuing to confirm success/failure                                                         |
 | `~/.openclaw/integrations/microsoft/sp-cache-poller.log`    | Cache poller log — check if index or cache is not updating                                                                    |
 | `~/.openclaw/integrations/microsoft/sp-queue-processor.log` | Queue processor log — check if writes are failing                                                                             |

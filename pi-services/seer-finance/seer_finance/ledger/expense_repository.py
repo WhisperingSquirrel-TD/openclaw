@@ -1,4 +1,4 @@
-"""SQLite repository for the Phase 1 SEER expense operational ledger.
+"""SQLite migration/recovery repository for the SEER expense ledger.
 
 This is deliberately a narrow persistence boundary.  It captures source facts
 without deriving missing financial values, and is the only module that changes
@@ -94,7 +94,11 @@ class ReceiptEvidence:
 
 
 class ExpenseRepository:
-    """Owns schema migration, idempotent candidate capture, and transitions."""
+    """Owns legacy schema migration, replay capture, and transitions.
+
+    Live business records use :class:`SharePointExpenseRepository`; this class
+    is retained for migration, replay, and isolated recovery databases.
+    """
 
     def __init__(self, database: str | Path) -> None:
         self.connection = sqlite3.connect(str(database))

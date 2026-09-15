@@ -6,11 +6,19 @@ import importlib.util
 import sys
 import json
 import hashlib
-import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from pathlib import Path
+
+from sharepoint_boundary import (
+    BoundaryResult,
+    QueueBoundary,
+    SharePointBoundaryError,
+    _ReadbackRequiredStore,
+    _SeerFinanceBoundaryAdapter,
+)
 
 MODULE_PATH = Path(__file__).with_name("watcher.py")
 SPEC = importlib.util.spec_from_file_location("expense_watcher", MODULE_PATH)
@@ -82,7 +90,7 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             events = root / "mirror-events.json"
-            expenses = root / "seer-expenses.md"
+            expenses = root / "expense-projection.md"
             monitored = root / "monitored-items-state.json"
             events.write_text(json.dumps({"items": [{
                 "stable_item_key": "microsoft_external:email:obcn-42",
@@ -97,14 +105,16 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
             }]}), encoding="utf-8")
             expenses.write_text("# Expenses\n\n## Domains\n", encoding="utf-8")
             queue = root / "expense-enrichment-queue.json"
-            old_events, old_expenses, old_monitored, old_queue = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
+            old_events, old_expenses, old_monitored, old_queue = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
             try:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
                 state, summary = WATCHER.default_state(), {}
-                with patch.object(WATCHER, 'capture_sqlite_candidate') as capture:
-                    capture.return_value.outcome = "captured"
-                    capture.return_value.expense_id = "pending:obcn-42"
-                    capture.return_value.blocker = None
+                with patch.object(WATCHER, 'capture_sharepoint_candidate') as capture:
+                    capture.return_value = BoundaryResult(
+                        operation="capture", path="/Expenses/Expense ledger.md",
+                        accepted=True, verified=True,
+                        canonical_ref="sharepoint:pending:obcn-42",
+                    )
                     WATCHER.process_mirror_expense_events(state, summary)
                     WATCHER.process_mirror_expense_events(state, summary)  # replay must be idempotent
                 self.assertEqual(summary["mirror_blocked"], 1)
@@ -113,11 +123,11 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 self.assertFalse(queue.exists())
                 item = json.loads(monitored.read_text(encoding="utf-8"))["items"][0]
                 self.assertEqual(item["expense_outcome"], "blocked")
-                self.assertEqual(item["canonical_ref"], "sqlite:pending:obcn-42")
+                self.assertEqual(item["canonical_ref"], "sharepoint:pending:obcn-42")
                 self.assertEqual(item["ledger_state"], "pending")
                 self.assertEqual(item["evidence_state"], "blocked")
             finally:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old_events, old_expenses, old_monitored, old_queue
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old_events, old_expenses, old_monitored, old_queue
 
     def test_failed_canonical_row_write_keeps_external_candidate_in_queue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -129,18 +139,22 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 "raw_evidence_ref": "TEAMS_RECENT.md", "routing_flags": ["EXPENSE"], "reasons": ["cost evidence"],
             }]}), encoding="utf-8")
             expenses.write_text("# Expenses\n(no insertion marker)\n", encoding="utf-8")
-            old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
+            old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
             try:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
-                with patch.object(WATCHER, 'capture_sqlite_candidate') as capture:
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
+                with patch.object(WATCHER, 'capture_sharepoint_candidate') as capture:
+                    capture.return_value = BoundaryResult(
+                        operation="capture", path="/Expenses/Expense ledger.md",
+                        accepted=False, verified=False, blocker="capture unavailable",
+                    )
                     WATCHER.process_mirror_expense_events(WATCHER.default_state(), {})
                 capture.assert_called_once()
                 self.assertFalse(queue.exists())
                 self.assertEqual(expenses.read_text(encoding="utf-8"), "# Expenses\n(no insertion marker)\n")
             finally:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
 
-    def test_capture_without_expense_id_never_claims_sqlite_canonical_ref(self) -> None:
+    def test_capture_without_canonical_ref_never_claims_sharepoint_completion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             events, expenses, monitored, queue = (
@@ -160,20 +174,21 @@ class CentralMirrorExpenseHandoffTests(unittest.TestCase):
                 "reasons": ["cost evidence"],
             }]}), encoding="utf-8")
             expenses.write_text("# Expenses\n(no insertion marker)\n", encoding="utf-8")
-            old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
+            old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
             try:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
-                with patch.object(WATCHER, "capture_sqlite_candidate") as capture:
-                    capture.return_value.outcome = "captured"
-                    capture.return_value.expense_id = None
-                    capture.return_value.blocker = None
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
+                with patch.object(WATCHER, "capture_sharepoint_candidate") as capture:
+                    capture.return_value = BoundaryResult(
+                        operation="capture", path="/Expenses/Expense ledger.md",
+                        accepted=True, verified=False,
+                    )
                     WATCHER.process_mirror_expense_events(WATCHER.default_state(), {})
                 item = json.loads(monitored.read_text(encoding="utf-8"))["items"][0]
                 self.assertIsNone(item["canonical_ref"])
-                self.assertIn("no expense ID", item["blocker"])
+                self.assertIn("readback", item["blocker"])
                 self.assertEqual(["TEAMS_RECENT.md"], item["evidence_refs"])
             finally:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
 
 
 class ExpenseReplayManifestTests(unittest.TestCase):
@@ -181,148 +196,121 @@ class ExpenseReplayManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             replay = root / "replay.json"
-            database = root / "ledger.sqlite3"
-            bad_database = root / "not-a-db-parent" / "ledger.sqlite3"
-            queue = root / "sharepoint-queue.json"
-            results = root / "sharepoint-results.json"
-            receipt = root / "receipt.pdf"
-            receipt.write_bytes(b"fixture receipt")
             source_ref = "email:receipt:interleaving"
             appended_ref = "email:receipt:appended-during-processing"
-            facts = {
-                "receipt_path": str(receipt),
-                "receipt_mime_type": "application/pdf",
-            }
             replay.write_text(json.dumps({
                 "schema_version": 1,
                 "items": [{
                     "source_surface": "email",
                     "source_ref": source_ref,
-                    "facts": facts,
+                    "facts": {"supplier": "Original"},
                 }],
             }), encoding="utf-8")
-            upload_id = WATCHER._receipt_upload_id(
-                source_ref,
-                hashlib.sha256(receipt.read_bytes()).hexdigest(),
-            )
-            results.write_text(json.dumps([{
-                "id": upload_id,
-                "success": True,
-                "output": json.dumps({"url": "https://example.invalid/receipt", "etag": "etag-1"}),
-            }]), encoding="utf-8")
-            old_paths = WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE
-            real_capture = WATCHER.capture_candidate
             appended = False
 
-            def capture_and_interleave(*args, **kwargs):
+            def capture_and_interleave(*, source_surface, source_ref, facts, boundary):
                 nonlocal appended
-                captured = real_capture(*args, **kwargs)
                 if not appended:
                     appended = True
-                    bad_database.parent.write_text("not a directory", encoding="utf-8")
-                    real_capture(
-                        source_surface="email",
-                        source_ref=source_ref,
-                        facts={"supplier": "Enriched after replay started"},
-                        database=bad_database,
-                        replay_path=replay,
-                    )
-                    real_capture(
-                        source_surface="email",
-                        source_ref=appended_ref,
-                        facts={"supplier": "Appended after replay started"},
-                        database=bad_database,
-                        replay_path=replay,
-                    )
-                return captured
+                    replay.write_text(json.dumps({
+                        "schema_version": 1,
+                        "items": [
+                            {
+                                "source_surface": "email",
+                                "source_ref": source_ref,
+                                "facts": {"supplier": "Original"},
+                            },
+                            {
+                                "source_surface": "email",
+                                "source_ref": appended_ref,
+                                "facts": {"supplier": "Appended during processing"},
+                            },
+                        ],
+                    }), encoding="utf-8")
+                return BoundaryResult(
+                    operation="capture",
+                    path="/Expenses/Expense ledger.md",
+                    accepted=True,
+                    verified=True,
+                    canonical_ref=f"/Expenses/Expense ledger.md#{source_ref}",
+                )
 
-            try:
-                WATCHER.SHAREPOINT_QUEUE_FILE = queue
-                WATCHER.SHAREPOINT_RESULTS_FILE = results
-                with patch.object(WATCHER, "capture_candidate", side_effect=capture_and_interleave):
-                    states = WATCHER.process_expense_sqlite_replay(
-                        {},
-                        replay_path=replay,
-                        database=database,
-                    )
-            finally:
-                WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE = old_paths
+            with patch.object(WATCHER, "capture_candidate", side_effect=capture_and_interleave):
+                states = WATCHER.process_expense_replay({}, replay_path=replay)
 
             self.assertEqual("success", states[0]["state"])
             saved_items = json.loads(replay.read_text(encoding="utf-8"))["items"]
-            self.assertEqual(
-                [
-                    {
+            self.assertEqual(appended_ref, saved_items[0]["source_ref"])
+            self.assertEqual("Appended during processing", saved_items[0]["facts"]["supplier"])
+
+    def test_pending_conflict_is_retained_when_facts_change_during_processing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            replay = root / "replay.json"
+            source_ref = "email:receipt:pending-conflict"
+            replay.write_text(json.dumps({
+                "schema_version": 1,
+                "items": [{
+                    "source_surface": "email",
+                    "source_ref": source_ref,
+                    "facts": {"supplier": "Before enrichment"},
+                }],
+            }), encoding="utf-8")
+            def capture_then_enrich(*, source_surface, source_ref, facts, boundary):
+                replay.write_text(json.dumps({
+                    "schema_version": 1,
+                    "items": [{
                         "source_surface": "email",
                         "source_ref": source_ref,
                         "facts": {
-                            "receipt_path": str(receipt),
-                            "receipt_mime_type": "application/pdf",
-                            "supplier": "Enriched after replay started",
+                            "supplier": "Enriched while write was pending",
+                            "amount_pence": 1200,
                         },
-                    },
-                    {
-                        "source_surface": "email",
-                        "source_ref": appended_ref,
-                        "facts": {"supplier": "Appended after replay started"},
-                        "blocker": unittest.mock.ANY,
-                        "observed_at": unittest.mock.ANY,
-                    },
-                ],
-                saved_items,
-            )
+                    }],
+                }), encoding="utf-8")
+                return BoundaryResult(
+                    operation="capture",
+                    path="/Expenses/Expense ledger.md",
+                    accepted=True,
+                    verified=False,
+                    blocker="SharePoint queue result/readback pending",
+                )
+
+            with patch.object(WATCHER, "capture_candidate", side_effect=capture_then_enrich):
+                states = WATCHER.process_expense_replay({}, replay_path=replay)
+
+            self.assertEqual("blocked", states[0]["state"])
+            saved = json.loads(replay.read_text(encoding="utf-8"))["items"]
+            self.assertEqual("Enriched while write was pending", saved[0]["facts"]["supplier"])
+            self.assertEqual(1200, saved[0]["facts"]["amount_pence"])
 
     def test_malformed_manifest_written_during_processing_is_not_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             replay = root / "replay.json"
-            database = root / "ledger.sqlite3"
-            queue = root / "sharepoint-queue.json"
-            results = root / "sharepoint-results.json"
-            receipt = root / "receipt.pdf"
-            receipt.write_bytes(b"fixture receipt")
-            source_ref = "email:receipt:malformed-interleaving"
             replay.write_text(json.dumps({
                 "schema_version": 1,
                 "items": [{
                     "source_surface": "email",
-                    "source_ref": source_ref,
-                    "facts": {
-                        "receipt_path": str(receipt),
-                        "receipt_mime_type": "application/pdf",
-                    },
+                    "source_ref": "email:receipt:malformed-interleaving",
+                    "facts": {"supplier": "Original"},
                 }],
             }), encoding="utf-8")
-            upload_id = WATCHER._receipt_upload_id(
-                source_ref,
-                hashlib.sha256(receipt.read_bytes()).hexdigest(),
-            )
-            results.write_text(json.dumps([{
-                "id": upload_id,
-                "success": True,
-                "output": json.dumps({"url": "https://example.invalid/receipt", "etag": "etag-1"}),
-            }]), encoding="utf-8")
             malformed = b'{"items": ['
-            old_paths = WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE
-            real_capture = WATCHER.capture_candidate
 
-            def capture_then_corrupt(*args, **kwargs):
-                captured = real_capture(*args, **kwargs)
+            def capture_then_corrupt(*, source_surface, source_ref, facts, boundary):
                 replay.write_bytes(malformed)
-                return captured
+                return BoundaryResult(
+                    operation="capture",
+                    path="/Expenses/Expense ledger.md",
+                    accepted=True,
+                    verified=True,
+                    canonical_ref="/Expenses/Expense ledger.md#malformed-interleaving",
+                )
 
-            try:
-                WATCHER.SHAREPOINT_QUEUE_FILE = queue
-                WATCHER.SHAREPOINT_RESULTS_FILE = results
-                with patch.object(WATCHER, "LOG_FILE", root / "watcher.log"), \
-                     patch.object(WATCHER, "capture_candidate", side_effect=capture_then_corrupt):
-                    states = WATCHER.process_expense_sqlite_replay(
-                        {},
-                        replay_path=replay,
-                        database=database,
-                    )
-            finally:
-                WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE = old_paths
+            with patch.object(WATCHER, "LOG_FILE", root / "watcher.log"), \
+                 patch.object(WATCHER, "capture_candidate", side_effect=capture_then_corrupt):
+                states = WATCHER.process_expense_replay({}, replay_path=replay)
 
             self.assertEqual("success", states[0]["state"])
             self.assertEqual(malformed, replay.read_bytes())
@@ -331,15 +319,13 @@ class ExpenseReplayManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             replay = root / "replay.json"
-            database = root / "ledger.sqlite3"
             original = b'{"items": ['
             replay.write_bytes(original)
 
             with patch.object(WATCHER, "LOG_FILE", root / "watcher.log"):
-                states = WATCHER.process_expense_sqlite_replay(
+                states = WATCHER.process_expense_replay(
                     {},
                     replay_path=replay,
-                    database=database,
                 )
 
             self.assertEqual(
@@ -347,13 +333,11 @@ class ExpenseReplayManifestTests(unittest.TestCase):
                 states,
             )
             self.assertEqual(original, replay.read_bytes())
-            self.assertFalse(database.exists())
 
     def test_replay_item_with_malformed_facts_is_preserved_without_capture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             replay = root / "replay.json"
-            database = root / "ledger.sqlite3"
             payload = {
                 "schema_version": 1,
                 "items": [{
@@ -365,11 +349,11 @@ class ExpenseReplayManifestTests(unittest.TestCase):
             replay.write_text(json.dumps(payload), encoding="utf-8")
 
             with patch.object(WATCHER, "LOG_FILE", root / "watcher.log"):
-                states = WATCHER.process_expense_sqlite_replay(
-                    {},
-                    replay_path=replay,
-                    database=database,
-                )
+                with patch.object(WATCHER, "capture_candidate") as capture:
+                    states = WATCHER.process_expense_replay(
+                        {},
+                        replay_path=replay,
+                    )
 
             self.assertEqual(
                 [{
@@ -380,13 +364,12 @@ class ExpenseReplayManifestTests(unittest.TestCase):
                 states,
             )
             self.assertEqual(payload, json.loads(replay.read_text(encoding="utf-8")))
-            self.assertFalse(database.exists())
+            capture.assert_not_called()
 
-    def test_receipt_replay_delivery_is_idempotent(self) -> None:
+    def test_receipt_replay_requires_processed_result_and_exact_remote_readback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             replay = root / "replay.json"
-            database = root / "ledger.sqlite3"
             queue = root / "sharepoint-queue.json"
             results = root / "sharepoint-results.json"
             receipt = root / "receipt.pdf"
@@ -403,54 +386,145 @@ class ExpenseReplayManifestTests(unittest.TestCase):
                     },
                 }],
             }), encoding="utf-8")
-            old_paths = (
-                WATCHER.SHAREPOINT_QUEUE_FILE,
-                WATCHER.SHAREPOINT_RESULTS_FILE,
-            )
+            old_paths = WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE
             try:
                 WATCHER.SHAREPOINT_QUEUE_FILE = queue
                 WATCHER.SHAREPOINT_RESULTS_FILE = results
-                first = WATCHER.process_expense_sqlite_replay(
-                    {},
-                    replay_path=replay,
-                    database=database,
+                complete_capture = BoundaryResult(
+                    operation="capture",
+                    path="/Expenses/Expense ledger.md",
+                    accepted=True,
+                    verified=True,
+                    canonical_ref="/Expenses/Expense ledger.md#receipt-replay-idempotent",
                 )
-                self.assertEqual("sharepoint_upload_pending", first[0]["blocker"])
-                upload_id = WATCHER._receipt_upload_id(
-                    source_ref,
-                    hashlib.sha256(receipt.read_bytes()).hexdigest(),
-                )
-                self.assertEqual(upload_id, json.loads(queue.read_text(encoding="utf-8"))[0]["id"])
+                with patch.object(WATCHER, "capture_candidate", return_value=complete_capture):
+                    first = WATCHER.process_expense_replay({}, replay_path=replay)
+                self.assertEqual("sharepoint_receipt_upload_pending", first[0]["blocker"])
+                upload = json.loads(queue.read_text(encoding="utf-8"))[0]
+                upload_id = upload["id"]
+                expected_path = upload["path"]
+
+                # A result without processor completion, or without exact
+                # remote path/version proof, cannot remove recovery state.
+                for result in (
+                    {"id": upload_id, "success": True},
+                    {
+                        "id": upload_id,
+                        "success": True,
+                        "processed_at": "2026-08-10T00:00:00Z",
+                        "output": json.dumps({
+                            "status": "uploaded", "path": "/Expenses/Receipts/stale",
+                            "etag": "etag-stale",
+                        }),
+                    },
+                ):
+                    results.write_text(json.dumps([result]), encoding="utf-8")
+                    with patch.object(WATCHER, "capture_candidate", return_value=complete_capture):
+                        pending = WATCHER.process_expense_replay({}, replay_path=replay)
+                    self.assertEqual("sharepoint_receipt_upload_pending", pending[0]["blocker"])
+                    self.assertEqual(1, len(json.loads(replay.read_text(encoding="utf-8"))["items"]))
+
                 results.write_text(json.dumps([{
                     "id": upload_id,
                     "success": True,
-                    "output": json.dumps({"url": "https://example.invalid/receipt", "etag": "etag-1"}),
+                    "processed_at": "2026-08-10T00:00:00Z",
+                    "output": json.dumps({
+                        "status": "uploaded", "path": expected_path, "etag": "etag-exact",
+                    }),
                 }]), encoding="utf-8")
-                second = WATCHER.process_expense_sqlite_replay(
-                    {},
-                    replay_path=replay,
-                    database=database,
-                )
-                third = WATCHER.process_expense_sqlite_replay(
-                    {},
-                    replay_path=replay,
-                    database=database,
-                )
+                with patch.object(WATCHER, "capture_candidate", return_value=complete_capture):
+                    delivered = WATCHER.process_expense_replay({}, replay_path=replay)
+                self.assertEqual("success", delivered[0]["state"])
+                self.assertEqual([], json.loads(replay.read_text(encoding="utf-8"))["items"])
             finally:
                 WATCHER.SHAREPOINT_QUEUE_FILE, WATCHER.SHAREPOINT_RESULTS_FILE = old_paths
 
-            self.assertEqual("success", second[0]["state"])
-            self.assertEqual([], third)
-            self.assertEqual([], json.loads(replay.read_text(encoding="utf-8"))["items"])
-            self.assertEqual(1, len(json.loads(queue.read_text(encoding="utf-8"))))
-            with sqlite3.connect(database) as connection:
-                self.assertEqual(
-                    2,
-                    connection.execute(
-                        "SELECT count(*) FROM receipt_evidence WHERE source_ref = ?",
-                        (source_ref,),
-                    ).fetchone()[0],
+
+class SharePointCacheSafetyTests(unittest.TestCase):
+    def test_missing_cache_never_becomes_an_empty_capture_authority(self) -> None:
+        class EmptyStore:
+            writes = 0
+
+            def write(self, **kwargs):
+                self.writes += 1
+                raise AssertionError("missing cache must not be initialized by watcher")
+
+        class MissingTransport:
+            def __init__(self) -> None:
+                self.store = EmptyStore()
+
+            def read(self, path: str) -> str:
+                raise SharePointBoundaryError(f"cache missing for {path}")
+
+        adapter = _SeerFinanceBoundaryAdapter(MissingTransport())
+        result = adapter.capture_candidate(
+            source_surface="email",
+            source_ref="email:missing-cache",
+            facts={"supplier": "Acme"},
+        )
+        self.assertTrue(result.accepted)
+        self.assertFalse(result.verified)
+        self.assertIn("pending readback", result.blocker or "")
+        self.assertEqual(0, adapter.store.store.writes)
+
+    def test_changed_cache_version_blocks_stale_whole_document_write(self) -> None:
+        class Store:
+            writes = 0
+
+            def write(self, **kwargs):
+                self.writes += 1
+                return "unexpected"
+
+        class ChangingTransport:
+            def __init__(self) -> None:
+                self.store = Store()
+                self.reads = iter(["version-one", "version-two"])
+
+            def read(self, path: str) -> str:
+                return next(self.reads)
+
+        transport = ChangingTransport()
+        store = _ReadbackRequiredStore(transport)
+        self.assertEqual("version-one", store.read("/Finance/Finance ledger.md"))
+        with self.assertRaises(SharePointBoundaryError):
+            store.write(path="/Finance/Finance ledger.md", content="new document")
+        self.assertEqual(0, transport.store.writes)
+
+    def test_queue_boundary_preserves_concurrent_producers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            queue = Path(tmp) / "sharepoint-queue.json"
+            boundary = QueueBoundary(queue)
+            blocked = boundary.write_verified(
+                "/Finance/Finance ledger.md",
+                "unsafe append",
+            )
+            self.assertFalse(blocked.accepted)
+            self.assertFalse(queue.exists())
+
+            def produce(index: int) -> BoundaryResult:
+                content = f"document version {index}"
+                return boundary.write_verified(
+                    "/Finance/Finance ledger.md",
+                    content,
+                    operation="update",
+                    base_etag=f'"etag-{index}"',
+                    expected_source_sha256=hashlib.sha256(content.encode()).hexdigest(),
                 )
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(produce, range(8)))
+
+            self.assertTrue(all(result.accepted and not result.verified for result in results))
+            queued = json.loads(queue.read_text(encoding="utf-8"))
+            self.assertEqual(8, len({item["id"] for item in queued}))
+            self.assertEqual(
+                {f'"etag-{index}"' for index in range(8)},
+                {item["base_etag"] for item in queued},
+            )
+            self.assertEqual(
+                {hashlib.sha256(f"document version {index}".encode()).hexdigest() for index in range(8)},
+                {item["expected_source_sha256"] for item in queued},
+            )
 
 
 class MirrorTimestampAndTelegramGuardTests(unittest.TestCase):
@@ -475,9 +549,9 @@ class MirrorTimestampAndTelegramGuardTests(unittest.TestCase):
                 "reasons": ["expense keyword"],
             }]}), encoding="utf-8")
             expenses.write_text("# Expenses\n\n## Domains\n", encoding="utf-8")
-            old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
+            old = WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE
             try:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = events, expenses, monitored, queue
                 state, summary = WATCHER.default_state(), {}
                 WATCHER.process_mirror_expense_events(state, summary)
                 self.assertFalse(queue.exists())
@@ -486,7 +560,7 @@ class MirrorTimestampAndTelegramGuardTests(unittest.TestCase):
                 self.assertEqual("invalid", item["source_timestamp_status"])
                 self.assertEqual("+058577-08-15T00:40:00.000Z", item["raw_source_timestamp"])
             finally:
-                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_FILE, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
+                WATCHER.MIRROR_EVENTS_FILE, WATCHER.EXPENSE_LEDGER_PATH, WATCHER.MONITORED_FILE, WATCHER.ENRICHMENT_QUEUE_FILE = old
 
 
 class RuntimeStatePruningTests(unittest.TestCase):
@@ -593,7 +667,7 @@ class MonitoredLedgerReconciliationTests(unittest.TestCase):
             blocked = WATCHER.whatsapp_monitored_payload(
                 expense,
                 "blocked",
-                "Captured in SQLite; WhatsApp expense signal needs explicit "
+                "Captured in SharePoint; WhatsApp expense signal needs explicit "
                 "business/payment/evidence review before finance posting",
                 flags=["EXPENSE"],
             )
@@ -603,7 +677,7 @@ class MonitoredLedgerReconciliationTests(unittest.TestCase):
                 WATCHER.MONITORED_FILE = monitored
                 state, summary = WATCHER.default_state(), {}
                 with (
-                    patch.object(WATCHER, "capture_sqlite_candidate") as capture,
+                    patch.object(WATCHER, "capture_sharepoint_candidate") as capture,
                     patch.object(WATCHER, "run_reader") as reader,
                 ):
                     WATCHER.reconcile_monitored_items(
@@ -645,7 +719,7 @@ class MonitoredLedgerReconciliationTests(unittest.TestCase):
             try:
                 WATCHER.MONITORED_FILE = monitored
                 with (
-                    patch.object(WATCHER, "capture_sqlite_candidate") as capture,
+                    patch.object(WATCHER, "capture_sharepoint_candidate") as capture,
                     patch.object(WATCHER, "run_reader") as reader,
                 ):
                     WATCHER.reconcile_monitored_items(

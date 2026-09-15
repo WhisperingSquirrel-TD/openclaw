@@ -1,5 +1,5 @@
 [Unit]
-Description=Run inbound watch router every 5 minutes (legacy expense-intake-watcher unit name)
+Description=Run inbound watch router every 5 minutes (bounded SharePoint handoff)
 
 [Timer]
 OnBootSec=2min

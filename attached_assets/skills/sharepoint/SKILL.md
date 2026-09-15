@@ -1,216 +1,169 @@
-# SharePoint Skill
-
-This skill describes how to read from, write to, and manage SharePoint documents
-using the OpenClaw mirror + queue system on the Pi.
-
+---
+name: sharepoint
+description: Read SharePoint's local mirror and submit safe, version-checked document operations through the locked queue producer.
 ---
 
-## Architecture overview
+# SharePoint
+
+This skill is the agent-facing contract for the SharePoint mirror and queue.
+It applies to every SharePoint-backed workflow, including CRM, expenses and
+finance.
+
+## Read path
+
+Reads do not use the write queue. Read `SHAREPOINT_INDEX.md` first, then read
+the corresponding file from:
 
 ```
-SharePoint (Microsoft 365)
-       │
-       │  Microsoft Graph API (every 15 min)
-       ▼
-~/.openclaw/workspace/sharepoint-cache/<SP-path>          ← .md / .txt files (verbatim)
-~/.openclaw/workspace/sharepoint-cache/<SP-path>.extracted.md  ← .docx / .pdf / .pptx / .msg (text extracted)
-~/.openclaw/workspace/SHAREPOINT_INDEX.md                 ← full document tree + sync status
-~/.openclaw/workspace/sharepoint-cache/.manifest.json     ← per-file machine-readable status
-       │
-       │  You write a queue entry (direct file write — no exec, no TOTP)
-       ▼
-~/.openclaw/sharepoint-queue.json                         ← queue (writes + on-demand reads)
-       │
-       │  sharepoint_queue_processor.py runs every 1 min via cron
-       ▼
-~/.openclaw/workspace/SHAREPOINT_RESULT.md                ← operation results
+~/.openclaw/workspace/sharepoint-cache/<SharePoint path>
 ```
 
----
+The cache is a mirror, not an authority. Check its sync header and
+`.manifest.json` when freshness matters. Binary documents have an
+`.extracted.md` companion. If a binary needs an on-demand extraction, submit a
+`read_binary` operation through the producer contract below and then read the
+resulting cache file.
 
-## Reading SharePoint files
+## Write boundary (mandatory)
 
-**No queue entry is needed for reads.** All supported file types are available
-locally in the cache directory. Read them directly like any local file.
-
-### Text files (.md, .txt)
-
-```
-Local path = ~/.openclaw/workspace/sharepoint-cache/<SP-path>
-
-Example:
-  SharePoint path: /Stackstone CRM/Opportunities/Croyde Medical.md
-  Local file:      ~/.openclaw/workspace/sharepoint-cache/Stackstone CRM/Opportunities/Croyde Medical.md
-```
-
-Each file starts with a sync-timestamp header so you always know how fresh it is:
-```
-<!-- sharepoint-cache: /Stackstone CRM/Opportunities/Croyde Medical.md | synced: 2026-04-13T10:15:00Z -->
-```
-
-### Binary files (.docx, .pdf, .pptx, .msg)
-
-Text (and images where available) are **automatically extracted** from these files
-during each 15-minute sync. The extracted content lives at:
+An agent must **never open, truncate, replace, append to, or otherwise edit**
+`~/.openclaw/sharepoint-queue.json`. Do not use shell redirection, `jq`, a
+text editor, or a hand-written read/modify/write JSON helper for that file.
+There is one producer boundary:
 
 ```
-<original-path>.extracted.md
-
-Example:
-  SharePoint path: /Stackstone CRM/Proposals/Q2 Proposal.docx
-  Extracted file:  ~/.openclaw/workspace/sharepoint-cache/Stackstone CRM/Proposals/Q2 Proposal.docx.extracted.md
+sharepoint_queue_processor.enqueue_operation(operation)
 ```
 
-The extracted file starts with a header:
-```
-<!-- sharepoint-binary-extract: /Stackstone CRM/Proposals/Q2 Proposal.docx | synced: 2026-04-13T10:15:00Z -->
-```
+Use the installed, locked producer (or the fixed service wrapper that exposes
+that producer) with one complete operation object. The producer takes the
+queue lock, reads the current queue, de-duplicates by `id`, and atomically
+publishes the new queue. A producer returning `false` means that the operation
+ID was already queued; it is not permission to create a second ID and retry
+blindly. If the producer is unavailable, report `blocked` and preserve the
+operation for the owning service; do not fall back to direct queue-file access.
 
-If images were embedded in the document, they are saved alongside the extracted file in a
-`<filename>.images/` folder and referenced in the markdown.
+The queue processor is the writer. It runs independently of the agent's
+interactive shell/TOTP gate. Queue submission is not write success: wait for
+the machine result proof and cache read-back.
 
-### What is and is not in the cache
+## Operation contract
 
-| File type | How it's available |
-|-----------|-------------------|
-| `.md`, `.txt` | Direct text mirror (≤ 500 KB) |
-| `.docx` | Text + tables extracted to `.docx.extracted.md` (≤ 5 MB) |
-| `.pdf` | Text extracted to `.pdf.extracted.md` (≤ 5 MB) |
-| `.pptx` | Slide text + notes extracted to `.pptx.extracted.md` (≤ 5 MB) |
-| `.msg` | From/To/Subject/Body extracted to `.msg.extracted.md` (≤ 5 MB) |
-| All other types | Indexed only — use `read_binary` queue entry if needed |
+Every operation has a unique stable `id`, an ISO-8601 UTC `requested_at`, and
+the full SharePoint `path` beginning with `/`. Supported operations are
+`create`, `update`, `append`, `move`, `upload_binary`, and `read_binary`.
+Use `content` for text writes and the operation-specific fields for the others.
+Do not use `allow_overwrite` for an existing document.
 
-### Where to look first
-
-1. **`SHAREPOINT_INDEX.md`** — scan the full document tree. It shows:
-   - All SharePoint paths
-   - Which files are cached / extracted / skipped and why
-   - The exact local path for each available file
-2. **`sharepoint-cache/<SP-path>`** — open a text file directly
-3. **`sharepoint-cache/<SP-path>.extracted.md`** — open an extracted binary file directly
-4. **`.manifest.json`** — machine-readable per-file status if you need to check programmatically
-
----
-
-## On-demand binary read (mid-conversation)
-
-If you need to read a binary file that hasn't been extracted yet, or you need
-a fresh extraction NOW (not waiting for the next 15-min cron), queue a
-`read_binary` entry. The processor picks it up within 1 minute.
+Example producer payload (the object is passed to `enqueue_operation`; it is
+not written to the queue file by the agent):
 
 ```json
-[
-  {
-    "id": "sp-read-20260413",
-    "operation": "read_binary",
-    "path": "/Stackstone CRM/Proposals/Q2 Proposal.docx",
-    "requested_at": "2026-04-13T10:00:00Z"
-  }
-]
+{
+  "id": "sp-finance-2026-08-24-001",
+  "operation": "update",
+  "path": "/Finance/Finance ledger.md",
+  "content": "<complete merged ledger content>",
+  "base_etag": "\"{SharePoint eTag read from the current item}\"",
+  "expected_source_sha256": "<sha256 of the exact current cached source bytes>",
+  "requested_at": "2026-08-24T12:00:00Z",
+  "delivery": "finance-ledger"
+}
 ```
 
-After ~1 minute, check `SHAREPOINT_RESULT.md` to confirm success, then
-read the extracted file at `sharepoint-cache/Stackstone CRM/Proposals/Q2 Proposal.docx.extracted.md`.
+For `move`, include `destination`. For `upload_binary`, include
+`source_path` and `mime_type`; preserve the original file and its hash. For
+`read_binary`, omit `content`.
 
----
+## Optimistic concurrency and native version semantics
 
-## Writing to SharePoint
+Before changing an existing document:
 
-Write a queue entry directly to `~/.openclaw/sharepoint-queue.json`.
-This is a plain file write — no `exec`, no TOTP required.
+1. Read the current cached document and its manifest metadata.
+2. Obtain the current SharePoint item `eTag` through the approved reader
+   route. An eTag is an opaque native SharePoint version validator; preserve
+   its quotes and exact spelling. Never invent a version, increment an eTag,
+   use a local hash as an eTag, or use `*`.
+3. Compute `expected_source_sha256` over the exact source bytes read before the
+   edit (not over a normalised or newly generated copy).
+4. Merge the requested change into that source and submit both
+   `base_etag` and `expected_source_sha256`.
 
-The queue processor picks it up within 1 minute and writes results to
-`SHAREPOINT_RESULT.md`.
+Both preconditions are required for `update` and `append` operations targeting
+either canonical ledger:
 
-### Queue file format
+* `/Expenses/Expense ledger.md`
+* `/Finance/Finance ledger.md`
+
+The processor passes `base_etag` as Graph `If-Match` and checks the source hash
+before writing. A successful write must be read back and hash-verified. The
+resulting eTag is a new opaque native SharePoint version; it is not a value the
+agent may calculate or predict.
+
+## Rebase-required flow
+
+If the current eTag differs from `base_etag`, the current source hash differs
+from `expected_source_sha256`, Graph returns a precondition/conflict response,
+or the write/read-back proof is missing, treat the operation as:
+`rebase_required`.
+
+Do not retry the same payload, weaken either precondition, overwrite the
+remote document, or claim success. Keep the requested change as a pending
+intent, re-read the current SharePoint document/eTag, reconcile the change
+against that newer source, compute a new source hash, create a new operation
+ID, and enqueue the rebased operation through `enqueue_operation`. If the
+current document cannot be read, leave the item `blocked` with the exact
+error.
+
+## Machine result proof
+
+After processing, inspect the machine result record in
+`~/.openclaw/sharepoint-queue-results.json` and the human-readable
+`~/.openclaw/workspace/SHAREPOINT_RESULT.md`. A write is complete only when
+the record has all applicable fields:
 
 ```json
-[
-  {
-    "id": "unique-id",
-    "operation": "create" | "update" | "append",
-    "path": "/Stackstone CRM/Opportunities/Harken Health.md",
-    "content": "Markdown content to write",
-    "requested_at": "2026-04-13T10:00:00Z"
-  }
-]
+{
+  "id": "sp-finance-2026-08-24-001",
+  "operation": "update",
+  "path": "/Finance/Finance ledger.md",
+  "success": true,
+  "resulting_etag": "\"{new native SharePoint eTag}\"",
+  "readback_sha256": "<sha256 of exact downloaded result bytes>",
+  "processed_at": "2026-08-24T12:01:02Z",
+  "retryable": false,
+  "delivery": "finance-ledger"
+}
 ```
 
-### Queue rules
+The processor's `SP_WRITE_PROOF` is evidence only when it contains the
+resulting native eTag and read-back SHA-256, and those fields are copied into
+the result record. `success: true` without `resulting_etag` and
+`readback_sha256` is not sufficient for a canonical ledger. A failed result
+must preserve the exact error and identify `rebase_required` when applicable.
 
-- **`id`**: any unique string (e.g. `"sp-<timestamp>"`)
-- **`path`**: full SharePoint path from drive root, starting with `/`
-- **`operation`**:
-  - `create` — creates a new file; fails if file already exists
-  - `update` — overwrites the entire file; fails if file does not exist
-  - `append` — appends content to end of an existing file
-  - `read_binary` — on-demand extraction of a binary file (no `content` needed)
-- **`content`**: required for create/update/append; omit for read_binary
-- **`requested_at`**: ISO 8601 UTC timestamp
+## Canonical finance and expense boundary
 
-If the queue file already has pending entries, append your entry to the array.
-If the file does not exist yet, write a fresh JSON array with your entry.
+The only authoritative business records in this workflow are:
 
-### Checking write results
+* `/Expenses/Expense ledger.md` — canonical expense review and expense
+  evidence references.
+* `/Finance/Finance ledger.md` — canonical finance ledger, including confirmed
+  income and posted financial movements.
 
-Open `~/.openclaw/workspace/SHAREPOINT_RESULT.md` about 1 minute after queuing.
-It records success or error for each processed operation, keyed by `id`.
+Local SQLite databases, `transactions.json`, `seer-expenses.md`, local queues,
+and outcome files are migration, reconciliation, evidence, or recovery state
+only. They are never alternate authorities and must not be presented as the
+current ledger. A local write is not a SharePoint write and cannot satisfy
+either canonical ledger's proof requirements.
 
----
+## Safety
 
-## Common patterns
-
-### "What's in folder X?"
-
-1. Read `SHAREPOINT_INDEX.md` — the folder tree is shown visually.
-2. Look for files under the folder in the Cached and Extracted sections.
-3. All `.md`/`.txt` files and all `.docx`/`.pdf`/`.pptx`/`.msg` files (≤ 5 MB)
-   are readable directly with no further action.
-
-### "Read the Q2 Proposal Word doc"
-
-1. Check `SHAREPOINT_INDEX.md` — find path and confirm it's extracted.
-2. Read `sharepoint-cache/Stackstone CRM/Proposals/Q2 Proposal.docx.extracted.md` directly.
-3. Note the sync timestamp — if the file changed recently, queue `read_binary` for a fresh pull.
-
-### "Read a PDF that isn't in the cache yet"
-
-Queue a `read_binary` entry:
-```json
-[{"id":"sp-read-now","operation":"read_binary","path":"/Reports/Annual Review.pdf","requested_at":"2026-04-13T10:00:00Z"}]
-```
-After ~1 min, read `sharepoint-cache/Reports/Annual Review.pdf.extracted.md`.
-
-### "Update the Harken Health opportunity note"
-
-```json
-[
-  {
-    "id": "sp-harken-20260413",
-    "operation": "update",
-    "path": "/Stackstone CRM/Opportunities/Harken Health.md",
-    "content": "# Harken Health\n\n...(full updated content)...",
-    "requested_at": "2026-04-13T10:00:00Z"
-  }
-]
-```
-
----
-
-## Cache freshness
-
-- Poller runs every **15 minutes** via cron.
-- Each cached/extracted file has a sync timestamp in its header.
-- For on-demand fresh extraction, use `read_binary` queue entry.
-
----
-
-## Error states
-
-| Symptom | Likely cause |
-|---------|-------------|
-| `SHAREPOINT_INDEX.md` is empty or missing | Poller hasn't run yet, or `SHAREPOINT_HOST` not set in `.env` |
-| Binary file shows `extractor_unavailable` | `python-docx`/`pdfminer.six`/etc. not installed — run install script |
-| Write/read_binary result shows auth error | Token expired — run `python3 ~/.openclaw/integrations/microsoft-l1/sharepoint.py reauth` |
-| File visible in index but not extracted | File type or size not eligible (check `reason_detail` in manifest) |
-| Queue entry stays pending | Queue processor may not be running — check cron with `crontab -l` |
+* Read before write; update complete content only after merging against the
+  current source.
+* Never silently create a second ledger or a competing finance/expense file.
+* Never delete, rename, move, or change permissions unless a separately
+  governed operation explicitly permits it.
+* Never report a document as written from queue submission alone. Report the
+  operation ID, machine proof, resulting eTag, read-back hash, or the exact
+  blocked/rebase-required reason.

@@ -16,9 +16,18 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .expense_repository import ExpenseRepository
+from .sharepoint_contract import (
+    DEFAULT_CACHE_ROOT,
+    DEFAULT_QUEUE_PATH,
+    DEFAULT_RESULTS_PATH,
+    SharePointDocumentStore,
+)
+from .sharepoint_repository import SharePointExpenseRepository
 
-DEFAULT_DATABASE = Path(os.environ.get('SEER_FINANCE_DATABASE', '/var/lib/seer-finance/expense-ledger.sqlite3'))
-DEFAULT_REPLAY = Path(os.environ.get('SEER_FINANCE_REPLAY', '/var/lib/seer-finance/expense-sqlite-replay.json'))
+# SQLite is intentionally opt-in for migration/recovery compatibility.  Live
+# capture defaults to the authoritative SharePoint queue/cache boundary.
+DEFAULT_DATABASE: Path | None = None
+DEFAULT_REPLAY = Path(os.environ.get('SEER_FINANCE_REPLAY', '/var/lib/seer-finance/expense-replay.json'))
 
 
 @dataclass(frozen=True)
@@ -96,8 +105,12 @@ def _append_replay(path: Path, *, source_surface: str, source_ref: str,
 
 def capture_candidate(*, source_surface: str, source_ref: str,
                       facts: Mapping[str, Any] | None = None,
-                      database: str | Path = DEFAULT_DATABASE,
-                      replay_path: str | Path = DEFAULT_REPLAY) -> CaptureResult:
+                      database: str | Path | None = DEFAULT_DATABASE,
+                      replay_path: str | Path = DEFAULT_REPLAY,
+                      sharepoint_store: SharePointDocumentStore | None = None,
+                      sharepoint_queue: str | Path = DEFAULT_QUEUE_PATH,
+                      sharepoint_results: str | Path = DEFAULT_RESULTS_PATH,
+                      sharepoint_cache: str | Path = DEFAULT_CACHE_ROOT) -> CaptureResult:
     """Capture once, or retain a source-linked replay item on any safe failure."""
     if not isinstance(source_surface, str) or not source_surface.strip():
         raise ValueError('source_surface is required')
@@ -119,9 +132,13 @@ def capture_candidate(*, source_surface: str, source_ref: str,
                              f'explicit_non_expense_direction:{direction}')
     # Let the repository stamp first capture.  Supplying a fresh observed time
     # on every retry would turn an otherwise idempotent replay into a collision.
-    database_path = Path(database)
+    database_path = Path(database) if database is not None else None
     replay = Path(replay_path)
-    lock_path = database_path.with_suffix(database_path.suffix + '.writer.lock')
+    lock_path = (
+        database_path.with_suffix(database_path.suffix + '.writer.lock')
+        if database_path is not None
+        else replay.with_suffix(replay.suffix + '.sharepoint.writer.lock')
+    )
     try:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         with lock_path.open('a+') as lock:
@@ -130,7 +147,17 @@ def capture_candidate(*, source_surface: str, source_ref: str,
             except BlockingIOError:
                 raise RuntimeError('expense ledger writer busy')
             try:
-                repository = ExpenseRepository(database_path)
+                repository = (
+                    ExpenseRepository(database_path)
+                    if database_path is not None
+                    else SharePointExpenseRepository(
+                        store=sharepoint_store or SharePointDocumentStore(
+                            queue_path=sharepoint_queue,
+                            results_path=sharepoint_results,
+                            cache_root=sharepoint_cache,
+                        )
+                    )
+                )
                 try:
                     expense = repository.capture(source_surface=source_surface, source_ref=source_ref, **safe_facts)
                 finally:
@@ -139,7 +166,8 @@ def capture_candidate(*, source_surface: str, source_ref: str,
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         return CaptureResult('captured', expense.expense_id, source_ref)
     except Exception as exc:
-        blocker = f'sqlite_capture_failed:{type(exc).__name__}:{exc}'
+        authority = 'sqlite' if database_path is not None else 'sharepoint'
+        blocker = f'{authority}_capture_failed:{type(exc).__name__}:{exc}'
         _append_replay(replay, source_surface=source_surface, source_ref=source_ref,
                        facts=replay_facts, blocker=blocker)
         return CaptureResult('replayed', None, source_ref, blocker)

@@ -1261,8 +1261,9 @@ fi
 # ---------------------------------------------------------------------------
 # SharePoint queue processor — runs every 1 min.
 # Handles WRITE ops (create/update/append) AND on-demand binary reads
-# (read_binary) — L1 queues a read_binary entry; result lands in cache
-# within ~1 min so L1 can read it like any other cached file.
+# (read_binary). Agents and producers must use the processor's locked
+# enqueue_operation contract; they must never edit sharepoint-queue.json
+# directly. Results land in the machine-readable receipt log and cache.
 # ---------------------------------------------------------------------------
 SP_QUEUE_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_queue_processor.py"
 SP_QUEUE_DST="$HOME/.openclaw/integrations/microsoft/sharepoint_queue_processor.py"
@@ -2256,7 +2257,7 @@ if [ -d "$EXTRA_SKILLS_SRC" ]; then
             ln -sf "$skill_dir/SKILL.md" "$EXTRA_SKILLS_DST/$skill_name/SKILL.md"
         fi
     done
-    info "Extra skills synced from attached_assets/skills/"
+    info "Extra skills synced from attached_assets/skills/ (including canonical sharepoint, expenses, and finance skills when present)"
 fi
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,23 @@ State is dual-written for transition safety:
 
 Pi-native watch-layer monitor for inbound/outbound operational surfaces, with expense handling as the strongest automatic route.
 
+Expense business records are not local files.  The watcher sends source-linked
+capture, review and finance handoff through the public seer-finance boundary:
+
+- authoritative expense review: `/Expenses/Expense ledger.md`
+- authoritative finance ledger: `/Finance/Finance ledger.md`
+- verified SharePoint readback is required before `logged`, `duplicate`, or
+  `written` is claimed
+- local queues, monitored outcomes and replay manifests are recovery/operational
+  state only
+- canonical mutations use seer-finance's base-etag and
+  expected-source-sha256 concurrency proof; the watcher does not synthesize or
+  bypass that protocol
+
+Routine bounded writes use the background no-TOTP SharePoint writer.  This is
+not deployment proof: an unavailable boundary remains `blocked` and is never
+silently replaced by a local document, JSON ledger or SQLite database.
+
 Current sources:
 
 - `/home/tomdean88/.openclaw/workspace/GMAIL_INBOX.md`
@@ -84,7 +101,7 @@ with the exact downstream outcome preserved beneath that state.
 - full-body email extraction still depends on the trusted reader route succeeding
 - WhatsApp thread inference for unlabeled direct `Me:` lines is heuristic because the export format does not carry an explicit peer/thread id on those lines
 - WhatsApp can only create `blocked` / `coverage_incomplete` signals from the recent feed when richer media/audio/source access is unavailable
-- SharePoint evidence filing is still separate from this watcher
+- SharePoint evidence filing is delegated to the seer-finance boundary
 
 ## Related docs
 

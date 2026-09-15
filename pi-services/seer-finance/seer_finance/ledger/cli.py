@@ -7,6 +7,7 @@ import sys
 
 from .computation import pounds, summarise
 from .loader import TransactionValidationError, load_transactions
+from .sharepoint_loader import SharePointLedgerLoadError, load_finance_transactions_from_sharepoint
 from .sqlite_loader import SqliteLedgerLoadError, load_finance_transactions
 
 
@@ -47,15 +48,24 @@ def _render(transactions, *, as_json: bool, estimate: bool, associated_companies
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="P&L/CT figures from one explicitly selected ledger input")
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--database", metavar="PATH", help="canonical SQLite finance ledger (read-only)")
+    source.add_argument("--sharepoint", action="store_true",
+                        help="authoritative SharePoint finance ledger via the local content cache")
+    source.add_argument("--database", metavar="PATH",
+                        help="explicit legacy SQLite migration/recovery ledger (read-only)")
     source.add_argument("--legacy-transactions", metavar="PATH", help="LEGACY IMPORT/EVIDENCE JSON; not authoritative after cutover")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--estimate-ct", action="store_true")
     parser.add_argument("--associated-companies", type=int, default=0, metavar="N")
     args = parser.parse_args(argv)
     try:
-        transactions = load_finance_transactions(args.database) if args.database else load_transactions(args.legacy_transactions)
-    except (OSError, SqliteLedgerLoadError, TransactionValidationError, json.JSONDecodeError) as exc:
+        if args.sharepoint:
+            transactions = load_finance_transactions_from_sharepoint()
+        elif args.database:
+            transactions = load_finance_transactions(args.database)
+        else:
+            transactions = load_transactions(args.legacy_transactions)
+    except (OSError, SqliteLedgerLoadError, SharePointLedgerLoadError,
+            TransactionValidationError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return _render(transactions, as_json=args.json, estimate=args.estimate_ct,

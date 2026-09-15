@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from sharepoint_boundary import BoundaryResult, FINANCE_LEDGER_PATH
+
 MODULE_PATH = Path(__file__).with_name("enrichment_resolution.py")
 SPEC = importlib.util.spec_from_file_location("expense_enrichment_resolution", MODULE_PATH)
 assert SPEC and SPEC.loader
@@ -15,12 +17,29 @@ sys.modules[SPEC.name] = RESOLUTION
 SPEC.loader.exec_module(RESOLUTION)
 
 
+class FakeBoundary:
+    def __init__(self, *, verified: bool) -> None:
+        self.verified = verified
+        self.paths: list[str] = []
+
+    def write_verified(self, path: str, content: str, *, operation: str = "append") -> BoundaryResult:
+        self.paths.append(path)
+        return BoundaryResult(
+            operation=operation,
+            path=path,
+            accepted=True,
+            verified=self.verified,
+            blocker=None if self.verified else "readback pending",
+        )
+
+    def read(self, path: str) -> str:
+        return ""
+
+
 class ExpenseDirectionBoundaryTests(unittest.TestCase):
     def test_explicit_income_is_preserved_without_creating_an_expense_record(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            queue = root / "expense-enrichment-queue.json"
-            database = root / "expense-ledger.sqlite3"
+            queue = Path(tmp) / "expense-enrichment-queue.json"
             queue.write_text(json.dumps({"items": [{
                 "source_id": "tide:income:1",
                 "source_surface": "tide_statement",
@@ -40,16 +59,44 @@ class ExpenseDirectionBoundaryTests(unittest.TestCase):
                     },
                 },
             }]}), encoding="utf-8")
+            boundary = FakeBoundary(verified=True)
 
-            result = RESOLUTION.resolve_ready_items(queue, database)
+            result = RESOLUTION.resolve_ready_items(queue, boundary)
 
             self.assertEqual({"written": 0, "duplicates": 0, "waiting": 1, "blocked": 0}, result)
-            self.assertFalse(database.exists())
+            self.assertFalse(boundary.paths)
             saved = json.loads(queue.read_text(encoding="utf-8"))
-            item = saved["items"][0]
-            self.assertEqual("accounting_only", item["state"])
-            self.assertEqual("not_expense", item["ledger_state"])
-            self.assertIn("excluded from expense workflow", item["blocker"])
+            self.assertEqual("accounting_only", saved["items"][0]["state"])
+
+    def test_verified_readback_marks_finance_handoff_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            queue = Path(tmp) / "expense-enrichment-queue.json"
+            queue.write_text(json.dumps({"items": [{
+                "source_id": "microsoft:expense:1",
+                "source_surface": "email",
+                "state": "needs_enrichment",
+                "enrichment": {
+                    "payment_settlement": "confirmed",
+                    "evidence_state": "retained",
+                    "transaction": {
+                        "date": "2026-08-01",
+                        "direction": "expense",
+                        "amount_pence": 4000,
+                        "description": "subscription",
+                        "counterparty": "Microsoft",
+                        "category": "software",
+                        "source_ref": "microsoft:expense:1",
+                    },
+                },
+            }]}), encoding="utf-8")
+            boundary = FakeBoundary(verified=True)
+
+            result = RESOLUTION.resolve_ready_items(queue, boundary)
+
+            self.assertEqual(1, result["written"])
+            self.assertEqual([FINANCE_LEDGER_PATH], boundary.paths)
+            item = json.loads(queue.read_text(encoding="utf-8"))["items"][0]
+            self.assertEqual("ledger_written", item["state"])
 
 
 if __name__ == "__main__":

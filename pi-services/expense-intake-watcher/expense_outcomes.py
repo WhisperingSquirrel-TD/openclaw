@@ -2,8 +2,9 @@
 
 This module is deliberately free of mailbox, filesystem and finance-engine access so
 all source adapters can be tested against the same fail-closed contract.  The
-runtime owner is responsible for persisting the returned record to the canonical
-expense log, finance ledger/evidence queues and health surface.
+runtime owner is responsible for persisting the returned record through the
+SharePoint-authoritative seer-finance boundary and retaining only operational
+queue/outcome state locally.
 """
 from __future__ import annotations
 

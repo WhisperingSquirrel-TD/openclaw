@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import json
 
-from watcher import process_expense_sqlite_replay
+from watcher import process_expense_replay
 
 
 def main() -> int:
-    results = process_expense_sqlite_replay({})
+    results = process_expense_replay({})
     print(json.dumps(results, sort_keys=True))
     return 0
 

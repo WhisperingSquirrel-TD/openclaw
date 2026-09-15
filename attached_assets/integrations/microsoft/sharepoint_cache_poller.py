@@ -41,9 +41,11 @@ The sharepoint_queue_processor.py handles writes (create/update/append) only.
 CRON SCHEDULE: every 15 minutes (installed by install-forked-openclaw.sh)
 """
 
+import hashlib
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -336,6 +338,13 @@ def _collect_all_files(
                 "size":     item.get("size", 0),
                 "modified": item.get("lastModifiedDateTime", ""),
                 "item_id":  item.get("id", ""),
+                "etag":     item.get("eTag") or item.get("@odata.etag", ""),
+                # Graph's cTag is the content-version identity.  Item ID is
+                # a conservative fallback for tenants that omit cTag.
+                # cTag is the content-version identity.  Do not fall back to
+                # the drive item ID: it remains stable across content
+                # replacements and cannot prove that cached bytes are current.
+                "version":  item.get("cTag") or item.get("ctag") or "",
             })
 
 
@@ -412,36 +421,115 @@ def _has_excluded_path_segment(sp_path: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def _fetch_file_content(
-    token: str, site_id: str, drive_id: str, sp_path: str
+    token: str, site_id: str, drive_id: str, sp_path: str,
+    if_match: str | None = None,
 ) -> str:
     """Fetch raw text content of a SharePoint file via Graph."""
     clean = sp_path.strip("/")
     url   = f"{GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{clean}:/content"
+    headers = {"Authorization": f"Bearer {token}"}
+    if if_match:
+        headers["If-Match"] = if_match
     resp  = requests.get(
         url,
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         timeout=30,
         allow_redirects=True,
     )
     if not resp.ok:
         raise RuntimeError(f"Content fetch failed ({resp.status_code}): {resp.text[:200]}")
-    return resp.text
+    response_headers = getattr(resp, "headers", {}) or {}
+    response_etag = str(
+        response_headers.get("ETag") or response_headers.get("etag") or ""
+    ).strip()
+    if if_match and response_etag and response_etag != if_match:
+        raise RuntimeError(
+            f"Content response eTag {response_etag!r} did not match "
+            f"conditional eTag {if_match!r}"
+        )
+    try:
+        return resp.content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(f"Content is not valid UTF-8: {exc}") from exc
+
+
+def _fetch_file_metadata(
+    token: str, site_id: str, drive_id: str, sp_path: str
+) -> dict:
+    """Fetch the current Graph identity for one drive item.
+
+    A listing snapshot can race the subsequent content download.  The
+    content-sync loop therefore obtains metadata immediately before and after
+    each download and only publishes bytes when both identities agree.
+    """
+    clean = sp_path.strip("/")
+    url = f"{GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{clean}"
+    resp = requests.get(url, headers=_headers(token), timeout=15)
+    if not resp.ok:
+        raise RuntimeError(
+            f"Metadata fetch failed ({resp.status_code}): {resp.text[:200]}"
+        )
+    item = resp.json()
+    if not isinstance(item, dict):
+        raise RuntimeError("Metadata fetch returned a non-object response")
+    etag = item.get("eTag") or item.get("@odata.etag") or ""
+    version = item.get("cTag") or item.get("ctag") or ""
+    if not etag or not version:
+        raise RuntimeError(
+            f"Graph metadata for '{sp_path}' lacks exact eTag/cTag content identity"
+        )
+    return {"etag": str(etag), "version": str(version)}
+
+
+def _fetch_consistent_file_content(
+    token: str, site_id: str, drive_id: str, sp_path: str,
+    *, binary: bool = False, attempts: int = 2,
+) -> tuple[object, dict]:
+    """Download bytes/text only when metadata is stable around the download."""
+    fetch = _fetch_file_bytes if binary else _fetch_file_content
+    last_error = "metadata changed while downloading"
+    for _ in range(max(1, attempts)):
+        before = _fetch_file_metadata(token, site_id, drive_id, sp_path)
+        content = fetch(
+            token, site_id, drive_id, sp_path, if_match=before["etag"],
+        )
+        after = _fetch_file_metadata(token, site_id, drive_id, sp_path)
+        if before == after:
+            return content, after
+        last_error = (
+            f"remote metadata changed during download "
+            f"(before={before!r}, after={after!r})"
+        )
+    raise RuntimeError(last_error)
 
 
 def _fetch_file_bytes(
-    token: str, site_id: str, drive_id: str, sp_path: str
+    token: str, site_id: str, drive_id: str, sp_path: str,
+    if_match: str | None = None,
 ) -> bytes:
     """Fetch raw binary content of a SharePoint file via Graph."""
     clean = sp_path.strip("/")
     url   = f"{GRAPH_BASE}/sites/{site_id}/drives/{drive_id}/root:/{clean}:/content"
+    headers = {"Authorization": f"Bearer {token}"}
+    if if_match:
+        headers["If-Match"] = if_match
     resp  = requests.get(
         url,
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         timeout=60,
         allow_redirects=True,
     )
     if not resp.ok:
         raise RuntimeError(f"Binary fetch failed ({resp.status_code}): {resp.text[:200]}")
+    response_headers = getattr(resp, "headers", {}) or {}
+    response_etag = str(
+        response_headers.get("ETag") or response_headers.get("etag") or ""
+    ).strip()
+    if if_match and response_etag and response_etag != if_match:
+        raise RuntimeError(
+            f"Binary response eTag {response_etag!r} did not match "
+            f"conditional eTag {if_match!r}"
+        )
     return resp.content
 
 
@@ -455,12 +543,70 @@ def _local_path_for(sp_path: str) -> Path:
     return CACHE_DIR / clean
 
 
+def _atomic_text_write(path: Path, content: str) -> None:
+    """Write a cache artifact with replace-based atomic publication."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary:
+            Path(temporary).unlink(missing_ok=True)
+
+
+def _cached_body_bytes(raw: bytes) -> bytes:
+    """Remove exactly the poller header and its one separator line.
+
+    User content is never normalised: leading blank lines, non-ASCII UTF-8,
+    and all other body bytes remain byte-for-byte intact.
+    """
+    newline = raw.find(b"\n")
+    if newline < 0:
+        return raw
+    first_line = raw[:newline].rstrip(b"\r")
+    if not (
+        first_line.startswith(b"<!-- sharepoint-cache:")
+        or first_line.startswith(b"<!-- sharepoint-binary-extract:")
+    ) or not first_line.endswith(b"-->"):
+        return raw
+    body_start = newline + 1
+    if raw[body_start:body_start + 2] == b"\r\n":
+        body_start += 2
+    elif raw[body_start:body_start + 1] == b"\n":
+        body_start += 1
+    return raw[body_start:]
+
+
+def _cached_body(raw: str) -> str:
+    """Return the strictly decoded document body represented by a cache file."""
+    return _cached_body_bytes(raw.encode("utf-8")).decode("utf-8")
+
+
+def _content_sha256(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _cached_file_sha256(path: Path) -> str:
+    return hashlib.sha256(_cached_body_bytes(path.read_bytes())).hexdigest()
+
+
+def _raw_file_sha256(path: Path) -> str:
+    """Hash the exact bytes published in a local cache artifact."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _write_cached_file(local_path: Path, sp_path: str, content: str, synced_at: str) -> None:
     local_path.parent.mkdir(parents=True, exist_ok=True)
     header = (
         f"<!-- sharepoint-cache: /{sp_path} | synced: {synced_at} -->\n\n"
     )
-    local_path.write_text(header + content, encoding="utf-8")
+    _atomic_text_write(local_path, header + content)
 
 
 def _write_extracted_file(
@@ -471,7 +617,7 @@ def _write_extracted_file(
     header = (
         f"<!-- sharepoint-binary-extract: /{sp_path} | synced: {synced_at} -->\n\n"
     )
-    local_path.write_text(header + extracted_text, encoding="utf-8")
+    _atomic_text_write(local_path, header + extracted_text)
 
 
 def _get_cached_extracted_synced(extracted_path: Path) -> str | None:
@@ -559,9 +705,19 @@ def _write_manifest(
         "extracted":           extracted,
         "skipped":             skipped,
     }
-    tmp = MANIFEST.with_suffix(".tmp")
-    tmp.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
-    tmp.replace(MANIFEST)
+    _atomic_text_write(
+        MANIFEST,
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+    )
+
+
+def _load_previous_manifest() -> dict:
+    """Load prior metadata so a retained stale body keeps its own identity."""
+    try:
+        value = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -606,8 +762,10 @@ def _write_index(
         "~/.openclaw/workspace/sharepoint-cache/.manifest.json",
         "```",
         "",
-        "**To write** (create/update/append): add an entry to `~/.openclaw/sharepoint-queue.json`.",
-        "The queue processor executes it within 1 minute without requiring TOTP approval.",
+        "**To write** (create/update/append): use the locked `enqueue_operation` helper",
+        "from `sharepoint_queue_processor.py`; do not edit the queue JSON directly.",
+        "The helper preserves concurrent producers and the queue processor executes",
+        "it within 1 minute without requiring TOTP approval.",
         "",
         "---",
         "",
@@ -746,6 +904,13 @@ def main() -> None:
 
     # Sync file contents
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    previous_manifest = _load_previous_manifest()
+    previous_cached = previous_manifest.get("cached", {})
+    previous_extracted = previous_manifest.get("extracted", {})
+    if not isinstance(previous_cached, dict):
+        previous_cached = {}
+    if not isinstance(previous_extracted, dict):
+        previous_extracted = {}
     synced_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     cached:  dict = {}
     skipped: dict = {}
@@ -791,14 +956,21 @@ def main() -> None:
             eligible_sp_paths.add(rel_path)
             local_path = _local_path_for(sp_path)
             try:
-                content = _fetch_file_content(token, site_id, drive_id, sp_path)
+                content, remote = _fetch_consistent_file_content(
+                    token, site_id, drive_id, sp_path,
+                )
                 _write_cached_file(local_path, sp_path, content, synced_at)
                 cached[rel_path] = {
                     "sp_path":     sp_path,
                     "size":        size,
                     "sp_modified": modified,
+                    "etag":        remote["etag"],
+                    "version":     remote["version"],
                     "synced_at":   synced_at,
                     "local_path":  str(local_path.relative_to(WORKSPACE)),
+                    "content_sha256": _cached_file_sha256(local_path),
+                    "raw_content_sha256": _raw_file_sha256(local_path),
+                    "source_content_sha256": _content_sha256(content),
                 }
                 log(f"  CACHED {sp_path} ({size // 1024} KB)")
             except Exception as e:
@@ -840,22 +1012,49 @@ def main() -> None:
             eligible_sp_paths.add(extracted_rel)
 
             # Check if already extracted and up-to-date
+            try:
+                remote = _fetch_file_metadata(token, site_id, drive_id, sp_path)
+            except Exception as e:
+                skipped[rel_path] = {
+                    "sp_path": sp_path, "size": size, "sp_modified": modified,
+                    "reason": "metadata_error",
+                    "reason_detail": f"Metadata error: {str(e)[:150]}",
+                }
+                log(f"  SKIP [metadata_error] {sp_path}: {e}")
+                continue
             cached_synced = _get_cached_extracted_synced(extracted_path)
-            if cached_synced and cached_synced >= modified:
+            previous_entry = previous_extracted.get(extracted_rel, {})
+            metadata_unchanged = (
+                isinstance(previous_entry, dict)
+                and previous_entry.get("etag")
+                and previous_entry.get("version")
+                and previous_entry.get("etag") == remote["etag"]
+                and previous_entry.get("version") == remote["version"]
+            )
+            if cached_synced and cached_synced >= modified and metadata_unchanged:
                 # File hasn't changed since last extraction — skip re-extraction
                 extracted[extracted_rel] = {
                     "sp_path":        sp_path,
                     "original_ext":   ext,
                     "size":           size,
                     "sp_modified":    modified,
+                    "etag":           remote["etag"],
+                    "version":        remote["version"],
                     "synced_at":      cached_synced,
                     "local_path":     str(extracted_path.relative_to(WORKSPACE)),
+                    "content_sha256": _cached_file_sha256(extracted_path),
+                    "raw_content_sha256": _raw_file_sha256(extracted_path),
+                    "source_content_sha256": previous_entry.get(
+                        "source_content_sha256", ""
+                    ),
                 }
                 log(f"  CACHED (unchanged) {sp_path}")
                 continue
 
             try:
-                raw_bytes      = _fetch_file_bytes(token, site_id, drive_id, sp_path)
+                raw_bytes, remote = _fetch_consistent_file_content(
+                    token, site_id, drive_id, sp_path, binary=True,
+                )
                 extracted_text = _extract_binary_text(name, raw_bytes, image_dir=image_dir)
                 _write_extracted_file(extracted_path, sp_path, extracted_text, synced_at)
                 extracted[extracted_rel] = {
@@ -863,8 +1062,13 @@ def main() -> None:
                     "original_ext":   ext,
                     "size":           size,
                     "sp_modified":    modified,
+                    "etag":           remote["etag"],
+                    "version":        remote["version"],
                     "synced_at":      synced_at,
                     "local_path":     str(extracted_path.relative_to(WORKSPACE)),
+                    "content_sha256": _cached_file_sha256(extracted_path),
+                    "raw_content_sha256": _raw_file_sha256(extracted_path),
+                    "source_content_sha256": hashlib.sha256(raw_bytes).hexdigest(),
                 }
                 log(f"  EXTRACTED {sp_path} ({size // 1024} KB) → {extracted_rel}")
             except Exception as e:
@@ -921,6 +1125,10 @@ def main() -> None:
             continue  # not on disk (never fetched, or just deleted as orphan)
         # File is on disk from a previous run — record it with a "stale" note
         is_extracted = rel_path.endswith(".extracted.md")
+        prior_entries = previous_extracted if is_extracted else previous_cached
+        prior_entry = prior_entries.get(rel_path, {})
+        if not isinstance(prior_entry, dict):
+            prior_entry = {}
         # For extracted files, the SP path is the rel_path minus ".extracted.md"
         sp_key = rel_path[: -len(".extracted.md")] if is_extracted else rel_path
         sp_meta = sp_meta_by_rel.get(sp_key, {})
@@ -939,10 +1147,28 @@ def main() -> None:
             "sp_path":     sp_meta.get("sp_path", "/" + sp_key),
             "size":        sp_meta.get("size", file_size),
             "sp_modified": sp_meta.get("modified", ""),
+            "etag":        prior_entry.get("etag") or sp_meta.get("etag", ""),
+            "version":     prior_entry.get("version") or sp_meta.get("version", ""),
             "synced_at":   stale_synced_at or "(previous run)",
             "local_path":  str(local_path.relative_to(WORKSPACE)),
             "stale":       True,
         }
+        if not entry["etag"] or not entry["version"]:
+            # An item ID is not a content version.  Without an exact remote
+            # identity this local body cannot be published as authoritative
+            # manifest metadata, even as a retained stale copy.
+            log(f"  STALE NOT PUBLISHED: {rel_path} lacks exact remote identity")
+            continue
+        try:
+            entry["content_sha256"] = _cached_file_sha256(local_path)
+            entry["raw_content_sha256"] = _raw_file_sha256(local_path)
+            entry["source_content_sha256"] = prior_entry.get(
+                "source_content_sha256", ""
+            )
+        except (OSError, UnicodeError):
+            entry["content_sha256"] = (
+                prior_entry.get("content_sha256", "")
+            )
         if is_extracted:
             entry["original_ext"] = Path(sp_key).suffix.lower()
             extracted[rel_path]   = entry

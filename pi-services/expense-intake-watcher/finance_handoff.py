@@ -1,55 +1,116 @@
-"""Fail-closed bridge from an exact expense outcome to the SEER finance ledger.
+"""SharePoint-authoritative finance handoff.
 
-No caller may infer a category, amount or payment source. This module only admits
-an already-complete transaction object, validates the complete existing ledger
-and candidate with the finance engine, and atomically appends it once.
+This module is intentionally not a file-backed ledger writer.  The watcher may
+prepare a source-linked candidate, but only the public seer-finance boundary
+may capture, review, post, or claim completion for it.  Local JSON queues and
+outcome state are recovery state and are never consulted as business truth.
 """
 from __future__ import annotations
 
-import json
-import os
-import sys
-import tempfile
-from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-FINANCE_ROOT = Path('/home/tomdean88/pi-services/seer-finance')
-if str(FINANCE_ROOT) not in sys.path:
-    sys.path.insert(0, str(FINANCE_ROOT))
-
-from seer_finance.ledger.loader import TransactionValidationError, load_transactions, parse_transaction
+from sharepoint_boundary import (
+    BoundaryResult,
+    FINANCE_LEDGER_PATH,
+    SharePointBoundary,
+    SharePointBoundaryError,
+    write_verified,
+)
 
 
-def append_validated_expense(ledger_path: Path, candidate: dict[str, Any]) -> bool:
-    """Append a fully specified, source-linked transaction exactly once.
+class TransactionValidationError(ValueError):
+    """Candidate facts are incomplete or unsafe for finance handoff."""
 
-    Returns False for a stable duplicate source reference. Raises a validation
-    error for incomplete/malformed records, preserving the caller's `blocked`
-    outcome rather than guessing financial data.
+
+_REQUIRED_FIELDS = (
+    "date",
+    "direction",
+    "amount_pence",
+    "description",
+    "counterparty",
+    "category",
+    "source_ref",
+)
+
+
+def _validate_candidate(candidate: Mapping[str, Any]) -> None:
+    missing = [field for field in _REQUIRED_FIELDS if candidate.get(field) in (None, "")]
+    if missing:
+        raise TransactionValidationError(
+            f"finance handoff requires complete candidate fields: {', '.join(missing)}"
+        )
+    if candidate.get("direction") != "expense":
+        raise TransactionValidationError("finance handoff accepts expense candidates only")
+    amount = candidate.get("amount_pence")
+    if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+        raise TransactionValidationError("amount_pence must be a non-negative integer")
+
+
+def append_validated_expense(
+    boundary: SharePointBoundary,
+    candidate: Mapping[str, Any],
+) -> BoundaryResult:
+    """Offer one complete expense to ``/Finance/Finance ledger.md``.
+
+    The boundary owns validation against the existing document, source-ref
+    idempotency, bounded write policy, and verified readback.  We deliberately
+    do not accept a local path argument: a local transactions file cannot be
+    the business authority after cutover.
     """
-    existing = json.loads(ledger_path.read_text(encoding='utf-8'))
-    if not isinstance(existing, list):
-        raise TransactionValidationError('ledger top level must be a JSON array')
-    parsed = parse_transaction(candidate, len(existing))
-    source_ref = parsed.source_ref
-    if not source_ref:
-        raise TransactionValidationError('expense ledger handoff requires source_ref')
-    for row in existing:
-        if isinstance(row, dict) and row.get('source_ref') == source_ref:
-            return False
-    # Validate existing data before mutation and the complete proposed ledger.
-    load_transactions(ledger_path)
-    proposed = [*existing, candidate]
-    fd, temp_name = tempfile.mkstemp(prefix=f'.{ledger_path.name}.', dir=ledger_path.parent, text=True)
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
-            json.dump(proposed, handle, indent=2)
-            handle.write('\n')
-            handle.flush()
-            os.fsync(handle.fileno())
-        load_transactions(temp_name)
-        os.replace(temp_name, ledger_path)
-    except Exception:
-        Path(temp_name).unlink(missing_ok=True)
-        raise
-    return True
+    _validate_candidate(candidate)
+    source_ref = str(candidate["source_ref"])
+    public_handoff = getattr(boundary, "append_validated_expense", None)
+    if callable(public_handoff):
+        result = public_handoff(dict(candidate))
+        if not isinstance(result, BoundaryResult):
+            raise SharePointBoundaryError("seer-finance finance handoff returned an invalid result")
+        return result
+    # The public boundary accepts structured JSON content so that it can apply
+    # its own schema and append/idempotency rules without the watcher parsing
+    # or rewriting a finance document.
+    import json
+
+    content = json.dumps(
+        {"kind": "expense_handoff", "source_ref": source_ref, "candidate": dict(candidate)},
+        sort_keys=True,
+    )
+    result = write_verified(
+        FINANCE_LEDGER_PATH,
+        content,
+        operation="append",
+        boundary=boundary,
+    )
+    if result.complete and not result.canonical_ref:
+        return BoundaryResult(
+            operation=result.operation,
+            path=result.path,
+            accepted=result.accepted,
+            verified=result.verified,
+            canonical_ref=f"{FINANCE_LEDGER_PATH}#source_ref:{source_ref}",
+            content=result.content,
+            blocker=result.blocker,
+        )
+    return result
+
+
+def capture_review_expense(
+    boundary: SharePointBoundary,
+    *,
+    source_surface: str,
+    source_ref: str,
+    facts: Mapping[str, Any] | None = None,
+) -> BoundaryResult:
+    """Delegate capture/review preparation to seer-finance's public boundary."""
+    method = getattr(boundary, "capture_candidate", None)
+    if not callable(method):
+        raise SharePointBoundaryError(
+            "seer-finance boundary does not expose capture_candidate"
+        )
+    result = method(
+        source_surface=source_surface,
+        source_ref=source_ref,
+        facts=dict(facts or {}),
+    )
+    if not isinstance(result, BoundaryResult):
+        raise SharePointBoundaryError("seer-finance capture returned an invalid result")
+    return result

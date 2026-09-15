@@ -1,4 +1,7 @@
-"""Read canonical accounting transactions from the SQLite finance ledger."""
+"""Read explicitly selected legacy/recovery transactions from SQLite.
+
+The authoritative live loader is :mod:`sharepoint_loader`.
+"""
 from __future__ import annotations
 
 import json
@@ -14,7 +17,7 @@ class SqliteLedgerLoadError(ValueError):
 
 
 def load_finance_transactions(database: str | Path) -> list[Transaction]:
-    """Read immutable finance rows once, deterministically by source reference."""
+    """Read immutable recovery rows deterministically by source reference."""
     try:
         with sqlite3.connect(f"file:{Path(database)}?mode=ro", uri=True) as connection:
             rows = connection.execute(

@@ -1,4 +1,8 @@
-"""Idempotently ingest validated legacy accounting rows into canonical SQLite."""
+"""Idempotently ingest legacy accounting rows into an explicit SQLite recovery DB.
+
+This is a migration/recovery tool only. It does not establish SQLite as the
+business or P&L authority; live writes target SharePoint.
+"""
 from __future__ import annotations
 import json
 from collections import Counter
@@ -8,6 +12,7 @@ from .loader import parse_transaction
 from .sqlite_finance_writer import SqliteFinanceWriter
 
 def migrate(*, transactions_path: str | Path, database: str | Path) -> dict[str, int]:
+    """Migrate legacy input into an explicitly selected recovery database."""
     rows=json.loads(Path(transactions_path).read_text(encoding='utf-8'))
     if not isinstance(rows,list): raise ValueError('legacy transactions must be an array')
     refs=Counter(row.get('source_ref') for row in rows if isinstance(row,dict) and row.get('source_ref'))

@@ -16,28 +16,13 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
-def _finance_code_root() -> Path:
-    """Resolve finance source without requiring a specific Pi home directory."""
-    explicit = os.environ.get('SEER_FINANCE_CODE_ROOT')
-    candidates = [
-        Path(explicit) if explicit else None,
-        Path(__file__).resolve().parent.parent / 'seer-finance',
-        Path('/home/tomdean88/pi-services/seer-finance'),  # legacy compatibility only
-    ]
-    for candidate in candidates:
-        if candidate and (candidate / 'seer_finance').is_dir():
-            return candidate
-    raise RuntimeError('seer_finance source is unavailable; set SEER_FINANCE_CODE_ROOT')
-
-
-FINANCE_CODE_ROOT = _finance_code_root()
-if str(FINANCE_CODE_ROOT) not in sys.path:
-    sys.path.insert(0, str(FINANCE_CODE_ROOT))
-
-from seer_finance.ledger.expense_capture_adapter import capture_candidate, DEFAULT_DATABASE, DEFAULT_REPLAY
-from seer_finance.ledger.expense_repository import ExpenseRepository
 from enrichment_queue import enqueue
 from expense_outcomes import build_outcome
+from sharepoint_boundary import (
+    EXPENSE_LEDGER_PATH,
+    capture_candidate,
+    resolve_boundary,
+)
 
 ROOT = Path('/home/tomdean88')
 WORKSPACE = ROOT / '.openclaw' / 'workspace'
@@ -45,13 +30,13 @@ CANONICAL_RUNTIME_NAME = 'inbound-watch-router'
 CANONICAL_STATE_DIR = ROOT / '.openclaw' / 'runtime' / CANONICAL_RUNTIME_NAME
 STATE_FILE = CANONICAL_STATE_DIR / 'state.json'
 LOG_FILE = CANONICAL_STATE_DIR / 'watcher.log'
-EXPENSE_FILE = WORKSPACE / 'seer-expenses.md'
 MONITORED_FILE = WORKSPACE / 'memory' / 'monitored-items-state.json'
 MIRROR_EVENTS_FILE = WORKSPACE / 'memory' / 'mirror-events.json'
 ENRICHMENT_QUEUE_FILE = ROOT / '.openclaw' / 'runtime' / 'inbound-watch-router' / 'expense-enrichment-queue.json'
+SHAREPOINT_REPLAY_FILE = ROOT / '.openclaw' / 'runtime' / 'inbound-watch-router' / 'sharepoint-expense-replay.json'
 SHAREPOINT_QUEUE_FILE = ROOT / '.openclaw' / 'sharepoint-queue.json'
 SHAREPOINT_RESULTS_FILE = ROOT / '.openclaw' / 'sharepoint-queue-results.json'
-RECEIPT_SHAREPOINT_ROOT = '/Stackstone Finance/Expenses/Receipts'
+RECEIPT_SHAREPOINT_ROOT = '/Expenses/Receipts'
 MAX_STATE_FILE_BYTES = 8 * 1024 * 1024
 MAX_LIFECYCLE_HISTORY = 6
 MAX_SCANNED_NON_CANDIDATES = 1_000
@@ -768,7 +753,10 @@ def currency_hint(amount: str) -> str:
 
 
 def load_expense_text() -> str:
-    return EXPENSE_FILE.read_text(encoding='utf-8') if EXPENSE_FILE.exists() else ''
+    """Compatibility shim; business ledger content is never local watcher state."""
+    raise RuntimeError(
+        f'{EXPENSE_LEDGER_PATH} is SharePoint-authoritative; use the seer-finance boundary'
+    )
 
 
 def row_exists(expense_md: str, refs: dict[str, str | None], subject: str) -> bool:
@@ -778,27 +766,24 @@ def row_exists(expense_md: str, refs: dict[str, str | None], subject: str) -> bo
 
 
 def insert_expense_row(row: str) -> bool:
-    """Legacy compatibility stub: the Markdown ledger is a read-only archive.
+    """Reject direct document writes from source adapters.
 
-    A live candidate must use SQLite capture or its durable replay fallback;
-    a Markdown write is never a valid capture outcome.
+    Capture/review must carry source-linked facts through seer-finance.  A raw
+    Markdown row can neither satisfy that contract nor establish readback.
     """
-    log('legacy seer-expenses.md write suppressed; SQLite capture is mandatory')
+    log('direct expense ledger row write suppressed; seer-finance boundary is mandatory')
     return False
 
 
 def ensure_pending_email_row(entry: MailEntry, blocker: str, refs: dict[str, str | None] | None = None) -> bool:
-    refs = refs or extract_refs(entry.subject, entry.body_preview)
-    expense_md = load_expense_text()
-    if row_exists(expense_md, refs, entry.subject):
-        return False
-    vendor, item = infer_vendor(entry.subject, entry.party, entry.body_preview)
-    iso_date = extract_date(entry.date_str)
-    row = (
-        f"| {pretty_date(iso_date)} | {item} | {vendor} | TBC | Pending expense signal from {entry.section} mirror. "
-        f"Subject: `{entry.subject}`. Source account: {entry.account}. Blocker: {blocker} |"
+    # Pending candidates are represented by the source-linked operational
+    # queue/monitored outcome until seer-finance accepts them.  Never inspect or
+    # mutate a local copy of the authoritative document here.
+    log(
+        f'email expense remains pending for SharePoint capture: '
+        f'{entry.account}:{entry.section}:{entry.message_id} ({blocker})'
     )
-    return insert_expense_row(row)
+    return False
 
 
 def build_logged_row(entry: MailEntry, reader: dict[str, Any]) -> str:
@@ -863,7 +848,7 @@ def email_monitored_payload(entry: MailEntry, closure_state: str, blocker: str |
     refs = refs or extract_refs(entry.subject, entry.body_preview)
     vendor, _ = infer_vendor(entry.subject, entry.party, entry.body_preview)
     flags = flags or ['EXPENSE']
-    evidence_refs = evidence_refs or ['seer-expenses.md']
+    evidence_refs = evidence_refs or [EXPENSE_LEDGER_PATH]
     now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     payload = {
         'id': mail_key(entry),
@@ -1068,15 +1053,8 @@ def is_whatsapp_candidate(entry: WhatsAppEntry) -> bool:
 
 
 def ensure_pending_whatsapp_row(entry: WhatsAppEntry, blocker: str) -> bool:
-    expense_md = load_expense_text()
-    if entry.text in expense_md:
-        return False
-    iso_date = extract_date(entry.timestamp)
-    row = (
-        f"| {pretty_date(iso_date)} | WhatsApp expense signal | Unknown | TBC | Pending expense signal from WhatsApp. "
-        f"Contact: {entry.contact}. Message: `{entry.text[:160]}`. Blocker: {blocker} |"
-    )
-    return insert_expense_row(row)
+    log(f'WhatsApp expense remains pending for SharePoint capture: {entry.key} ({blocker})')
+    return False
 
 
 def whatsapp_monitored_payload(entry: WhatsAppEntry, closure_state: str, blocker: str | None, flags: list[str] | None = None, evidence_refs: list[str] | None = None) -> dict[str, Any]:
@@ -1093,43 +1071,48 @@ def whatsapp_monitored_payload(entry: WhatsAppEntry, closure_state: str, blocker
         'mode': 'watch',
         'closure_state': closure_state,
         'blocker': blocker,
-        'evidence_refs': evidence_refs or ['seer-expenses.md'],
+        'evidence_refs': evidence_refs or [EXPENSE_LEDGER_PATH],
         'resolved_at': now_iso if closure_state in ('processed', 'closed', 'not_needed') else None,
         'processed_at': now_iso if closure_state == 'processed' else None,
         'closed_at': now_iso if closure_state == 'closed' else None,
     }
 
 
-def capture_sqlite_candidate(*, source_surface: str, source_ref: str, source_timestamp: str | None = None,
-                             supplier: str | None = None, evidence_ref: str | None = None):
-    """Capture once and return the real SQLite-or-replay outcome to every caller.
-
-    Callers must never label a candidate as captured merely because this boundary
-    was invoked: `captured` requires an expense ID; `replayed` is a blocked,
-    durable fallback which the autonomous runtime must retry without TOTP.
-    """
+def capture_sharepoint_candidate(*, source_surface: str, source_ref: str, source_timestamp: str | None = None,
+                                 supplier: str | None = None, evidence_ref: str | None = None):
+    """Capture through seer-finance and require verified SharePoint readback."""
     facts = {
         'source_timestamp': source_timestamp,
         'supplier': supplier,
         'evidence_ref': evidence_ref,
         'evidence_state': 'retained' if evidence_ref else 'source_visible',
     }
-    result = capture_candidate(source_surface=source_surface, source_ref=source_ref, facts=facts)
-    log(f'sqlite capture {result.outcome} source_ref={source_ref} expense_id={result.expense_id or ""} blocker={result.blocker or ""}')
+    result = capture_candidate(
+        source_surface=source_surface,
+        source_ref=source_ref,
+        facts=facts,
+        boundary=resolve_boundary(),
+    )
+    log(
+        f'SharePoint capture accepted={result.accepted} verified={result.verified} '
+        f'source_ref={source_ref} canonical_ref={result.canonical_ref or ""} '
+        f'blocker={result.blocker or ""}'
+    )
     return result
 
 
 def _capture_persisted(result: Any) -> bool:
-    """Treat a capture as persisted only when the adapter returned its ID."""
-    return result.outcome == 'captured' and bool(result.expense_id)
+    """Treat a capture as persisted only after verified SharePoint readback."""
+    return bool(getattr(result, 'accepted', False) and getattr(result, 'verified', False)
+                and getattr(result, 'canonical_ref', None))
 
 
 def _capture_blocker(result: Any) -> str:
-    if result.blocker:
+    if getattr(result, 'blocker', None):
         return result.blocker
-    if result.outcome == 'captured' and not result.expense_id:
-        return 'sqlite_capture_missing_expense_id'
-    return 'sqlite_capture_not_persisted'
+    if getattr(result, 'accepted', False) and not getattr(result, 'verified', False):
+        return 'sharepoint_write_readback_pending'
+    return 'sharepoint_capture_not_persisted'
 
 
 def mark_state(state: dict[str, Any], key: str, route: str, status: str, detail: str | None = None) -> None:
@@ -1346,27 +1329,9 @@ def prune_whatsapp_artifacts(entries: list[WhatsAppEntry]) -> None:
         doc['last_updated'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         save_json(MONITORED_FILE, doc)
 
-    expense_text = load_expense_text()
-    expense_lines = expense_text.splitlines()
-    filtered_lines: list[str] = []
-    expense_changed = False
-    for line in expense_lines:
-        if 'Pending expense signal from WhatsApp.' not in line:
-            filtered_lines.append(line)
-            continue
-        msg_match = re.search(r'Message: `([^`]+)`', line)
-        message_preview = msg_match.group(1) if msg_match else None
-        if not message_preview:
-            filtered_lines.append(line)
-            continue
-        if message_preview not in live_expense_texts:
-            expense_changed = True
-            continue
-        filtered_lines.append(line)
-    if expense_changed:
-        # seer-expenses.md is retained read-only evidence after SQLite cutover.
-        # Never fail the live watcher by attempting legacy archival cleanup.
-        log('legacy seer-expenses.md cleanup suppressed; archive is read-only')
+    # Pending expense rows are owned by the SharePoint authority.  Reconcile
+    # only the local monitored projection above; never read or rewrite the
+    # business ledger from this watcher.
 
 
 def process_whatsapp_threads(state: dict[str, Any], entries: list[WhatsAppEntry], summary: dict[str, int]) -> None:
@@ -1480,19 +1445,19 @@ def process_email_entry(state: dict[str, Any], entry: MailEntry, summary: dict[s
     # and immutable sender allowlist; it must never fall back to agent exec/TOTP.
     reader = run_reader(entry)
     reader_detail = 'trusted reader extracted body/attachments' if reader else 'trusted reader unavailable; autonomous retry required'
-    capture = capture_sqlite_candidate(source_surface=f'email:{entry.account}:{entry.section}', source_ref=key,
-                                       source_timestamp=entry.date_str, supplier=entry.party, evidence_ref=f'{entry.mailbox_path}:{entry.message_id}')
+    capture = capture_sharepoint_candidate(source_surface=f'email:{entry.account}:{entry.section}', source_ref=key,
+                                           source_timestamp=entry.date_str, supplier=entry.party, evidence_ref=f'{entry.mailbox_path}:{entry.message_id}')
     if _capture_persisted(capture):
-        routed_detail = f'Captured in SQLite expense_id={capture.expense_id}; {reader_detail}'
-        blocker = ('Captured in SQLite; explicit review/enrichment is required before finance posting'
+        routed_detail = f'Captured in SharePoint ref={capture.canonical_ref}; {reader_detail}'
+        blocker = ('Captured in SharePoint; explicit review/enrichment is required before finance posting'
                    if reader else
-                   'Captured in SQLite; trusted reader failed, so body/attachment enrichment will retry autonomously')
-    elif capture.outcome == 'captured':
-        routed_detail = 'SQLite capture returned no expense ID; durable capture is not claimed'
-        blocker = 'SQLite capture returned no expense ID'
+                   'Captured in SharePoint; trusted reader failed, so body/attachment enrichment will retry autonomously')
+    elif capture.accepted:
+        routed_detail = 'SharePoint write accepted; verified readback is pending'
+        blocker = _capture_blocker(capture)
     else:
-        routed_detail = f'SQLite capture failed; durable replay preserved; {reader_detail}'
-        blocker = f'Durable SQLite replay pending autonomous retry: {_capture_blocker(capture)}'
+        routed_detail = f'SharePoint capture unavailable; operational retry preserved; {reader_detail}'
+        blocker = f'SharePoint capture pending autonomous retry: {_capture_blocker(capture)}'
     advance_item_lifecycle(state, key, 'email', 'routed', routed_detail)
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
     advance_item_lifecycle(state, key, 'email', 'blocked', blocker)
@@ -1558,17 +1523,17 @@ def process_whatsapp_entry(state: dict[str, Any], entry: WhatsAppEntry, summary:
         return
 
     summary['expense_candidates'] += 1
-    capture = capture_sqlite_candidate(source_surface='whatsapp_recent', source_ref=key,
-                                       source_timestamp=entry.timestamp, supplier=entry.contact, evidence_ref='WHATSAPP_RECENT.md')
+    capture = capture_sharepoint_candidate(source_surface='whatsapp_recent', source_ref=key,
+                                           source_timestamp=entry.timestamp, supplier=entry.contact, evidence_ref='WHATSAPP_RECENT.md')
     if _capture_persisted(capture):
-        routed_detail = f'Captured in SQLite expense_id={capture.expense_id}'
-        blocker = 'Captured in SQLite; WhatsApp expense signal needs explicit business/payment/evidence review before finance posting'
-    elif capture.outcome == 'captured':
-        routed_detail = 'SQLite capture returned no expense ID; durable capture is not claimed'
-        blocker = 'SQLite capture returned no expense ID'
+        routed_detail = f'Captured in SharePoint ref={capture.canonical_ref}'
+        blocker = 'Captured in SharePoint; WhatsApp expense signal needs explicit business/payment/evidence review before finance posting'
+    elif capture.accepted:
+        routed_detail = 'SharePoint write accepted; verified readback is pending'
+        blocker = _capture_blocker(capture)
     else:
-        routed_detail = 'SQLite capture failed; durable replay preserved'
-        blocker = f'Durable SQLite replay pending autonomous retry: {_capture_blocker(capture)}'
+        routed_detail = 'SharePoint capture unavailable; operational retry preserved'
+        blocker = f'SharePoint capture pending autonomous retry: {_capture_blocker(capture)}'
     advance_item_lifecycle(state, key, 'whatsapp', 'routed', routed_detail)
     upsert_monitored(key, lifecycle_payload(base_payload, 'routed'))
     advance_item_lifecycle(state, key, 'whatsapp', 'blocked', blocker)
@@ -1660,17 +1625,17 @@ def process_mirror_expense_events(state: dict[str, Any], summary: dict[str, int]
             advance_item_lifecycle(state, key, 'mirror_expense', 'not_needed', reason)
             summary['mirror_not_needed'] = summary.get('mirror_not_needed', 0) + 1
             continue
-        capture = capture_sqlite_candidate(source_surface=surface, source_ref=source_id, source_timestamp=safe_source_timestamp,
-                                           supplier=subject, evidence_ref=source_ref)
+        capture = capture_sharepoint_candidate(source_surface=surface, source_ref=source_id, source_timestamp=safe_source_timestamp,
+                                               supplier=subject, evidence_ref=source_ref)
         if _capture_persisted(capture):
-            canonical_ref = f'sqlite:{capture.expense_id}'
-            blocker = 'SQLite capture requires expense enrichment before ledger/evidence completion'
-        elif capture.outcome == 'captured':
+            canonical_ref = capture.canonical_ref
+            blocker = 'SharePoint capture requires expense enrichment before ledger/evidence completion'
+        elif capture.accepted:
             canonical_ref = None
-            blocker = 'SQLite capture returned no expense ID'
+            blocker = 'SharePoint write accepted without verified readback'
         else:
-            canonical_ref = f'sqlite-replay:{source_id}'
-            blocker = f'Durable SQLite replay pending autonomous retry: {_capture_blocker(capture)}'
+            canonical_ref = None
+            blocker = f'SharePoint capture pending autonomous retry: {_capture_blocker(capture)}'
         outcome = build_outcome(
             source_id=source_id,
             source_surface=surface,
@@ -1772,6 +1737,28 @@ def _read_sharepoint_delivery_results() -> dict[str, dict[str, Any]]:
     return {str(item.get('id')): item for item in raw if isinstance(item, dict) and item.get('id')}
 
 
+def _verified_receipt_delivery(delivery: Any, expected_path: str) -> bool:
+    """Require processed success plus the upload's exact remote readback proof."""
+    if not isinstance(delivery, dict):
+        return False
+    if delivery.get('success') is not True or not delivery.get('processed_at'):
+        return False
+    output = delivery.get('output')
+    if isinstance(output, str):
+        try:
+            output = json.loads(output)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(output, dict):
+        return False
+    return (
+        output.get('path') == expected_path
+        and isinstance(output.get('etag'), str)
+        and bool(output['etag'].strip())
+        and output.get('status') in {'uploaded', 'exists'}
+    )
+
+
 def _enqueue_receipt_upload(*, upload_id: str, source_ref: str, local_path: Path,
                             sha256: str, mime_type: str) -> str:
     safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', local_path.name).strip('._') or 'receipt.bin'
@@ -1789,13 +1776,12 @@ def _enqueue_receipt_upload(*, upload_id: str, source_ref: str, local_path: Path
     return sp_path
 
 
-def process_expense_sqlite_replay(summary: dict[str, int], *, replay_path: Path = DEFAULT_REPLAY,
-                                  database: Path = DEFAULT_DATABASE) -> list[dict[str, Any]]:
-    """Advance durable SQLite replay records through capture and receipt proof.
+def process_expense_replay(summary: dict[str, int], *, replay_path: Path = SHAREPOINT_REPLAY_FILE) -> list[dict[str, Any]]:
+    """Advance SharePoint-bound recovery records without claiming completion.
 
-    It is intentionally queue-driven: no privileged tool/TOTP is invoked at
-    runtime.  A success is only returned after SQLite and immutable local plus
-    SharePoint evidence are present; every other state remains replayable.
+    The manifest is operational recovery state.  Each item is removed only
+    after the authority reports a verified readback; queued writes remain in
+    place for the next bounded retry.
     """
     if not replay_path.exists():
         manifest = {'items': []}
@@ -1838,49 +1824,48 @@ def process_expense_sqlite_replay(summary: dict[str, int], *, replay_path: Path 
         source_ref = item['source_ref']
         source_surface = item['source_surface']
         facts = item['facts']
-        captured = capture_candidate(source_surface=source_surface, source_ref=source_ref,
-                                     facts=facts, database=database, replay_path=replay_path)
+        captured = capture_candidate(
+            source_surface=source_surface,
+            source_ref=source_ref,
+            facts=facts,
+            boundary=resolve_boundary(),
+        )
         if not _capture_persisted(captured):
             states.append({'state': 'blocked', 'source_ref': source_ref, 'blocker': _capture_blocker(captured)})
             continue
         receipt = _receipt_file_from_facts(facts)
-        if receipt is None:
-            states.append({'state': 'blocked', 'source_ref': source_ref, 'expense_id': captured.expense_id,
-                           'blocker': 'original_receipt_binary_unavailable'})
-            continue
-        digest = hashlib.sha256(receipt.read_bytes()).hexdigest()
-        mime_type = str(facts.get('receipt_mime_type') or mimetypes.guess_type(receipt.name)[0] or 'application/octet-stream')
-        repository = ExpenseRepository(database)
-        try:
-            repository.record_receipt_evidence(source_ref=source_ref, evidence_kind='local_receipt_binary',
-                                               local_path=str(receipt), sha256=digest,
-                                               source_timestamp=str(facts.get('source_timestamp') or '') or None)
+        if receipt is not None:
+            digest = hashlib.sha256(receipt.read_bytes()).hexdigest()
+            mime_type = str(
+                facts.get('receipt_mime_type')
+                or mimetypes.guess_type(receipt.name)[0]
+                or 'application/octet-stream'
+            )
             upload_id = _receipt_upload_id(source_ref, digest)
-            sp_path = _enqueue_receipt_upload(upload_id=upload_id, source_ref=source_ref,
-                                              local_path=receipt, sha256=digest, mime_type=mime_type)
+            sp_path = _enqueue_receipt_upload(
+                upload_id=upload_id,
+                source_ref=source_ref,
+                local_path=receipt,
+                sha256=digest,
+                mime_type=mime_type,
+            )
             delivery = deliveries.get(upload_id)
-            if not delivery or not delivery.get('success'):
-                states.append({'state': 'blocked', 'source_ref': source_ref, 'expense_id': captured.expense_id,
-                               'blocker': 'sharepoint_upload_pending', 'queue_id': upload_id})
+            if not _verified_receipt_delivery(delivery, sp_path):
+                states.append({
+                    'state': 'blocked',
+                    'source_ref': source_ref,
+                    'canonical_ref': captured.canonical_ref,
+                    'blocker': 'sharepoint_receipt_upload_pending',
+                    'queue_id': upload_id,
+                })
                 continue
-            try:
-                proof = json.loads(str(delivery.get('output') or ''))
-            except json.JSONDecodeError:
-                proof = {}
-            if not proof.get('url') or not proof.get('etag'):
-                states.append({'state': 'blocked', 'source_ref': source_ref, 'expense_id': captured.expense_id,
-                               'blocker': 'sharepoint_upload_missing_proof', 'queue_id': upload_id})
-                continue
-            repository.record_receipt_evidence(source_ref=source_ref, evidence_kind='sharepoint_receipt_binary',
-                                               sha256=digest, sharepoint_path=sp_path,
-                                               sharepoint_url=str(proof['url']), sharepoint_etag=str(proof['etag']),
-                                               source_timestamp=str(facts.get('source_timestamp') or '') or None)
-            summary['replay_delivered'] = summary.get('replay_delivered', 0) + 1
-            successful_items.append(item)
-            states.append({'state': 'success', 'source_ref': source_ref, 'expense_id': captured.expense_id,
-                           'sharepoint_url': proof['url'], 'sharepoint_etag': proof['etag']})
-        finally:
-            repository.close()
+        summary['replay_delivered'] = summary.get('replay_delivered', 0) + 1
+        successful_items.append(item)
+        states.append({
+            'state': 'success',
+            'source_ref': source_ref,
+            'canonical_ref': captured.canonical_ref,
+        })
 
     # Capture and evidence delivery intentionally happen before this lock.  The
     # adapter takes the same lock while appending a failed capture, so holding it
@@ -1947,7 +1932,7 @@ def main() -> None:
     process_whatsapp_threads(state, whatsapp_entries, summary)
     reconcile_monitored_items(state, email_entries, whatsapp_entries, summary)
     process_mirror_expense_events(state, summary)
-    replay_states = process_expense_sqlite_replay(summary)
+    replay_states = process_expense_replay(summary)
     summary['replay_blocked'] = sum(1 for result in replay_states if result.get('state') == 'blocked')
 
     state['last_run'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')

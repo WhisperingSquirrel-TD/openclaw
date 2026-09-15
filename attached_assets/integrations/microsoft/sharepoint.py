@@ -60,6 +60,7 @@ EXIT CODES
 """
 
 import argparse
+import hashlib
 import json
 import sys
 import requests
@@ -131,6 +132,10 @@ def parse_args() -> argparse.Namespace:
                    help="Path to temp file containing content (required for create/update/append)")
     p.add_argument("--allow-overwrite", action="store_true",
                    help="For create: overwrite if file already exists (default: fail)")
+    p.add_argument("--base-etag", default=None,
+                   help="Required source eTag for an optimistic update/append")
+    p.add_argument("--expected-source-sha256", default=None,
+                   help="Expected SHA-256 of the source content before an update")
     p.add_argument("--mime-type", default=None,
                    help="For upload: original binary MIME type (required)")
     p.add_argument("--destination", default=None,
@@ -480,6 +485,120 @@ def _file_exists(access_token: str, site_id: str, drive_id: str, sp_path: str) -
     return resp.status_code == 200
 
 
+def _get_item_metadata(access_token: str, site_id: str, drive_id: str,
+                       sp_path: str):
+    """Return the current drive item response used for optimistic writes.
+
+    Keeping the metadata request separate from ``_file_exists`` means callers
+    can retain the eTag observed immediately before a write.  A conditional
+    PUT is important here: a read/modify/write append must never overwrite a
+    newer authoritative file version.
+    """
+    return requests.get(
+        _drive_item_url(site_id, drive_id, sp_path),
+        headers=_headers(access_token),
+        timeout=15,
+    )
+
+
+def _item_etag(item: dict, response=None) -> str:
+    """Extract an eTag from either a Graph item or an HTTP response."""
+    etag = str(item.get("eTag") or item.get("@odata.etag") or "").strip()
+    if not etag and response is not None:
+        headers = getattr(response, "headers", {}) or {}
+        etag = str(headers.get("ETag") or headers.get("etag") or "").strip()
+    return etag
+
+
+LEDGER_UPDATE_PATHS = frozenset({
+    "expenses/expense ledger.md",
+    "finance/finance ledger.md",
+})
+
+
+def _is_ledger_update_path(sp_path: str) -> bool:
+    return sp_path.strip("/").casefold() in LEDGER_UPDATE_PATHS
+
+
+def _validate_source_sha256(value: str | None) -> str:
+    value = str(value or "").strip().lower()
+    if value and (len(value) != 64 or any(char not in "0123456789abcdef" for char in value)):
+        print("ERROR: --expected-source-sha256 must be a SHA-256 hex digest", file=sys.stderr)
+        sys.exit(3)
+    return value
+
+
+def _validate_update_etag(sp_path: str, base_etag: str | None) -> str:
+    base_etag = str(base_etag or "").strip()
+    if _is_ledger_update_path(sp_path) and not base_etag:
+        print(
+            f"ERROR: Update refused for authoritative ledger {sp_path}: "
+            "--base-etag is required",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+    return base_etag
+
+
+def _validate_write_protocol(
+    sp_path: str, base_etag: str | None, expected_source_sha256: str | None,
+) -> tuple[str, str]:
+    """Require both optimistic-concurrency fields for authoritative ledgers."""
+    base = str(base_etag or "").strip()
+    expected = _validate_source_sha256(expected_source_sha256)
+    if _is_ledger_update_path(sp_path):
+        missing = []
+        if not base:
+            missing.append("--base-etag")
+        if not expected:
+            missing.append("--expected-source-sha256")
+        if missing:
+            print(
+                f"ERROR: Write refused for authoritative ledger {sp_path}: "
+                f"{' and '.join(missing)} {'are' if len(missing) > 1 else 'is'} required",
+                file=sys.stderr,
+            )
+            sys.exit(3)
+    return base, expected
+
+
+def _write_proof(item: dict, readback_sha256: str) -> None:
+    """Emit a stable machine-readable proof line for queue consumers."""
+    print("SP_WRITE_PROOF: " + json.dumps({
+        "etag": _item_etag(item),
+        "resulting_etag": _item_etag(item),
+        "readback_sha256": readback_sha256,
+    }, sort_keys=True))
+
+
+def _readback_or_exit(access_token: str, site_id: str, drive_id: str,
+                      sp_path: str, expected: bytes, operation: str) -> str:
+    """Verify that Graph serves exactly the bytes just written.
+
+    Graph can return a successful PUT before a proxy/cache has made the new
+    content available.  A write is only reported as successful once a fresh
+    content read matches byte-for-byte.
+    """
+    url = _drive_item_url(site_id, drive_id, sp_path) + ":/content"
+    response = requests.get(url, headers=_headers(access_token), timeout=30)
+    if not response.ok:
+        print(
+            f"ERROR: {operation.title()} readback failed "
+            f"({response.status_code}): {response.text[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    actual = response.content
+    if actual != expected:
+        print(
+            f"ERROR: {operation.title()} readback mismatch for {sp_path} "
+            f"(expected {len(expected)} bytes, received {len(actual)} bytes)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return hashlib.sha256(actual).hexdigest()
+
+
 def _print_item(item: dict, prefix: str = "") -> None:
     name      = item.get("name", "?")
     is_folder = "folder" in item
@@ -543,20 +662,41 @@ def cmd_read(access_token: str, sp_path: str, site_id: str, drive_id: str) -> No
 def cmd_create(access_token: str, sp_path: str, site_id: str, drive_id: str,
                content_file: str, allow_overwrite: bool) -> None:
     sp_path = _normalise_path(sp_path)
+    if _is_ledger_update_path(sp_path):
+        print(
+            f"ERROR: Generic create is refused for authoritative ledger {sp_path}; "
+            "use the seer-finance gated bootstrap mechanism",
+            file=sys.stderr,
+        )
+        sys.exit(3)
     content = _read_content_file(content_file)
 
-    if not allow_overwrite:
-        if _file_exists(access_token, site_id, drive_id, sp_path):
+    existing_response = _get_item_metadata(access_token, site_id, drive_id, sp_path)
+    existing_item = {}
+    if existing_response.status_code == 200:
+        existing_item = existing_response.json()
+        if not allow_overwrite:
             print(
                 f"ERROR: File already exists: {sp_path}\n"
                 "Use --allow-overwrite to replace it, or use 'update' to replace with versioning.",
                 file=sys.stderr,
             )
             sys.exit(4)
+    elif existing_response.status_code != 404:
+        print(
+            f"ERROR: Could not check whether file exists "
+            f"({existing_response.status_code}): {existing_response.text[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     url = _drive_item_url(site_id, drive_id, sp_path) + ":/content"
     headers = _headers(access_token)
     headers["Content-Type"] = "text/markdown; charset=utf-8"
+    if existing_item:
+        etag = _item_etag(existing_item, existing_response)
+        if etag:
+            headers["If-Match"] = etag
 
     resp = requests.put(url, headers=headers, data=content, timeout=30)
 
@@ -565,6 +705,10 @@ def cmd_create(access_token: str, sp_path: str, site_id: str, drive_id: str,
         sys.exit(2)
 
     item    = resp.json()
+    if not _item_etag(item, resp):
+        print("ERROR: Create returned no resulting eTag; write proof is incomplete",
+              file=sys.stderr)
+        sys.exit(2)
     version = item.get("eTag", "").strip('"')[:12]
     size    = item.get("size", len(content))
     print(f"✓ Created: {sp_path}")
@@ -572,6 +716,10 @@ def cmd_create(access_token: str, sp_path: str, site_id: str, drive_id: str,
     if version:
         print(f"  eTag:    {version}")
     print(f"  URL:     {item.get('webUrl', '(unavailable)')}")
+    readback_sha256 = _readback_or_exit(
+        access_token, site_id, drive_id, sp_path, content, "create"
+    )
+    _write_proof(item, readback_sha256)
 
 
 def cmd_upload(access_token: str, sp_path: str, site_id: str, drive_id: str,
@@ -613,21 +761,75 @@ def cmd_upload(access_token: str, sp_path: str, site_id: str, drive_id: str,
 
 
 def cmd_update(access_token: str, sp_path: str, site_id: str, drive_id: str,
-               content_file: str) -> None:
+               content_file: str, base_etag: str | None = None,
+               expected_source_sha256: str | None = None) -> None:
     sp_path = _normalise_path(sp_path)
     content = _read_content_file(content_file)
+    base_etag, expected_source_sha256 = _validate_write_protocol(
+        sp_path, base_etag, expected_source_sha256,
+    )
 
-    if not _file_exists(access_token, site_id, drive_id, sp_path):
+    existing_response = _get_item_metadata(access_token, site_id, drive_id, sp_path)
+    if existing_response.status_code == 404:
         print(
             f"ERROR: File not found: {sp_path}\n"
             "Use 'create' to create a new file.",
             file=sys.stderr,
         )
         sys.exit(5)
+    if not existing_response.ok:
+        print(
+            f"ERROR: Could not read file metadata ({existing_response.status_code}): "
+            f"{existing_response.text[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     url = _drive_item_url(site_id, drive_id, sp_path) + ":/content"
     headers = _headers(access_token)
     headers["Content-Type"] = "text/markdown; charset=utf-8"
+    current_etag = _item_etag(existing_response.json(), existing_response)
+    if base_etag:
+        if not current_etag or current_etag != base_etag:
+            print(
+                f"ERROR: Update conflict for {sp_path}: supplied base eTag does "
+                f"not match remote eTag ({base_etag!r} != {current_etag!r}); no write sent",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        etag = base_etag
+    else:
+        etag = current_etag
+    if not etag:
+        print(
+            f"ERROR: Update refused — SharePoint did not return an eTag for {sp_path}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if expected_source_sha256:
+        source_resp = requests.get(
+            _drive_item_url(site_id, drive_id, sp_path) + ":/content",
+            headers=_headers(access_token), timeout=30,
+        )
+        if not source_resp.ok:
+            print(
+                f"ERROR: Could not read update source ({source_resp.status_code}): "
+                f"{source_resp.text[:300]}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        actual_source_sha256 = hashlib.sha256(source_resp.content).hexdigest()
+        if actual_source_sha256 != expected_source_sha256:
+            print(
+                f"ERROR: Update source hash conflict for {sp_path}: "
+                f"expected {expected_source_sha256}, received {actual_source_sha256}; "
+                "no write sent",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+    headers["If-Match"] = etag
 
     resp = requests.put(url, headers=headers, data=content, timeout=30)
 
@@ -636,6 +838,10 @@ def cmd_update(access_token: str, sp_path: str, site_id: str, drive_id: str,
         sys.exit(2)
 
     item    = resp.json()
+    if not _item_etag(item, resp):
+        print("ERROR: Update returned no resulting eTag; write proof is incomplete",
+              file=sys.stderr)
+        sys.exit(2)
     version = item.get("eTag", "").strip('"')[:12]
     size    = item.get("size", len(content))
     print(f"✓ Updated: {sp_path}")
@@ -644,24 +850,41 @@ def cmd_update(access_token: str, sp_path: str, site_id: str, drive_id: str,
         print(f"  eTag:    {version}")
     print(f"  SharePoint versioning creates a new version automatically if enabled.")
     print(f"  URL:     {item.get('webUrl', '(unavailable)')}")
+    readback_sha256 = _readback_or_exit(
+        access_token, site_id, drive_id, sp_path, content, "update"
+    )
+    _write_proof(item, readback_sha256)
 
 
 def cmd_append(access_token: str, sp_path: str, site_id: str, drive_id: str,
-               content_file: str) -> None:
+               content_file: str, base_etag: str | None = None,
+               expected_source_sha256: str | None = None) -> None:
     sp_path    = _normalise_path(sp_path)
     new_chunk  = _read_content_file(content_file)
+    base_etag, expected_source_sha256 = _validate_write_protocol(
+        sp_path, base_etag, expected_source_sha256,
+    )
 
-    # Read existing content
-    read_url = _drive_item_url(site_id, drive_id, sp_path) + ":/content"
-    read_resp = requests.get(read_url, headers=_headers(access_token), timeout=30)
-
-    if read_resp.status_code == 404:
+    metadata_resp = _get_item_metadata(access_token, site_id, drive_id, sp_path)
+    if metadata_resp.status_code == 404:
         print(
             f"ERROR: File not found: {sp_path}\n"
             "Use 'create' to create it first.",
             file=sys.stderr,
         )
         sys.exit(5)
+    if not metadata_resp.ok:
+        print(
+            f"ERROR: Could not read file metadata before append "
+            f"({metadata_resp.status_code}): {metadata_resp.text[:300]}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    # Read existing content
+    read_url = _drive_item_url(site_id, drive_id, sp_path) + ":/content"
+    read_resp = requests.get(read_url, headers=_headers(access_token), timeout=30)
+
     if not read_resp.ok:
         print(f"ERROR: Could not read file before append ({read_resp.status_code}): {read_resp.text[:300]}",
               file=sys.stderr)
@@ -679,6 +902,35 @@ def cmd_append(access_token: str, sp_path: str, site_id: str, drive_id: str,
     write_url = _drive_item_url(site_id, drive_id, sp_path) + ":/content"
     headers   = _headers(access_token)
     headers["Content-Type"] = "text/markdown; charset=utf-8"
+    current_etag = _item_etag(metadata_resp.json(), metadata_resp)
+    if base_etag:
+        if not current_etag or current_etag != base_etag:
+            print(
+                f"ERROR: Append conflict for {sp_path}: supplied base eTag does "
+                f"not match remote eTag ({base_etag!r} != {current_etag!r}); no write sent",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        etag = base_etag
+    else:
+        etag = current_etag or _item_etag({}, read_resp)
+    if not etag:
+        print(
+            f"ERROR: Append refused — SharePoint did not return an eTag for {sp_path}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if expected_source_sha256:
+        actual_source_sha256 = hashlib.sha256(existing).hexdigest()
+        if actual_source_sha256 != expected_source_sha256:
+            print(
+                f"ERROR: Append source hash conflict for {sp_path}: "
+                f"expected {expected_source_sha256}, received {actual_source_sha256}; "
+                "no write sent",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    headers["If-Match"] = etag
 
     resp = requests.put(write_url, headers=headers, data=combined, timeout=30)
 
@@ -687,6 +939,10 @@ def cmd_append(access_token: str, sp_path: str, site_id: str, drive_id: str,
         sys.exit(2)
 
     item    = resp.json()
+    if not _item_etag(item, resp):
+        print("ERROR: Append returned no resulting eTag; write proof is incomplete",
+              file=sys.stderr)
+        sys.exit(2)
     version = item.get("eTag", "").strip('"')[:12]
     print(f"✓ Appended: {sp_path}")
     print(f"  Added:   {len(new_chunk):,} bytes")
@@ -694,6 +950,10 @@ def cmd_append(access_token: str, sp_path: str, site_id: str, drive_id: str,
     if version:
         print(f"  eTag:    {version}")
     print(f"  URL:     {item.get('webUrl', '(unavailable)')}")
+    readback_sha256 = _readback_or_exit(
+        access_token, site_id, drive_id, sp_path, combined, "append"
+    )
+    _write_proof(item, readback_sha256)
 
 
 def cmd_delete_folder(access_token: str, sp_path: str,
@@ -864,9 +1124,15 @@ def main() -> None:
     elif args.command == "upload":
         cmd_upload(access_token, sp_path, site_id, drive_id, args.content_file, args.mime_type)
     elif args.command == "update":
-        cmd_update(access_token, sp_path, site_id, drive_id, args.content_file)
+        cmd_update(
+            access_token, sp_path, site_id, drive_id, args.content_file,
+            args.base_etag, args.expected_source_sha256,
+        )
     elif args.command == "append":
-        cmd_append(access_token, sp_path, site_id, drive_id, args.content_file)
+        cmd_append(
+            access_token, sp_path, site_id, drive_id, args.content_file,
+            args.base_etag, args.expected_source_sha256,
+        )
     elif args.command == "move":
         cmd_move(access_token, sp_path, args.destination, site_id, drive_id)
     elif args.command == "delete_folder":

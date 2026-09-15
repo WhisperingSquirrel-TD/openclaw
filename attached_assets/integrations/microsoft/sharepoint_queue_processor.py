@@ -8,10 +8,10 @@ SHAREPOINT_RESULT.md so L1 can see what happened — all without exec.run
 or TOTP approval from L1's perspective.
 
 ALL QUEUE OPERATIONS ARE EXEC-FREE FROM L1'S SIDE.
-L1 queues work by writing JSON to sharepoint-queue.json (a plain file
-write). The cron-based processor picks it up independently. No exec.run,
-no TOTP gate — this applies equally to create/update/append, move, and
-delete_folder.
+L1 submits complete operation objects through ``enqueue_operation``.  That
+producer owns the queue lock and atomic publication; agents must never edit
+sharepoint-queue.json directly.  The cron-based processor picks entries up
+independently. No exec.run or TOTP gate is required for bounded operations.
 
 READS ARE NOT HANDLED HERE.
 Files are read from the local content mirror at:
@@ -19,9 +19,9 @@ Files are read from the local content mirror at:
 The sharepoint_cache_poller.py keeps that mirror fresh (every 15 min).
 The AI reads from local files directly — no queue entry needed.
 
-QUEUE FORMAT (~/.openclaw/sharepoint-queue.json)
+PRODUCER PAYLOAD FORMAT
 -------------------------------------------------
-L1 writes queue entries directly as file writes (no exec/TOTP needed):
+L1 passes each complete object to ``enqueue_operation`` (no exec/TOTP needed):
 
 [
   {
@@ -29,6 +29,9 @@ L1 writes queue entries directly as file writes (no exec/TOTP needed):
     "operation": "create" | "update" | "append",
     "path": "/Stackstone CRM/Opportunities/Harken Health.md",
     "content": "Markdown content to write",
+    "base_etag": "\"{current-version}\"",  # required for authoritative ledgers
+    "expected_source_sha256": "<sha256 of content read before update>",
+    "content_sha256": "<sha256 of the exact queued replacement content>",
     "requested_at": "2026-04-09T10:00:00Z"
   },
   {
@@ -50,9 +53,11 @@ CRON SCHEDULE: every 1 minute (installed by install-forked-openclaw.sh)
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,6 +78,10 @@ MOVE_OPERATIONS          = {"move"}           # relocate/rename, no delete permi
 FOLDER_DELETE_OPERATIONS = {"delete_folder"}  # empty folders only — files never deleted
 READ_OPERATIONS          = {"read_binary"}    # on-demand binary extraction
 BINARY_UPLOAD_OPERATIONS = {"upload_binary"}  # receipt originals, MIME preserved
+AUTHORITATIVE_UPDATE_PATHS = frozenset({
+    "expenses/expense ledger.md",
+    "finance/finance ledger.md",
+})
 
 # OpenClaw skill assets are governed separately by the versioned skill-library
 # publisher. The generic SharePoint queue must never create, update, move or
@@ -80,6 +89,7 @@ BINARY_UPLOAD_OPERATIONS = {"upload_binary"}  # receipt originals, MIME preserve
 PROTECTED_ROOTS = frozenset({"skills"})
 SKILL_PUBLISHER = WORKSPACE / "scripts/publish_skill_release_to_sharepoint.py"
 SKILL_ID_ALLOWLIST = frozenset({"workspace-skills", "openclaw-skills"})
+_QUEUE_MUTEX = threading.Lock()
 
 
 def _queue_path_allowed(path: str) -> tuple[bool, str]:
@@ -92,6 +102,67 @@ def _queue_path_allowed(path: str) -> tuple[bool, str]:
     if parts[0].lower() in PROTECTED_ROOTS:
         return False, "Protected SharePoint root 'skills' is managed only by the guarded publish_skill operation"
     return True, ""
+
+
+def _is_authoritative_update_path(path: str) -> bool:
+    return str(path or "").strip().strip("/").casefold() in AUTHORITATIVE_UPDATE_PATHS
+
+
+def _validate_update_protocol(op: dict) -> tuple[bool, str]:
+    """Validate the queue-side optimistic concurrency contract."""
+    operation = str(op.get("operation", "")).lower()
+    if operation == "create" and _is_authoritative_update_path(op.get("path", "")):
+        return False, (
+            "Generic create is refused for authoritative ledger paths; "
+            "use the seer-finance gated bootstrap mechanism"
+        )
+    if operation not in {"update", "append"}:
+        return True, ""
+    if _is_authoritative_update_path(op.get("path", "")):
+        missing = []
+        if not str(op.get("base_etag", "")).strip():
+            missing.append("'base_etag'")
+        if not str(op.get("expected_source_sha256", "")).strip():
+            missing.append("'expected_source_sha256'")
+        if missing:
+            return False, (
+                "Authoritative ledger update/append requires "
+                + " and ".join(missing)
+                + "; re-read the ledger and retry from its current version"
+            )
+    expected_hash = str(op.get("expected_source_sha256", "")).strip().lower()
+    if expected_hash and (
+        len(expected_hash) != 64 or any(char not in "0123456789abcdef" for char in expected_hash)
+    ):
+        return False, "expected_source_sha256 must be a SHA-256 hex digest"
+    return True, ""
+
+
+def _conflict_proof(output: str) -> dict | None:
+    """Classify stale-base conflicts as terminal rebase-required failures."""
+    text = str(output or "")
+    lowered = text.casefold()
+    # A malformed queue entry is terminal, but it is not evidence that the
+    # remote document changed; callers should fix the request rather than
+    # treating a missing protocol field as a rebase receipt.
+    if "requires" in lowered and (
+        "base_etag" in lowered or "expected_source_sha256" in lowered
+    ):
+        return None
+    proof: dict | None = None
+    if "source hash conflict" in lowered or "source_hash" in lowered:
+        proof = {"kind": "source_hash_mismatch"}
+    elif "base etag" in lowered or "base_etag" in lowered:
+        proof = {"kind": "base_etag_mismatch"}
+    elif re.search(r"(?<!\d)412(?!\d)", lowered):
+        proof = {"kind": "remote_precondition_failed", "status": 412}
+    elif re.search(r"(?<!\d)409(?!\d)", lowered):
+        proof = {"kind": "remote_conflict", "status": 409}
+    if proof is not None:
+        # Keep the bounded CLI detail as machine-readable evidence without
+        # requiring consumers to parse human log text.
+        proof["message"] = text[:2000]
+    return proof
 
 # Binary extractor — same directory as this script
 import sys as _sys
@@ -156,18 +227,48 @@ def _trim_log() -> None:
 # ---------------------------------------------------------------------------
 
 class _Lock:
+    def __init__(self, blocking: bool = False):
+        self.blocking = blocking
+        self._fd = None
+
     def __enter__(self):
+        # The lock file is deliberately independent of TOTP/exec.  flock
+        # closes the check-then-create race in the old sentinel-only lock,
+        # while the process mutex also serialises threads in one interpreter.
+        acquired = _QUEUE_MUTEX.acquire(blocking=self.blocking)
+        if not acquired:
+            raise RuntimeError("another queue operation is in progress")
         LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if LOCK_FILE.exists():
-            age = datetime.now().timestamp() - LOCK_FILE.stat().st_mtime
-            if age < 120:
-                raise RuntimeError(f"Lock held ({age:.0f}s old) — another run in progress")
-            LOCK_FILE.unlink(missing_ok=True)
-        LOCK_FILE.write_text(str(os.getpid()))
+        try:
+            import fcntl
+            self._fd = LOCK_FILE.open("a+")
+            flags = fcntl.LOCK_EX
+            if not self.blocking:
+                flags |= fcntl.LOCK_NB
+            try:
+                fcntl.flock(self._fd.fileno(), flags)
+            except BlockingIOError:
+                self._fd.close()
+                self._fd = None
+                raise RuntimeError("another queue operation is in progress")
+            self._fd.seek(0)
+            self._fd.truncate()
+            self._fd.write(str(os.getpid()))
+            self._fd.flush()
+        except Exception:
+            _QUEUE_MUTEX.release()
+            raise
         return self
 
     def __exit__(self, *_):
-        LOCK_FILE.unlink(missing_ok=True)
+        try:
+            if self._fd is not None:
+                import fcntl
+                fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
+                self._fd.close()
+        finally:
+            self._fd = None
+            _QUEUE_MUTEX.release()
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +300,30 @@ def _write_queue(items: list[dict]) -> None:
     except OSError as e:
         log(f"ERROR: Could not write queue: {e}")
         tmp.unlink(missing_ok=True)
+
+
+def enqueue_operation(operation: dict) -> bool:
+    """Atomically append one queue operation without dropping producers.
+
+    Queue writers normally have no TOTP/exec requirement.  This helper is the
+    safe read/modify/write path for producers that run in the same process (or
+    cooperate through the queue lock); existing IDs are idempotent.
+    """
+    if not isinstance(operation, dict):
+        raise TypeError("SharePoint queue operation must be an object")
+    operation = dict(operation)
+    operation.setdefault("id", str(uuid.uuid4()))
+    with _Lock(blocking=True):
+        current = _read_queue()
+        operation_id = str(operation["id"])
+        if any(str(item.get("id", "")) == operation_id for item in current):
+            return False
+        _write_queue(current + [operation])
+    return True
+
+
+# A descriptive alias for callers that prefer queue-oriented naming.
+enqueue = enqueue_operation
 
 
 def _clear_queue() -> None:
@@ -488,6 +613,9 @@ def _run_write_operation(op: dict) -> tuple[bool, str]:
             f"Reads are handled via the local SharePoint cache — "
             f"read ~/.openclaw/workspace/sharepoint-cache/<path> directly."
         )
+    protocol_allowed, protocol_rejection = _validate_update_protocol(op)
+    if not protocol_allowed:
+        return False, protocol_rejection
     if not sp_path:
         return False, "Missing 'path' field"
     if not SP_SCRIPT.exists():
@@ -505,6 +633,11 @@ def _run_write_operation(op: dict) -> tuple[bool, str]:
     cmd = ["python3", str(SP_SCRIPT), operation, sp_path, "--content-file", content_file]
     if operation == "create" and op.get("allow_overwrite"):
         cmd += ["--allow-overwrite"]
+    if operation in {"update", "append"}:
+        if op.get("base_etag"):
+            cmd += ["--base-etag", str(op["base_etag"])]
+        if op.get("expected_source_sha256"):
+            cmd += ["--expected-source-sha256", str(op["expected_source_sha256"])]
 
     try:
         result = subprocess.run(
@@ -515,6 +648,30 @@ def _run_write_operation(op: dict) -> tuple[bool, str]:
         )
         output  = (result.stdout + result.stderr).strip()
         success = result.returncode == 0
+        if success and (
+            str(op.get("operation", "")).lower() in {"update", "append"}
+            and _is_authoritative_update_path(op.get("path", ""))
+        ):
+            proof = _extract_write_proof(output)
+            expected_hash = str(op.get("content_sha256", "")).strip()
+            readback_hash = str(proof.get("readback_sha256", "")).strip()
+            resulting_etag = str(proof.get("resulting_etag", "")).strip()
+            sha_valid = (
+                len(readback_hash) == 64
+                and readback_hash == readback_hash.lower()
+                and all(char in "0123456789abcdef" for char in readback_hash)
+            )
+            if (
+                not resulting_etag
+                or not sha_valid
+                or not expected_hash
+                or readback_hash != expected_hash
+            ):
+                return False, (
+                    "ERROR: Authoritative write proof is missing or invalid; "
+                    "expected SP_WRITE_PROOF with nonempty resulting_etag and "
+                    f"readback_sha256 matching content_sha256 ({expected_hash or 'missing'})"
+                )
         return success, output
     except subprocess.TimeoutExpired:
         return False, "Timed out after 60 seconds"
@@ -525,6 +682,18 @@ def _run_write_operation(op: dict) -> tuple[bool, str]:
             Path(content_file).unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _extract_write_proof(output: str) -> dict:
+    """Extract the CLI's final machine-readable write proof."""
+    match = re.search(r"(?m)^SP_WRITE_PROOF:\s*(\{.*\})\s*$", output or "")
+    if not match:
+        return {}
+    try:
+        proof = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return {}
+    return proof if isinstance(proof, dict) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -588,27 +757,96 @@ def _write_results_json(results: list[dict]) -> None:
     tmp.replace(RESULT_JSON)
 
 
+def _successful_operation_ids() -> set[str]:
+    """Return IDs already durably acknowledged by a prior successful run."""
+    try:
+        loaded = json.loads(RESULT_JSON.read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(loaded, list):
+        return set()
+    return {
+        str(item.get("id"))
+        for item in loaded
+        if isinstance(item, dict) and item.get("id") and item.get("success") is True
+    }
+
+
+def _pending_after_processing(original: list[dict], current: list[dict],
+                              results: list[dict],
+                              completed_ids: set[str] | None = None) -> list[dict]:
+    """Merge retries with entries added while this batch was running.
+
+    The processor owns only the entries it observed at batch start.  Reading
+    the file again before replacing it prevents a producer that queued work
+    during a slow Graph request from being erased by the retry write.
+    """
+    result_by_id = {str(item.get("id")): item for item in results if item.get("id")}
+    completed_ids = completed_ids or set()
+    pending: list[dict] = []
+    seen: set[str] = set()
+
+    # Failed original entries must remain available for retry.  This applies
+    # to create/update/append as well as the other queue operations.
+    for op in original:
+        op_id = str(op.get("id", ""))
+        if op_id in completed_ids:
+            continue
+        result = result_by_id.get(op_id)
+        if result is None or (
+            not result.get("success", False) and result.get("retryable", False)
+        ):
+            if op_id not in seen:
+                pending.append(op)
+                seen.add(op_id)
+
+    # Preserve entries a producer added after the initial snapshot.  A
+    # successful ID is intentionally omitted: operation IDs are idempotency
+    # keys, so replaying that ID must not write twice.
+    for op in current:
+        op_id = str(op.get("id", ""))
+        # IDs processed in this batch are represented by the original entry
+        # above (only retryable failures are retained).  Do not re-add the
+        # stale copy that a plain-file producer may have left in place.
+        if op_id in completed_ids or op_id in result_by_id or op_id in seen:
+            continue
+        pending.append(op)
+        seen.add(op_id)
+    return pending
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    queue = _read_queue()
-    if not queue:
-        return
-
-    log(f"Queue processor starting — {len(queue)} item(s) to process")
-
     try:
         with _Lock():
+            queue = _read_queue()
+            if not queue:
+                return
+
+            log(f"Queue processor starting — {len(queue)} item(s) to process")
             results   = []
-            rejected  = []
+            seen_ids  = set()
+            completed_ids = _successful_operation_ids()
 
             for op in queue:
                 op_id      = op.get("id", str(uuid.uuid4())[:8])
                 op_name    = op.get("operation", "?")
                 path       = op.get("path", "?")
+                op_id      = str(op_id)
+                if not op.get("id"):
+                    op["id"] = op_id
                 log(f"Processing [{op_id}] {op_name.upper()} {path}")
+
+                # A queue ID is an idempotency key.  This handles both
+                # duplicate producer entries in one file and replay after a
+                # successful prior processor run.
+                if op_id in seen_ids or op_id in completed_ids:
+                    log(f"  SKIPPED duplicate/completed operation ID {op_id}")
+                    continue
+                seen_ids.add(op_id)
 
                 op_lower = op_name.lower()
                 # Skills remain protected from generic paths; only the guarded
@@ -621,12 +859,25 @@ def main() -> None:
                     dest_allowed, dest_rejection = _queue_path_allowed(op.get("destination", ""))
                     if not dest_allowed:
                         allowed, rejection = False, f"Unsafe move destination: {dest_rejection}"
+                if allowed:
+                    protocol_allowed, protocol_rejection = _validate_update_protocol(op)
+                    if not protocol_allowed:
+                        allowed, rejection = False, protocol_rejection
                 if not allowed:
                     log(f"  REJECTED: {rejection}")
-                    rejected.append(op_id)
+                    conflict = _conflict_proof(rejection)
                     results.append({
                         "id": op_id, "operation": op_name, "path": path,
                         "success": False, "output": rejection,
+                        "retryable": False,
+                        **(
+                            {
+                                "error_code": "rebase_required",
+                                "rebase_required": True,
+                                "conflict": conflict,
+                            }
+                            if conflict else {}
+                        ),
                         "requested_at": op.get("requested_at", ""),
                         "processed_at": datetime.now(timezone.utc).isoformat(),
                     })
@@ -656,10 +907,10 @@ def main() -> None:
                         f"~/.openclaw/workspace/sharepoint-cache/<path>."
                     )
                     log(f"  REJECTED: {msg}")
-                    rejected.append(op_id)
                     results.append({
                         "id": op_id, "operation": op_name, "path": path,
                         "success": False, "output": msg,
+                        "retryable": False,
                         "requested_at": op.get("requested_at", ""),
                         "processed_at": datetime.now(timezone.utc).isoformat(),
                     })
@@ -667,6 +918,12 @@ def main() -> None:
 
                 status = "OK" if success else "FAILED"
                 log(f"  → {status}: {output[:120]}")
+                conflict = _conflict_proof(output) if not success else None
+                retryable = (
+                    not success
+                    and not conflict
+                    and op_lower in (WRITE_OPERATIONS | BINARY_UPLOAD_OPERATIONS)
+                )
 
                 results.append({
                     "id":           op_id,
@@ -674,15 +931,36 @@ def main() -> None:
                     "path":         path,
                     "success":      success,
                     "output":       output,
+                    "retryable":    retryable,
+                    **(
+                        {
+                            "error_code": "rebase_required",
+                            "rebase_required": True,
+                            "conflict": conflict,
+                        }
+                        if conflict else {}
+                    ),
+                    **(
+                        {
+                            "etag": _extract_write_proof(output).get(
+                                "etag", _extract_write_proof(output).get("resulting_etag")
+                            ),
+                            "resulting_etag": _extract_write_proof(output).get(
+                                "resulting_etag", _extract_write_proof(output).get("etag")
+                            ),
+                            "readback_sha256": _extract_write_proof(output).get("readback_sha256"),
+                        }
+                        if op_lower in WRITE_OPERATIONS and success else {}
+                    ),
                     "requested_at": op.get("requested_at", ""),
                     "processed_at": datetime.now(timezone.utc).isoformat(),
                     "delivery":     op.get("delivery"),
                 })
 
-            # Failed binary receipts stay durable in the queue; they are never
-            # silently dropped while a replay item still needs evidence proof.
-            retryable = [op for op in queue if op.get("operation", "").lower() in BINARY_UPLOAD_OPERATIONS
-                         and not any(r.get("id") == op.get("id") and r.get("success") for r in results)]
+            # Re-read after Graph work so producers that queued entries while
+            # this batch was running are merged, not overwritten.
+            current_queue = _read_queue()
+            retryable = _pending_after_processing(queue, current_queue, results, completed_ids)
             _write_queue(retryable)
             _write_results(results)
             _write_results_json(results)

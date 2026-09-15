@@ -1,8 +1,9 @@
 """Bounded, source-linked enrichment queue for expense candidates.
 
-The queue holds only unresolved financial facts. It is not a second expense
-ledger: canonical outcome remains seer-expenses.md and accounting truth remains
-the finance ledger.
+The queue holds only unresolved financial facts and recovery metadata. It is
+not a second expense ledger: canonical expense review is SharePoint
+``/Expenses/Expense ledger.md`` and finance posting is SharePoint
+``/Finance/Finance ledger.md``.
 """
 from __future__ import annotations
 

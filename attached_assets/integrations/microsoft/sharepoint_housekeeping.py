@@ -4,7 +4,7 @@ SharePoint CRM housekeeping sweep for OpenClaw.
 
 Reads the local SharePoint cache, reviews each CRM entity (Account or Opportunity)
 using the configured model via the Anthropic batch API (50% cost saving), and executes safe
-normalisation changes via the existing sharepoint-queue.json write path.
+normalisation changes via the locked SharePoint queue producer contract.
 
 Operating modes
 ───────────────
@@ -44,11 +44,17 @@ import argparse
 import json
 import os
 import sys
-import time
 import urllib.request
 import urllib.error
+import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# This script is installed beside sharepoint_queue_processor.py.  Keep queue
+# publication in that module so housekeeping participates in the same
+# process/file lock as every other producer.
+sys.path.insert(0, str(Path(__file__).parent))
+from sharepoint_queue_processor import enqueue_operation
 
 # ---------------------------------------------------------------------------
 # Paths and constants
@@ -57,7 +63,6 @@ from pathlib import Path
 STATE_DIR    = Path.home() / ".openclaw"
 CACHE_DIR    = STATE_DIR / "workspace/sharepoint-cache"
 MANIFEST     = CACHE_DIR / ".manifest.json"
-QUEUE_FILE   = STATE_DIR / "sharepoint-queue.json"
 RESULT_MD    = STATE_DIR / "workspace/SHAREPOINT_RESULT.md"
 REPORT_MD    = STATE_DIR / "workspace/HOUSEKEEPING_REPORT.md"
 PROPOSAL_MD  = STATE_DIR / "workspace/HOUSEKEEPING_PROPOSAL.md"
@@ -680,24 +685,10 @@ def parse_decision(response_text: str, entity_name: str) -> dict:
 # Queue execution
 # ---------------------------------------------------------------------------
 
-def _read_queue() -> list:
-    try:
-        if QUEUE_FILE.exists():
-            return json.loads(QUEUE_FILE.read_text())
-    except Exception:
-        pass
-    return []
-
-
-def _write_queue(items: list) -> None:
-    tmp = QUEUE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(items, indent=2))
-    tmp.replace(QUEUE_FILE)
-
 
 def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
     """
-    Submit safe changes for one entity to sharepoint-queue.json.
+    Submit safe changes for one entity through enqueue_operation.
     Returns list of submitted queue entries (for report tracking).
     """
     safe = decision.get("safe_changes", [])
@@ -705,10 +696,9 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
         return []
 
     submitted = []
-    queue = _read_queue()
     run_ts = datetime.now(timezone.utc).isoformat()
 
-    for change in safe:
+    for change_index, change in enumerate(safe, start=1):
         action = change.get("action", "").lower()
         path   = change.get("path", "")
         if not path:
@@ -741,7 +731,10 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
                     "file": from_path,
                     "reason": f"Original file — new canonical version created at {path}. Safe to delete manually.",
                 })
-            entry_id = f"sp-hk-{entity['name'][:8].replace(' ', '')}-{len(queue)+1}-{int(time.time())}"
+            entry_id = (
+                f"sp-hk-{entity['name'][:8].replace(' ', '')}-"
+                f"{change_index}-{uuid.uuid4().hex[:12]}"
+            )
             entry = {
                 "id":            entry_id,
                 "operation":     "create",
@@ -754,11 +747,14 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
                 "_reason":       change.get("reason", ""),
                 "_verified":     False,
             }
-            queue.append(entry)
-            submitted.append(entry)
+            if enqueue_operation(entry):
+                submitted.append(entry)
 
         elif action == "delete_folder":
-            entry_id = f"sp-hk-{entity['name'][:8].replace(' ', '')}-{len(queue)+1}-{int(time.time())}"
+            entry_id = (
+                f"sp-hk-{entity['name'][:8].replace(' ', '')}-"
+                f"{change_index}-{uuid.uuid4().hex[:12]}"
+            )
             entry = {
                 "id":            entry_id,
                 "operation":     "delete_folder",
@@ -768,8 +764,8 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
                 "_reason":       change.get("reason", ""),
                 "_verified":     False,
             }
-            queue.append(entry)
-            submitted.append(entry)
+            if enqueue_operation(entry):
+                submitted.append(entry)
 
         elif action == "move":
             destination = change.get("destination", "").strip()
@@ -784,7 +780,10 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
                     "reason": f"Rejected move destination outside canonical entity roots: {destination}"
                 })
                 continue
-            entry_id = f"sp-hk-{entity['name'][:8].replace(' ', '')}-{len(queue)+1}-{int(time.time())}"
+            entry_id = (
+                f"sp-hk-{entity['name'][:8].replace(' ', '')}-"
+                f"{change_index}-{uuid.uuid4().hex[:12]}"
+            )
             entry = {
                 "id":            entry_id,
                 "operation":     "move",
@@ -795,14 +794,17 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
                 "_reason":       change.get("reason", ""),
                 "_verified":     False,
             }
-            queue.append(entry)
-            submitted.append(entry)
+            if enqueue_operation(entry):
+                submitted.append(entry)
 
         elif action in ("create", "update", "append"):
             content = change.get("content", "")
             if not content:
                 continue
-            entry_id = f"sp-hk-{entity['name'][:8].replace(' ', '')}-{len(queue)+1}-{int(time.time())}"
+            entry_id = (
+                f"sp-hk-{entity['name'][:8].replace(' ', '')}-"
+                f"{change_index}-{uuid.uuid4().hex[:12]}"
+            )
             entry = {
                 "id":            entry_id,
                 "operation":     action,
@@ -813,11 +815,10 @@ def execute_safe_changes(entity: dict, decision: dict) -> list[dict]:
                 "_reason":       change.get("reason", ""),
                 "_verified":     False,
             }
-            queue.append(entry)
-            submitted.append(entry)
+            if enqueue_operation(entry):
+                submitted.append(entry)
 
     if submitted:
-        _write_queue(queue)
         log(f"  Queued {len(submitted)} write(s)/move(s) for {entity['name']} "
             f"(pending verification — check SHAREPOINT_RESULT.md)")
 
@@ -1151,8 +1152,8 @@ def _check_degraded_state() -> list[str]:
 
     # 2. Queue file writability
     try:
-        QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        test_path = QUEUE_FILE.parent / ".sp-hk-write-test"
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        test_path = STATE_DIR / ".sp-hk-write-test"
         test_path.write_text("ok")
         test_path.unlink()
     except Exception as e:

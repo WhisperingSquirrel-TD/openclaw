@@ -1,4 +1,4 @@
-"""Explicit one-way legacy JSON import into SQLite; never runs implicitly."""
+"""Explicit one-way legacy JSON import into a SQLite recovery DB; never implicit."""
 from __future__ import annotations
 import argparse
 import json
@@ -6,7 +6,9 @@ from .legacy_transactions_migration import migrate
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Import validated legacy accounting JSON into SQLite")
+    parser = argparse.ArgumentParser(
+        description="Import validated legacy accounting JSON into an explicit SQLite recovery DB"
+    )
     parser.add_argument("--legacy-transactions", required=True)
     parser.add_argument("--database", required=True)
     parser.add_argument("--apply", action="store_true", help="required: otherwise report planned operation only")

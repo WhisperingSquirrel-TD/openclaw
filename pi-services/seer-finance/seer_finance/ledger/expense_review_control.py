@@ -15,14 +15,47 @@ from typing import Any, Mapping
 from .expense_finance_bridge import ExpenseFinanceBridge, FinancePostResult
 from .expense_repository import ExpenseRepository, ExpenseStatus
 from .sqlite_finance_writer import SqliteFinanceWriter
+from .sharepoint_contract import (
+    DEFAULT_CACHE_ROOT,
+    DEFAULT_QUEUE_PATH,
+    DEFAULT_RESULTS_PATH,
+    SharePointDocumentStore,
+)
+from .sharepoint_finance_writer import SharePointFinanceWriter
+from .sharepoint_repository import SharePointExpenseRepository
 
-DEFAULT_DATABASE = Path(os.environ.get('SEER_FINANCE_DATABASE', '/var/lib/seer-finance/expense-ledger.sqlite3'))
+# SQLite is an explicit migration/recovery input, never the live default.
+DEFAULT_DATABASE: Path | None = None
 _REQUIRED_CONFIRMATION_FIELDS = ('supplier', 'amount_pence', 'currency', 'expense_date', 'category', 'evidence_ref', 'evidence_state', 'settlement_state')
 
 
-def list_holding_tray(database: str | Path = DEFAULT_DATABASE) -> list[dict[str, Any]]:
-    repo = ExpenseRepository(database)
+def _repository(*, database: str | Path | None, sharepoint_store: SharePointDocumentStore | None,
+                sharepoint_queue: str | Path, sharepoint_results: str | Path,
+                sharepoint_cache: str | Path):
+    if database is not None:
+        return ExpenseRepository(database)
+    return SharePointExpenseRepository(
+        store=sharepoint_store or SharePointDocumentStore(
+            queue_path=sharepoint_queue,
+            results_path=sharepoint_results,
+            cache_root=sharepoint_cache,
+        )
+    )
+
+
+def list_holding_tray(database: str | Path | None = DEFAULT_DATABASE, *,
+                      sharepoint_store: SharePointDocumentStore | None = None,
+                      sharepoint_queue: str | Path = DEFAULT_QUEUE_PATH,
+                      sharepoint_results: str | Path = DEFAULT_RESULTS_PATH,
+                      sharepoint_cache: str | Path = DEFAULT_CACHE_ROOT) -> list[dict[str, Any]]:
+    repo = _repository(database=database, sharepoint_store=sharepoint_store,
+                       sharepoint_queue=sharepoint_queue, sharepoint_results=sharepoint_results,
+                       sharepoint_cache=sharepoint_cache)
     try:
+        if isinstance(repo, SharePointExpenseRepository):
+            rows = repo.holding_tray()
+            rows.sort(key=lambda row: (row["observed_timestamp"], row["expense_id"]))
+            return rows
         rows = repo.connection.execute(
             "SELECT * FROM expenses WHERE status IN ('needs_review','blocked') ORDER BY observed_timestamp, expense_id"
         ).fetchall()
@@ -32,7 +65,11 @@ def list_holding_tray(database: str | Path = DEFAULT_DATABASE) -> list[dict[str,
 
 
 def review_expense(*, expense_id: str, decision: str, facts: Mapping[str, Any] | None = None,
-                   database: str | Path = DEFAULT_DATABASE) -> dict[str, Any]:
+                   database: str | Path | None = DEFAULT_DATABASE,
+                   sharepoint_store: SharePointDocumentStore | None = None,
+                   sharepoint_queue: str | Path = DEFAULT_QUEUE_PATH,
+                   sharepoint_results: str | Path = DEFAULT_RESULTS_PATH,
+                   sharepoint_cache: str | Path = DEFAULT_CACHE_ROOT) -> dict[str, Any]:
     """Apply an explicit review decision without inventing values.
 
     ``confirm`` admits only a fully evidenced expense and marks it ledger-ready;
@@ -41,7 +78,9 @@ def review_expense(*, expense_id: str, decision: str, facts: Mapping[str, Any] |
     """
     if decision not in {'confirm', 'not_business', 'duplicate'}:
         raise ValueError('decision must be confirm, not_business or duplicate')
-    repo = ExpenseRepository(database)
+    repo = _repository(database=database, sharepoint_store=sharepoint_store,
+                       sharepoint_queue=sharepoint_queue, sharepoint_results=sharepoint_results,
+                       sharepoint_cache=sharepoint_cache)
     try:
         current = repo.get(expense_id)
         if current.status is not ExpenseStatus.NEEDS_REVIEW:
@@ -67,11 +106,28 @@ def review_expense(*, expense_id: str, decision: str, facts: Mapping[str, Any] |
 
 
 def post_ready_expense(*, expense_id: str, transaction: Mapping[str, Any],
-                       database: str | Path = DEFAULT_DATABASE) -> FinancePostResult:
-    """Offer one reviewed expense to the sole strict SQLite finance writer."""
-    repo = ExpenseRepository(database)
+                       database: str | Path | None = DEFAULT_DATABASE,
+                       sharepoint_store: SharePointDocumentStore | None = None,
+                       sharepoint_queue: str | Path = DEFAULT_QUEUE_PATH,
+                       sharepoint_results: str | Path = DEFAULT_RESULTS_PATH,
+                       sharepoint_cache: str | Path = DEFAULT_CACHE_ROOT) -> FinancePostResult:
+    """Offer one reviewed expense to the authoritative SharePoint writer."""
+    repo = _repository(database=database, sharepoint_store=sharepoint_store,
+                       sharepoint_queue=sharepoint_queue, sharepoint_results=sharepoint_results,
+                       sharepoint_cache=sharepoint_cache)
     try:
-        return ExpenseFinanceBridge(repo, SqliteFinanceWriter(database)).post(expense_id, transaction)
+        writer = (
+            SqliteFinanceWriter(database)
+            if database is not None
+            else SharePointFinanceWriter(
+                store=sharepoint_store or SharePointDocumentStore(
+                    queue_path=sharepoint_queue,
+                    results_path=sharepoint_results,
+                    cache_root=sharepoint_cache,
+                )
+            )
+        )
+        return ExpenseFinanceBridge(repo, writer).post(expense_id, transaction)
     finally:
         repo.close()
 
@@ -91,7 +147,8 @@ def _json_object(raw: str) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='Controlled SEER SQLite expense review/posting operations.')
-    parser.add_argument('--database', default=str(DEFAULT_DATABASE))
+    parser.add_argument('--database', default=None,
+                        help='explicit legacy SQLite migration/recovery database')
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('list')
     review = sub.add_parser('review')

@@ -1,4 +1,8 @@
-"""Canonical SQLite accounting writer for reviewed SEER expense transactions."""
+"""Legacy/recovery SQLite accounting writer.
+
+Live finance writes use :mod:`sharepoint_finance_writer`; this class remains
+available only for explicit migration and recovery workflows.
+"""
 from __future__ import annotations
 
 import json
@@ -11,7 +15,7 @@ from .schema import Transaction
 
 
 class SqliteFinanceWriter:
-    """Stores a strict transaction once in the operational SQLite database."""
+    """Stores a strict transaction once in an explicitly selected recovery DB."""
 
     def __init__(self, database: str | Path) -> None:
         self.database = str(database)

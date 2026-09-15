@@ -1,4 +1,9 @@
-"""Scheduled, SQLite-consistent expense-ledger backup and restore verification."""
+"""Opt-in SQLite migration/recovery backup and restore verification.
+
+This job is not a live production-ledger backup. SharePoint is the business
+authority; operators may run this explicitly for isolated migration or recovery
+state after setting ``SEER_FINANCE_ENABLE_SQLITE_RECOVERY_BACKUP=1``.
+"""
 from __future__ import annotations
 import os
 
@@ -14,6 +19,9 @@ DATABASE = ROOT / 'data' / 'expense-ledger.sqlite3'
 BACKUPS = ROOT / 'backups' / 'scheduled'
 HEALTH = ROOT / 'data' / 'expense-ledger-health.json'
 RETENTION_DAYS = 30
+RECOVERY_BACKUP_ENABLED = os.environ.get(
+    'SEER_FINANCE_ENABLE_SQLITE_RECOVERY_BACKUP', ''
+) == '1'
 
 
 def _now() -> datetime:
@@ -47,8 +55,13 @@ def main() -> int:
     now = _now()
     stamp = now.strftime('%Y%m%dT%H%M%SZ')
     try:
+        if not RECOVERY_BACKUP_ENABLED:
+            raise RuntimeError(
+                'SQLite backup job is disabled for live operation; '
+                'set SEER_FINANCE_ENABLE_SQLITE_RECOVERY_BACKUP=1 for migration/recovery only'
+            )
         if not DATABASE.exists():
-            raise RuntimeError('production expense ledger database is absent')
+            raise RuntimeError('migration/recovery SQLite database is absent')
         BACKUPS.mkdir(parents=True, exist_ok=True)
         backup = BACKUPS / f'expense-ledger-{stamp}.sqlite3'
         manifest = BACKUPS / f'expense-ledger-{stamp}.manifest.json'

@@ -13,7 +13,7 @@ class OutcomeContractTests(unittest.TestCase):
             source_id="microsoft-external:HUB-001042",
             source_surface="microsoft_external",
             expense_outcome="blocked",
-            canonical_ref="seer-expenses.md#pending:HUB-001042",
+            canonical_ref="/Expenses/Expense ledger.md#pending:HUB-001042",
             ledger_state="pending",
             evidence_state="blocked",
             blocker="external mirror body hidden; full invoice extraction unavailable",
@@ -41,7 +41,7 @@ class OutcomeContractTests(unittest.TestCase):
                 source_id="teams:abc",
                 source_surface="teams_recent",
                 expense_outcome="blocked",
-                canonical_ref="seer-expenses.md#pending:teams-abc",
+                canonical_ref="/Expenses/Expense ledger.md#pending:teams-abc",
                 ledger_state="pending",
                 evidence_state="pending",
             )
@@ -52,7 +52,7 @@ class OutcomeContractTests(unittest.TestCase):
                 source_id="whatsapp:abc",
                 source_surface="whatsapp_recent",
                 expense_outcome="not_needed",
-                canonical_ref="seer-expenses.md#bad",
+                canonical_ref="/Expenses/Expense ledger.md#bad",
                 ledger_state="not_required",
                 evidence_state="not_required",
             )
@@ -63,7 +63,7 @@ class OutcomeContractTests(unittest.TestCase):
                 source_id="email:assistant:abc",
                 source_surface="assistant_inbox",
                 expense_outcome="logged",
-                canonical_ref="seer-expenses.md#row:abc",
+                canonical_ref="/Expenses/Expense ledger.md#row:abc",
                 ledger_state="blocked",
                 evidence_state="pending",
             )

@@ -131,6 +131,14 @@ class ExpenseFinanceBridge:
             return self._result(FinancePostOutcome.BLOCKED, self._repository.get(expense_id),
                                 error_code=_repository_error_code(exc),
                                 proposed_transaction=canonical, started=started)
+        except Exception:
+            # A SharePoint queue/cache transport failure is deliberately not
+            # converted into a successful local state transition.
+            logger.exception("expense_finance_bridge repository_failure expense_id=%s",
+                             expense_id)
+            return self._result(FinancePostOutcome.BLOCKED, self._repository.get(expense_id),
+                                error_code="repository_finalize_failed",
+                                proposed_transaction=canonical, started=started)
         return self._result(FinancePostOutcome.POSTED, written,
                             finance_ledger_ref=finance_ref,
                             proposed_transaction=canonical, started=started)

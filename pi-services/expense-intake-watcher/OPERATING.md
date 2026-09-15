@@ -22,12 +22,12 @@ completion. See the canonical delivery checkpoint:
 trusted/external email + sent views + WhatsApp + Teams
   -> openclaw-mirror-router (15-minute source normalisation/classification)
   -> memory/mirror-events.json (stable source ID + surface + flags)
-  -> expense-intake-watcher (five-minute deterministic capture)
-  -> seer-expenses.md (canonical expense outcome)
+  -> expense-intake-watcher (deterministic source capture)
+  -> SharePoint /Expenses/Expense ledger.md (authoritative expense review)
   -> monitored-items-state.json (source-level proof)
   -> expense-enrichment-queue.json (explicit missing financial facts)
-  -> expense-enrichment-resolution.timer (validated ledger resolution)
-  -> finance ledger + health surface
+  -> expense-enrichment-resolution.timer (validated finance handoff)
+  -> SharePoint /Finance/Finance ledger.md (authoritative finance ledger)
 ```
 
 Trusted inbox and WhatsApp inputs also retain the watcher’s established direct
@@ -47,8 +47,9 @@ Every plausible candidate ends as exactly one of:
 
 `ledger_state` (`not_required`, `pending`, `written`, `blocked`) and
 `evidence_state` (`not_required`, `pending`, `retained`, `blocked`) are separate
-from the outcome. A candidate must never be called closed simply because a
-similar string appears in `seer-expenses.md`.
+from the outcome. A candidate must never be called closed because a local queue,
+local document, or similar string appears to match it. Completion requires
+verified readback from the relevant SharePoint document.
 
 ## Runtime paths
 
@@ -57,9 +58,10 @@ similar string appears in `seer-expenses.md`.
 - Enrichment resolution: `expense-enrichment-resolution.timer`
 - Canonical runtime state: `~/.openclaw/runtime/inbound-watch-router/state.json`
 - Retired legacy units/state: archived under `pi-services/expense-intake-watcher/backups/`; no compatibility state writer remains.
-- Canonical expense outcome: `/home/tomdean88/pi-services/seer-finance/data/expense-ledger.sqlite3`
+- Canonical expense review document: `/Expenses/Expense ledger.md`
 - Source proof: `~/.openclaw/workspace/memory/monitored-items-state.json`
-- Finance ledger: `~/pi-services/seer-finance/transactions.json`
+- Canonical finance ledger document: `/Finance/Finance ledger.md`
+- Local queues/outcomes are recovery and operational state only, never business authority.
 
 ## Safe operator checks
 
@@ -73,9 +75,11 @@ systemctl --user start openclaw-mirror-router.service
 systemctl --user show openclaw-mirror-router.service -p Result -p ExecMainStatus
 ```
 
-Do not enable/disable timers, delete state, insert finance-ledger rows or remove
-legacy paths until the controlled activation checklist in the canonical plan has
-passed and an explicit approval/TOTP window is open.
+Do not enable/disable timers, delete state, or claim a finance write until the
+controlled activation checklist has passed and the seer-finance boundary has
+returned verified SharePoint readback. Routine bounded writes use the no-TOTP
+background writer; this does not authorise unrestricted edits, deletions,
+permission changes, or invented financial facts.
 
 ## Failure behaviour
 

@@ -1,83 +1,113 @@
-"""Resolve fully enriched expense candidates through the canonical SQLite writer.
+"""Resolve enriched candidates through the SharePoint finance authority.
 
-This worker never derives accounting facts.  It preserves unresolved candidates
-in the queue and blocks every failed hand-off with the exact reason.
+The JSON file is a retry queue only.  It is never a ledger and it cannot
+complete a candidate without a verified write/readback from seer-finance.
 """
 from __future__ import annotations
-import json, os, sys, tempfile
+
+import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-FINANCE_ROOT=Path('/home/tomdean88/pi-services/seer-finance')
-if str(FINANCE_ROOT) not in sys.path: sys.path.insert(0,str(FINANCE_ROOT))
-from seer_finance.ledger.expense_finance_bridge import ExpenseFinanceBridge, FinancePostOutcome
-from seer_finance.ledger.expense_repository import ExpenseRepository, ExpenseStatus
-from seer_finance.ledger.sqlite_finance_writer import SqliteFinanceWriter
+from finance_handoff import append_validated_expense
+from sharepoint_boundary import SharePointBoundary, resolve_boundary
 
 
 def _write_atomic(path: Path, value: Any) -> None:
-    fd,tmp=tempfile.mkstemp(prefix=f'.{path.name}.',dir=path.parent,text=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
     try:
-        with os.fdopen(fd,'w',encoding='utf-8') as h:
-            json.dump(value,h,indent=2); h.write('\n'); h.flush(); os.fsync(h.fileno())
-        os.replace(tmp,path)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
     except Exception:
-        Path(tmp).unlink(missing_ok=True); raise
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
-def _prepare(repository: ExpenseRepository, item: dict[str, Any], transaction: dict[str, Any]):
-    expense=repository.capture(source_surface=str(item.get('source_surface') or 'expense_enrichment_queue'), source_ref=item['source_id'],
-        supplier=transaction['counterparty'], amount_pence=transaction['amount_pence'], currency='GBP', expense_date=transaction['date'],
-        category=transaction['category'], evidence_ref=item.get('canonical_ref'), evidence_state='retained', settlement_state='confirmed')
-    if expense.status is ExpenseStatus.NEEDS_REVIEW:
-        expense=repository.transition(expense.expense_id,ExpenseStatus.CONFIRMED)
-        expense=repository.transition(expense.expense_id,ExpenseStatus.LEDGER_READY)
-    return expense
-
-
-def resolve_ready_items(queue_path: Path, database_path: Path) -> dict[str,int]:
-    raw=json.loads(queue_path.read_text(encoding='utf-8'))
-    if not isinstance(raw,dict) or not isinstance(raw.get('items'),list): raise ValueError('enrichment queue is malformed')
-    result={'written':0,'duplicates':0,'waiting':0,'blocked':0}
-    repository=None; bridge=None
-    try:
-      for item in raw['items']:
-        if not isinstance(item,dict) or item.get('state')!='needs_enrichment': continue
-        enrichment=item.get('enrichment')
-        if not isinstance(enrichment,dict) or enrichment.get('payment_settlement')!='confirmed' or enrichment.get('evidence_state')!='retained': result['waiting']+=1; continue
-        transaction=enrichment.get('transaction')
-        if not isinstance(transaction,dict) or transaction.get('source_ref')!=item.get('source_id'):
-          item['state']='blocked'; item['blocker']='transaction must be complete and source_ref must exactly match queued source_id'; result['blocked']+=1; continue
-        # An explicitly non-expense transaction is retained as accounting
-        # evidence in the source-linked queue, but must never create, advance
-        # or post an expense record. Its eventual finance-ledger treatment is
-        # a separate Tide-led accounting reconciliation decision.
-        if transaction.get('direction') != 'expense':
-          item['state']='accounting_only'; item['ledger_state']='not_expense'; item['blocker']=f"explicit transaction direction {transaction.get('direction')!r}; excluded from expense workflow"; result['waiting']+=1; continue
+def resolve_ready_items(
+    queue_path: Path,
+    boundary: SharePointBoundary | None = None,
+) -> dict[str, int]:
+    raw = json.loads(queue_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not isinstance(raw.get("items"), list):
+        raise ValueError("enrichment queue is malformed")
+    result = {"written": 0, "duplicates": 0, "waiting": 0, "blocked": 0}
+    authority = boundary or resolve_boundary()
+    for item in raw["items"]:
+        if not isinstance(item, dict) or item.get("state") != "needs_enrichment":
+            continue
+        enrichment = item.get("enrichment")
+        if (
+            not isinstance(enrichment, dict)
+            or enrichment.get("payment_settlement") != "confirmed"
+            or enrichment.get("evidence_state") != "retained"
+        ):
+            result["waiting"] += 1
+            continue
+        transaction = enrichment.get("transaction")
+        if not isinstance(transaction, dict) or transaction.get("source_ref") != item.get("source_id"):
+            item["state"] = "blocked"
+            item["blocker"] = (
+                "transaction must be complete and source_ref must exactly match queued source_id"
+            )
+            result["blocked"] += 1
+            continue
+        if transaction.get("direction") != "expense":
+            item.update({
+                "state": "accounting_only",
+                "ledger_state": "not_expense",
+                "blocker": (
+                    f"explicit transaction direction {transaction.get('direction')!r}; "
+                    "excluded from expense workflow"
+                ),
+            })
+            result["waiting"] += 1
+            continue
         try:
-          if repository is None:
-            repository=ExpenseRepository(database_path)
-            bridge=ExpenseFinanceBridge(repository,SqliteFinanceWriter(database_path))
-          expense=_prepare(repository,item,transaction)
-          post=bridge.post(expense.expense_id,transaction)
+            handoff = append_validated_expense(authority, transaction)
         except Exception as exc:
-          item['state']='blocked'; item['blocker']=f'sqlite finance handoff failed: {type(exc).__name__}: {exc}'; result['blocked']+=1; continue
-        if post.outcome is FinancePostOutcome.POSTED:
-          item.update({'state':'ledger_written','ledger_state':'written','evidence_state':'retained','resolved_at':datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),'sqlite_finance_ref':post.finance_ledger_ref}); result['written']+=1
-        elif post.outcome is FinancePostOutcome.ALREADY_POSTED:
-          item.update({'state':'ledger_written','ledger_state':'written','evidence_state':'retained','sqlite_finance_ref':post.finance_ledger_ref}); result['duplicates']+=1
+            item["state"] = "blocked"
+            item["blocker"] = (
+                f"SharePoint finance handoff failed: {type(exc).__name__}: {exc}"
+            )
+            result["blocked"] += 1
+            continue
+        if handoff.complete:
+            item.update({
+                "state": "ledger_written",
+                "ledger_state": "written",
+                "evidence_state": "retained",
+                "resolved_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "finance_ledger_ref": handoff.canonical_ref,
+            })
+            result["written"] += 1
+        elif handoff.accepted:
+            item["blocker"] = handoff.blocker or "SharePoint readback pending"
+            result["waiting"] += 1
         else:
-          item['state']='blocked'; item['blocker']=f'sqlite finance bridge {post.outcome.value}: {post.error_code}'; result['blocked']+=1
-    finally:
-      if repository is not None: repository.close()
-    raw['updated_at']=datetime.now(timezone.utc).isoformat().replace('+00:00','Z'); _write_atomic(queue_path,raw); return result
+            item["state"] = "blocked"
+            item["blocker"] = handoff.blocker or "SharePoint finance handoff was not accepted"
+            result["blocked"] += 1
+    raw["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    _write_atomic(queue_path, raw)
+    return result
 
 
 def main() -> None:
-    root=Path('/home/tomdean88')
-    queue=root/'.openclaw/runtime/inbound-watch-router/expense-enrichment-queue.json'
-    database=root/'pi-services/seer-finance/data/expense-ledger.sqlite3'
-    if not queue.exists(): print(json.dumps({'written':0,'duplicates':0,'waiting':0,'blocked':0,'queue':'absent'})); return
-    print(json.dumps(resolve_ready_items(queue,database),sort_keys=True))
-if __name__=='__main__': main()
+    root = Path(os.environ.get("OPENCLAW_ROOT", str(Path.home())))
+    queue = root / ".openclaw/runtime/inbound-watch-router/expense-enrichment-queue.json"
+    if not queue.exists():
+        print(json.dumps({"written": 0, "duplicates": 0, "waiting": 0, "blocked": 0, "queue": "absent"}))
+        return
+    print(json.dumps(resolve_ready_items(queue), sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
