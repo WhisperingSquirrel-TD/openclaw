@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 40px;
+            color: #333;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 40px;
+            border-bottom: 3px solid #0066cc;
+            padding-bottom: 20px;
+        }
+        .company {
+            flex: 1;
+        }
+        .company h1 {
+            color: #0066cc;
+            margin: 0;
+            font-size: 24px;
+        }
+        .company-details {
+            margin-top: 10px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .invoice-header {
+            text-align: right;
+        }
+        .invoice-title {
+            font-size: 32px;
+            color: #0066cc;
+            margin: 0;
+        }
+        .invoice-details {
+            background: #f8f9fa;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 4px solid #0066cc;
+        }
+        .invoice-details table {
+            width: 100%;
+        }
+        .invoice-details td {
+            padding: 5px 10px;
+        }
+        .invoice-details .label {
+            font-weight: 600;
+            color: #666;
+        }
+        .bill-to {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+        }
+        .bill-to h3 {
+            margin: 0 0 10px 0;
+            color: #0066cc;
+        }
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 30px 0;
+        }
+        .items-table th {
+            background: #0066cc;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        .items-table td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+        .items-table .amount {
+            text-align: right;
+        }
+        .total-section {
+            text-align: right;
+            margin: 20px 0;
+        }
+        .total-row {
+            font-size: 18px;
+            font-weight: bold;
+            color: #0066cc;
+            margin: 10px 0;
+        }
+        .payment-details {
+            margin-top: 40px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-left: 4px solid #0066cc;
+        }
+        .payment-details h3 {
+            color: #0066cc;
+            margin-top: 0;
+        }
+        .payment-details table {
+            margin-top: 10px;
+        }
+        .payment-details td {
+            padding: 5px 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="company">
+            <h1>Stackstone Consulting</h1>
+            <div class="company-details">
+                <div><strong>Registered Business Name:</strong> SEER Innovations LTD</div>
+                <div><strong>Company No.:</strong> 17100455</div>
+                <div>21 St John's Road, OX14 2HA</div>
+                <div>Tom@stackstoneconsulting.co.uk | +44 7894 241 276</div>
+            </div>
+        </div>
+        <div class="invoice-header">
+            <h1 class="invoice-title">INVOICE</h1>
+        </div>
+    </div>
+
+    <div class="invoice-details">
+        <table>
+            <tr>
+                <td class="label">Invoice Reference:</td>
+                <td><strong>INV-0075</strong></td>
+                <td class="label">Issue Date:</td>
+                <td>25/05/2026</td>
+            </tr>
+            <tr>
+                <td class="label">Amount Due:</td>
+                <td><strong>£1200.00</strong></td>
+                <td class="label">Due Date:</td>
+                <td>08/06/2026</td>
+            </tr>
+        </table>
+    </div>
+
+    <div class="bill-to">
+        <h3>Bill To:</h3>
+        <div>Andy Barrett</div>
+        <div>30 Lombard Street, London EC3V 9BQ</div>
+        <div>Andy.Barrett@sjpp.co.uk</div>
+        <div>+44 7742 809 531</div>
+    </div>
+
+    <table class="items-table">
+        <thead>
+            <tr>
+                <th>Description</th>
+                <th style="text-align: center;">Qty</th>
+                <th style="text-align: right;">Unit Cost</th>
+                <th style="text-align: right;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Consultancy services - 1.5 days</td>
+                <td style="text-align: center;">1</td>
+                <td class="amount">£1200.00</td>
+                <td class="amount">£1200.00</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="total-section">
+        <div class="total-row">Total: £1200.00</div>
+    </div>
+
+    <div class="payment-details">
+        <h3>Payment Methods</h3>
+        <table>
+            <tr>
+                <td><strong>Account Name:</strong></td>
+                <td>SEER Innovations LTD</td>
+            </tr>
+            <tr>
+                <td><strong>Account Number:</strong></td>
+                <td>30855597</td>
+            </tr>
+            <tr>
+                <td><strong>Sort Code:</strong></td>
+                <td>04-06-05</td>
+            </tr>
+        </table>
+    </div>
+</body>
+</html>

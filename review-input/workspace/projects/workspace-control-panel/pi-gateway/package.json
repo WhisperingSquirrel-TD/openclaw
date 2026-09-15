@@ -1,0 +1,12 @@
+{
+  "name": "workspace-pi-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi-side gateway for safe live access to the OpenClaw workspace",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  }
+}

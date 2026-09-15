@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WCP HTML Render Test</title>
+  <style>
+    :root {
+      --bg: #f5f0e8;
+      --card: #ffffff;
+      --text: #2a2a2a;
+      --accent: #c8922a;
+      --muted: #6b6b6b;
+    }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Inter, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .card {
+      max-width: 720px;
+      margin: 0 auto;
+      background: var(--card);
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+    .hero {
+      padding: 24px;
+      border-bottom: 4px solid var(--accent);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    p {
+      line-height: 1.6;
+      margin: 0 0 16px;
+    }
+    .body {
+      padding: 24px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .tile {
+      background: #faf8f4;
+      border: 1px solid #ece4d7;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .value {
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .ok {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #fdf0cf;
+      color: #6b5200;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="hero">
+      <h1>WCP HTML render test</h1>
+      <p>If this appears styled inside the GUI, the Pi gateway is serving raw HTML correctly and the app iframe rendering path is working.</p>
+      <div class="ok">Expected result: styled card, grid, and badge all visible</div>
+    </div>
+    <div class="body">
+      <div class="grid">
+        <div class="tile">
+          <div class="label">File type</div>
+          <div class="value">.html</div>
+        </div>
+        <div class="tile">
+          <div class="label">Location</div>
+          <div class="value">WCP project</div>
+        </div>
+        <div class="tile">
+          <div class="label">Render mode</div>
+          <div class="value">Raw HTML</div>
+        </div>
+      </div>
+      <p>Open this file in the GUI by browsing to:</p>
+      <p><code>projects/workspace-control-panel/test-render.html</code></p>
+    </div>
+  </div>
+</body>
+</html>

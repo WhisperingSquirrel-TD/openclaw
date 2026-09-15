@@ -1,0 +1,1135 @@
+{
+  "purpose": "Consolidated code review snapshot. George Dean portfolio intentionally excluded. Historical backups, snapshots, caches, generated output, dependencies and runtime data excluded.",
+  "files": [
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/AGENTS.md",
+      "destination": "workspace/AGENTS.md",
+      "bytes": 10417
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/SYSTEM_MAP.md",
+      "destination": "workspace/SYSTEM_MAP.md",
+      "bytes": 10177
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/create_lgps_form.py",
+      "destination": "workspace/create_lgps_form.py",
+      "bytes": 6066
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/apply-anthropic.js",
+      "destination": "workspace/apply-anthropic.js",
+      "bytes": 5082
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/session_query.py",
+      "destination": "workspace/scripts/session_query.py",
+      "bytes": 5651
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/context_extract.py",
+      "destination": "workspace/scripts/context_extract.py",
+      "bytes": 4720
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/test_inbound_monitoring.py",
+      "destination": "workspace/scripts/test_inbound_monitoring.py",
+      "bytes": 30183
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/test_intake_ledger.py",
+      "destination": "workspace/scripts/test_intake_ledger.py",
+      "bytes": 3851
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/qmd-vectorise.sh",
+      "destination": "workspace/scripts/qmd-vectorise.sh",
+      "bytes": 4073
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/crm-capture-handoff.py",
+      "destination": "workspace/scripts/crm-capture-handoff.py",
+      "bytes": 18458
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/patch-gate-window-and-visibility.py",
+      "destination": "workspace/scripts/patch-gate-window-and-visibility.py",
+      "bytes": 8390
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/email-reply-task-handoff.py",
+      "destination": "workspace/scripts/email-reply-task-handoff.py",
+      "bytes": 16285
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/context-budget-summary.py",
+      "destination": "workspace/scripts/context-budget-summary.py",
+      "bytes": 1619
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/patch-totp-gate-complete.py",
+      "destination": "workspace/scripts/patch-totp-gate-complete.py",
+      "bytes": 10437
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/skill_library_worker_health.py",
+      "destination": "workspace/scripts/skill_library_worker_health.py",
+      "bytes": 942
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/sync-contacts.sh",
+      "destination": "workspace/scripts/sync-contacts.sh",
+      "bytes": 1947
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/test_context_tools.py",
+      "destination": "workspace/scripts/test_context_tools.py",
+      "bytes": 3681
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/run_skill_library_pull_worker.py",
+      "destination": "workspace/scripts/run_skill_library_pull_worker.py",
+      "bytes": 2381
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/operational_surface_adapters.py",
+      "destination": "workspace/scripts/operational_surface_adapters.py",
+      "bytes": 5319
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/skill_library_release.py",
+      "destination": "workspace/scripts/skill_library_release.py",
+      "bytes": 2939
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/worker_wrapper.py",
+      "destination": "workspace/scripts/worker_wrapper.py",
+      "bytes": 4069
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/test_skill_library_release.py",
+      "destination": "workspace/scripts/test_skill_library_release.py",
+      "bytes": 1295
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/ai-briefing-control.py",
+      "destination": "workspace/scripts/ai-briefing-control.py",
+      "bytes": 5440
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/verify_tools.py",
+      "destination": "workspace/scripts/verify_tools.py",
+      "bytes": 814
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/patch-totp-gate-exact.py",
+      "destination": "workspace/scripts/patch-totp-gate-exact.py",
+      "bytes": 6020
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/invoice_payment_reconciliation.py",
+      "destination": "workspace/scripts/invoice_payment_reconciliation.py",
+      "bytes": 5012
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/context_dashboard.py",
+      "destination": "workspace/scripts/context_dashboard.py",
+      "bytes": 1634
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/test_crm_capture_handoff.py",
+      "destination": "workspace/scripts/test_crm_capture_handoff.py",
+      "bytes": 524
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/mirror_router.py",
+      "destination": "workspace/scripts/mirror_router.py",
+      "bytes": 45511
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/inbound-monitoring.py",
+      "destination": "workspace/scripts/inbound-monitoring.py",
+      "bytes": 164085
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/test_operational_surface_adapters.py",
+      "destination": "workspace/scripts/test_operational_surface_adapters.py",
+      "bytes": 4494
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/test_linkedin_intake_adapter.py",
+      "destination": "workspace/scripts/test_linkedin_intake_adapter.py",
+      "bytes": 4579
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/whatsapp_recent.sh",
+      "destination": "workspace/scripts/whatsapp_recent.sh",
+      "bytes": 8521
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/sync_skill_library_from_sharepoint.py",
+      "destination": "workspace/scripts/sync_skill_library_from_sharepoint.py",
+      "bytes": 5058
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/linkedin_intake_adapter.py",
+      "destination": "workspace/scripts/linkedin_intake_adapter.py",
+      "bytes": 7461
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/publish_skill_release_to_sharepoint.py",
+      "destination": "workspace/scripts/publish_skill_release_to_sharepoint.py",
+      "bytes": 4823
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/intake_ledger.py",
+      "destination": "workspace/scripts/intake_ledger.py",
+      "bytes": 7732
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/tests/test_invoice_payment_reconciliation.py",
+      "destination": "workspace/tests/test_invoice_payment_reconciliation.py",
+      "bytes": 2223
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/tests/test_mirror_router.py",
+      "destination": "workspace/tests/test_mirror_router.py",
+      "bytes": 11523
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/tests/test_email_reply_task_handoff.py",
+      "destination": "workspace/tests/test_email_reply_task_handoff.py",
+      "bytes": 3671
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/tests/test_monitoring_proof_contract.py",
+      "destination": "workspace/tests/test_monitoring_proof_contract.py",
+      "bytes": 1600
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/tests/test_crm_capture_handoff.py",
+      "destination": "workspace/tests/test_crm_capture_handoff.py",
+      "bytes": 7579
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/tests/test_outlook_draft.py",
+      "destination": "workspace/tests/test_outlook_draft.py",
+      "bytes": 2791
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/tests/test_linkedin_intake_adapter.py",
+      "destination": "workspace/tests/test_linkedin_intake_adapter.py",
+      "bytes": 2730
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/tests/test_mirror_router_email_reply.py",
+      "destination": "workspace/tests/test_mirror_router_email_reply.py",
+      "bytes": 2897
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/tests/test_mirror_routing_handoff_contract.py",
+      "destination": "workspace/tests/test_mirror_routing_handoff_contract.py",
+      "bytes": 2034
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/integrations/ai_briefing_service_client.py",
+      "destination": "workspace/integrations/ai_briefing_service_client.py",
+      "bytes": 5866
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/reference/email-signatures/tom-signature.html",
+      "destination": "workspace/reference/email-signatures/tom-signature.html",
+      "bytes": 1842
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/reference/email-signatures/assistant-signature.html",
+      "destination": "workspace/reference/email-signatures/assistant-signature.html",
+      "bytes": 1753
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/reference/qmd-config/archive.yml",
+      "destination": "workspace/reference/qmd-config/archive.yml",
+      "bytes": 537
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/reference/qmd-config/core.yml",
+      "destination": "workspace/reference/qmd-config/core.yml",
+      "bytes": 896
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/stackstone/templates/001-intro.html",
+      "destination": "workspace/stackstone/templates/001-intro.html",
+      "bytes": 7628
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/stackstone/outbox/test-tom-2026-03-21.html",
+      "destination": "workspace/stackstone/outbox/test-tom-2026-03-21.html",
+      "bytes": 7009
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/ai-briefing-outbound-runner/schema.sql",
+      "destination": "workspace/projects/ai-briefing-outbound-runner/schema.sql",
+      "bytes": 1644
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/ai-briefing-outbound-runner/send_queue.py",
+      "destination": "workspace/projects/ai-briefing-outbound-runner/send_queue.py",
+      "bytes": 2218
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/ai-briefing-outbound-runner/config.py",
+      "destination": "workspace/projects/ai-briefing-outbound-runner/config.py",
+      "bytes": 1185
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/ai-briefing-outbound-runner/crm_import.py",
+      "destination": "workspace/projects/ai-briefing-outbound-runner/crm_import.py",
+      "bytes": 2954
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/ai-briefing-outbound-runner/runner.py",
+      "destination": "workspace/projects/ai-briefing-outbound-runner/runner.py",
+      "bytes": 19819
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/ai-briefing-outbound-runner/api_client.py",
+      "destination": "workspace/projects/ai-briefing-outbound-runner/api_client.py",
+      "bytes": 2328
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/test-render.html",
+      "destination": "workspace/projects/workspace-control-panel/test-render.html",
+      "bytes": 2571
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/scripts/apply-local-qwen-openclaw-config.py",
+      "destination": "workspace/projects/workspace-control-panel/scripts/apply-local-qwen-openclaw-config.py",
+      "bytes": 2852
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/scripts/print-tunnel-url.sh",
+      "destination": "workspace/projects/workspace-control-panel/scripts/print-tunnel-url.sh",
+      "bytes": 612
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/scripts/local-qwen-task-worker.py",
+      "destination": "workspace/projects/workspace-control-panel/scripts/local-qwen-task-worker.py",
+      "bytes": 8272
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/scripts/start-gateway-and-tunnel.sh",
+      "destination": "workspace/projects/workspace-control-panel/scripts/start-gateway-and-tunnel.sh",
+      "bytes": 1544
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/package.json",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/package.json",
+      "bytes": 291
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/task-context-broker.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/task-context-broker.integration.test.js",
+      "bytes": 30367
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/calendar-availability.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/calendar-availability.test.js",
+      "bytes": 1798
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/email-draft.executor-failure.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/email-draft.executor-failure.integration.test.js",
+      "bytes": 3283
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/email-context-reconciliation.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/email-context-reconciliation.test.js",
+      "bytes": 3337
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/linkedin-mirror.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/linkedin-mirror.integration.test.js",
+      "bytes": 5375
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/task-context-broker-bounds.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/task-context-broker-bounds.test.js",
+      "bytes": 787
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/brief-intake.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/brief-intake.integration.test.js",
+      "bytes": 39350
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/email-draft-entity-binding.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/email-draft-entity-binding.integration.test.js",
+      "bytes": 46003
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/task-system.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/task-system.integration.test.js",
+      "bytes": 78828
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/email-draft-route.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/email-draft-route.integration.test.js",
+      "bytes": 2905
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/email-draft.writer.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/email-draft.writer.test.js",
+      "bytes": 10376
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/expense-review-post.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/expense-review-post.test.js",
+      "bytes": 1915
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/task-context-contract.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/task-context-contract.integration.test.js",
+      "bytes": 2744
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/executors.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/executors.test.js",
+      "bytes": 2590
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/email-thread-context.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/email-thread-context.test.js",
+      "bytes": 8926
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/recipient-unresolved.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/recipient-unresolved.integration.test.js",
+      "bytes": 3775
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/operator-email-draft.integration.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/operator-email-draft.integration.test.js",
+      "bytes": 7883
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/expense-review-controller.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/expense-review-controller.test.js",
+      "bytes": 2178
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/test/expense-review.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/test/expense-review.test.js",
+      "bytes": 3632
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/email-composition-provider.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/email-composition-provider.js",
+      "bytes": 26974
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/logger.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/logger.js",
+      "bytes": 618
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/linkedin-mirror.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/linkedin-mirror.js",
+      "bytes": 13404
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/email-composition-provider.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/email-composition-provider.test.js",
+      "bytes": 5940
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/task-system.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/task-system.js",
+      "bytes": 207081
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/task-context-broker.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/task-context-broker.js",
+      "bytes": 96567
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/server.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/server.js",
+      "bytes": 38481
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/calendar-availability.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/calendar-availability.js",
+      "bytes": 4219
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/email-composition-runner.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/email-composition-runner.test.js",
+      "bytes": 8395
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/expense-review.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/expense-review.js",
+      "bytes": 5311
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/xlsx-extractor.py",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/xlsx-extractor.py",
+      "bytes": 4272
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/dev-projects.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/dev-projects.js",
+      "bytes": 21803
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/email-draft.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/email-draft.js",
+      "bytes": 20834
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/task-system-regression.test.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/task-system-regression.test.js",
+      "bytes": 5547
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/ai-briefings.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/ai-briefings.js",
+      "bytes": 10667
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/workspace-control-panel/pi-gateway/src/executors.js",
+      "destination": "workspace/projects/workspace-control-panel/pi-gateway/src/executors.js",
+      "bytes": 35755
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/linkedin-message-mirror/scripts/capture_linkedin_posts.py",
+      "destination": "workspace/projects/linkedin-message-mirror/scripts/capture_linkedin_posts.py",
+      "bytes": 22931
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/linkedin-message-mirror/scripts/capture_linkedin_messages.py",
+      "destination": "workspace/projects/linkedin-message-mirror/scripts/capture_linkedin_messages.py",
+      "bytes": 25638
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/linkedin-message-mirror/scripts/route_linkedin_messages.py",
+      "destination": "workspace/projects/linkedin-message-mirror/scripts/route_linkedin_messages.py",
+      "bytes": 11855
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/linkedin-message-mirror/tests/test_route_linkedin_messages.py",
+      "destination": "workspace/projects/linkedin-message-mirror/tests/test_route_linkedin_messages.py",
+      "bytes": 4785
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/linkedin-message-mirror/tests/run_focused_tests.py",
+      "destination": "workspace/projects/linkedin-message-mirror/tests/run_focused_tests.py",
+      "bytes": 777
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/linkedin-message-mirror/tests/test_mirror_router_crm_leads.py",
+      "destination": "workspace/projects/linkedin-message-mirror/tests/test_mirror_router_crm_leads.py",
+      "bytes": 2084
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/linkedin-message-mirror/tests/test_capture_helpers.py",
+      "destination": "workspace/projects/linkedin-message-mirror/tests/test_capture_helpers.py",
+      "bytes": 3651
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/projects/linkedin-message-mirror/tests/test_capture_linkedin_posts.py",
+      "destination": "workspace/projects/linkedin-message-mirror/tests/test_capture_linkedin_posts.py",
+      "bytes": 7128
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/scripts/tests/test_surface_owner_migration.py",
+      "destination": "workspace/scripts/tests/test_surface_owner_migration.py",
+      "bytes": 3349
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/hooks/telegram-expense-capture/handler.ts",
+      "destination": "workspace/hooks/telegram-expense-capture/handler.ts",
+      "bytes": 4195
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/calendar-today/SKILL.md",
+      "destination": "workspace/skills/calendar-today/SKILL.md",
+      "bytes": 2058
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/task-operate/SKILL.md",
+      "destination": "workspace/skills/task-operate/SKILL.md",
+      "bytes": 22415
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/governed-document/SKILL.md",
+      "destination": "workspace/skills/governed-document/SKILL.md",
+      "bytes": 6173
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/crm-partnership/SKILL.md",
+      "destination": "workspace/skills/crm-partnership/SKILL.md",
+      "bytes": 6412
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/afternoon-standup/SKILL.md",
+      "destination": "workspace/skills/afternoon-standup/SKILL.md",
+      "bytes": 15506
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/transcript-resource/SKILL.md",
+      "destination": "workspace/skills/transcript-resource/SKILL.md",
+      "bytes": 16604
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/whatsapp-check/SKILL.md",
+      "destination": "workspace/skills/whatsapp-check/SKILL.md",
+      "bytes": 21312
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/mgmt-bot/SKILL.md",
+      "destination": "workspace/skills/mgmt-bot/SKILL.md",
+      "bytes": 1821
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/stackstone-report/SKILL.md",
+      "destination": "workspace/skills/stackstone-report/SKILL.md",
+      "bytes": 8595
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/standup/SKILL.md",
+      "destination": "workspace/skills/standup/SKILL.md",
+      "bytes": 38241
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/web-search/SKILL.md",
+      "destination": "workspace/skills/web-search/SKILL.md",
+      "bytes": 1689
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/app-patch/SKILL.md",
+      "destination": "workspace/skills/app-patch/SKILL.md",
+      "bytes": 12588
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/codex-reauth/reauth-local.sh",
+      "destination": "workspace/skills/codex-reauth/reauth-local.sh",
+      "bytes": 1945
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/codex-reauth/SKILL.md",
+      "destination": "workspace/skills/codex-reauth/SKILL.md",
+      "bytes": 4209
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/codex-reauth/reauth-remote.sh",
+      "destination": "workspace/skills/codex-reauth/reauth-remote.sh",
+      "bytes": 1951
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/codex-reauth/reauth-copy-tokens.py",
+      "destination": "workspace/skills/codex-reauth/reauth-copy-tokens.py",
+      "bytes": 5394
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/stackstone-talk-deck/SKILL.md",
+      "destination": "workspace/skills/stackstone-talk-deck/SKILL.md",
+      "bytes": 15167
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/invoice-generate/andy-barrett-inv-075.html",
+      "destination": "workspace/skills/invoice-generate/andy-barrett-inv-075.html",
+      "bytes": 5210
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/invoice-generate/SKILL.md",
+      "destination": "workspace/skills/invoice-generate/SKILL.md",
+      "bytes": 18373
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/invoice-generate/generate-invoice.py",
+      "destination": "workspace/skills/invoice-generate/generate-invoice.py",
+      "bytes": 8714
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/briefing/SKILL.md",
+      "destination": "workspace/skills/briefing/SKILL.md",
+      "bytes": 6266
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/invoice-create/SKILL.md",
+      "destination": "workspace/skills/invoice-create/SKILL.md",
+      "bytes": 3535
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/crm-update/SKILL.md",
+      "destination": "workspace/skills/crm-update/SKILL.md",
+      "bytes": 42554
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/email-check/SKILL.md",
+      "destination": "workspace/skills/email-check/SKILL.md",
+      "bytes": 45772
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/weekly-review/SKILL.md",
+      "destination": "workspace/skills/weekly-review/SKILL.md",
+      "bytes": 3467
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/expenses/SKILL.md",
+      "destination": "workspace/skills/expenses/SKILL.md",
+      "bytes": 50737
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/resource-intake/SKILL.md",
+      "destination": "workspace/skills/resource-intake/SKILL.md",
+      "bytes": 8680
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/reminder-delivery/SKILL.md",
+      "destination": "workspace/skills/reminder-delivery/SKILL.md",
+      "bytes": 1499
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/local-llm/SKILL.md",
+      "destination": "workspace/skills/local-llm/SKILL.md",
+      "bytes": 9805
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/app-resume/SKILL.md",
+      "destination": "workspace/skills/app-resume/SKILL.md",
+      "bytes": 3433
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/crm-follow-up/SKILL.md",
+      "destination": "workspace/skills/crm-follow-up/SKILL.md",
+      "bytes": 3998
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/app-plan/SKILL.md",
+      "destination": "workspace/skills/app-plan/SKILL.md",
+      "bytes": 7430
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/email-reply-draft/SKILL.md",
+      "destination": "workspace/skills/email-reply-draft/SKILL.md",
+      "bytes": 38290
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/invoice-update/SKILL.md",
+      "destination": "workspace/skills/invoice-update/SKILL.md",
+      "bytes": 3431
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/stackstone-branding/SKILL.md",
+      "destination": "workspace/skills/stackstone-branding/SKILL.md",
+      "bytes": 8653
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/daily-plan/SKILL.md",
+      "destination": "workspace/skills/daily-plan/SKILL.md",
+      "bytes": 11009
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/email-send/SKILL.md",
+      "destination": "workspace/skills/email-send/SKILL.md",
+      "bytes": 34567
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/task-decompose/SKILL.md",
+      "destination": "workspace/skills/task-decompose/SKILL.md",
+      "bytes": 18255
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/bootstrap-governance/SKILL.md",
+      "destination": "workspace/skills/bootstrap-governance/SKILL.md",
+      "bytes": 12717
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/google-auth/SKILL.md",
+      "destination": "workspace/skills/google-auth/SKILL.md",
+      "bytes": 2894
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/file-audit/SKILL.md",
+      "destination": "workspace/skills/file-audit/SKILL.md",
+      "bytes": 4371
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/learning/SKILL.md",
+      "destination": "workspace/skills/learning/SKILL.md",
+      "bytes": 24168
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/app-init/SKILL.md",
+      "destination": "workspace/skills/app-init/SKILL.md",
+      "bytes": 7283
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/crm-opportunity/SKILL.md",
+      "destination": "workspace/skills/crm-opportunity/SKILL.md",
+      "bytes": 4106
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/skill-update/SKILL.md",
+      "destination": "workspace/skills/skill-update/SKILL.md",
+      "bytes": 7693
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/calendar-read/SKILL.md",
+      "destination": "workspace/skills/calendar-read/SKILL.md",
+      "bytes": 2643
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/kombucha/SKILL.md",
+      "destination": "workspace/skills/kombucha/SKILL.md",
+      "bytes": 4579
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/app-deploy/SKILL.md",
+      "destination": "workspace/skills/app-deploy/SKILL.md",
+      "bytes": 2072
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/talk-live/SKILL.md",
+      "destination": "workspace/skills/talk-live/SKILL.md",
+      "bytes": 5220
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/invoice-close/SKILL.md",
+      "destination": "workspace/skills/invoice-close/SKILL.md",
+      "bytes": 3974
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/task-capture/SKILL.md",
+      "destination": "workspace/skills/task-capture/SKILL.md",
+      "bytes": 9011
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/calendar-send/SKILL.md",
+      "destination": "workspace/skills/calendar-send/SKILL.md",
+      "bytes": 4048
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/app-build/SKILL.md",
+      "destination": "workspace/skills/app-build/SKILL.md",
+      "bytes": 11630
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/crm-sharepoint/SKILL.md",
+      "destination": "workspace/skills/crm-sharepoint/SKILL.md",
+      "bytes": 61475
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/send-email/SKILL.md",
+      "destination": "workspace/skills/send-email/SKILL.md",
+      "bytes": 3474
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/weekly-planning/SKILL.md",
+      "destination": "workspace/skills/weekly-planning/SKILL.md",
+      "bytes": 6476
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/app-test/SKILL.md",
+      "destination": "workspace/skills/app-test/SKILL.md",
+      "bytes": 4684
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/invoice-chase/SKILL.md",
+      "destination": "workspace/skills/invoice-chase/SKILL.md",
+      "bytes": 3969
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/linkedin-post/SKILL.md",
+      "destination": "workspace/skills/linkedin-post/SKILL.md",
+      "bytes": 34560
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/stackstone-talk-deck/references/template.html",
+      "destination": "workspace/skills/stackstone-talk-deck/references/template.html",
+      "bytes": 35154
+    },
+    {
+      "source": "/home/tomdean88/.openclaw/workspace/skills/standup/morning-standup/SKILL.md",
+      "destination": "workspace/skills/standup/morning-standup/SKILL.md",
+      "bytes": 38544
+    },
+    {
+      "source": "/home/tomdean88/pi-services/trusted-email-reader/read_email.py",
+      "destination": "pi-services/trusted-email-reader/read_email.py",
+      "bytes": 7060
+    },
+    {
+      "source": "/home/tomdean88/pi-services/trusted-email-reader/read_gmail.py",
+      "destination": "pi-services/trusted-email-reader/read_gmail.py",
+      "bytes": 7900
+    },
+    {
+      "source": "/home/tomdean88/pi-services/ai-briefing-outbound-service/schema.sql",
+      "destination": "pi-services/ai-briefing-outbound-service/schema.sql",
+      "bytes": 2454
+    },
+    {
+      "source": "/home/tomdean88/pi-services/ai-briefing-outbound-service/send_queue.py",
+      "destination": "pi-services/ai-briefing-outbound-service/send_queue.py",
+      "bytes": 3074
+    },
+    {
+      "source": "/home/tomdean88/pi-services/ai-briefing-outbound-service/config.py",
+      "destination": "pi-services/ai-briefing-outbound-service/config.py",
+      "bytes": 2394
+    },
+    {
+      "source": "/home/tomdean88/pi-services/ai-briefing-outbound-service/crm_import.py",
+      "destination": "pi-services/ai-briefing-outbound-service/crm_import.py",
+      "bytes": 2954
+    },
+    {
+      "source": "/home/tomdean88/pi-services/ai-briefing-outbound-service/runner.py",
+      "destination": "pi-services/ai-briefing-outbound-service/runner.py",
+      "bytes": 44058
+    },
+    {
+      "source": "/home/tomdean88/pi-services/ai-briefing-outbound-service/api_client.py",
+      "destination": "pi-services/ai-briefing-outbound-service/api_client.py",
+      "bytes": 2799
+    },
+    {
+      "source": "/home/tomdean88/pi-services/ai-briefing-outbound-service/control_api.py",
+      "destination": "pi-services/ai-briefing-outbound-service/control_api.py",
+      "bytes": 31740
+    },
+    {
+      "source": "/home/tomdean88/pi-services/l1-voice-telephony/pyproject.toml",
+      "destination": "pi-services/l1-voice-telephony/pyproject.toml",
+      "bytes": 242
+    },
+    {
+      "source": "/home/tomdean88/pi-services/expense-intake-watcher/watcher.py",
+      "destination": "pi-services/expense-intake-watcher/watcher.py",
+      "bytes": 11022
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/requirements.txt",
+      "destination": "pi-services/seer-finance/requirements.txt",
+      "bytes": 109
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_receipt_replay_chain.py",
+      "destination": "pi-services/seer-finance/tests/test_receipt_replay_chain.py",
+      "bytes": 4091
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_backup_restore.py",
+      "destination": "pi-services/seer-finance/tests/test_backup_restore.py",
+      "bytes": 5938
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_sqlite_finance_writer.py",
+      "destination": "pi-services/seer-finance/tests/test_sqlite_finance_writer.py",
+      "bytes": 1202
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_expense_capture_adapter.py",
+      "destination": "pi-services/seer-finance/tests/test_expense_capture_adapter.py",
+      "bytes": 3437
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_expense_review_control.py",
+      "destination": "pi-services/seer-finance/tests/test_expense_review_control.py",
+      "bytes": 3007
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_legacy_transactions_migration.py",
+      "destination": "pi-services/seer-finance/tests/test_legacy_transactions_migration.py",
+      "bytes": 3033
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_expense_repository.py",
+      "destination": "pi-services/seer-finance/tests/test_expense_repository.py",
+      "bytes": 9095
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_expense_review_tray.py",
+      "destination": "pi-services/seer-finance/tests/test_expense_review_tray.py",
+      "bytes": 7183
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_expense_importer.py",
+      "destination": "pi-services/seer-finance/tests/test_expense_importer.py",
+      "bytes": 7918
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_database_review_snapshot.py",
+      "destination": "pi-services/seer-finance/tests/test_database_review_snapshot.py",
+      "bytes": 760
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/tests/test_expense_finance_bridge.py",
+      "destination": "pi-services/seer-finance/tests/test_expense_finance_bridge.py",
+      "bytes": 5486
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/deadlines.py",
+      "destination": "pi-services/seer-finance/seer_finance/deadlines.py",
+      "bytes": 13780
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/config.py",
+      "destination": "pi-services/seer-finance/seer_finance/config.py",
+      "bytes": 2984
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/notify.py",
+      "destination": "pi-services/seer-finance/seer_finance/notify.py",
+      "bytes": 4565
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/hmrc_check.py",
+      "destination": "pi-services/seer-finance/seer_finance/hmrc_check.py",
+      "bytes": 6144
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/__init__.py",
+      "destination": "pi-services/seer-finance/seer_finance/__init__.py",
+      "bytes": 43
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/notify_cli.py",
+      "destination": "pi-services/seer-finance/seer_finance/notify_cli.py",
+      "bytes": 2137
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/cli.py",
+      "destination": "pi-services/seer-finance/seer_finance/cli.py",
+      "bytes": 3833
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/hmrc_check_cli.py",
+      "destination": "pi-services/seer-finance/seer_finance/hmrc_check_cli.py",
+      "bytes": 3006
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/computation.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/computation.py",
+      "bytes": 3713
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/estimate.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/estimate.py",
+      "bytes": 6605
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/legacy_transactions_migration.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/legacy_transactions_migration.py",
+      "bytes": 3129
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/__init__.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/__init__.py",
+      "bytes": 45
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/expense_backup_job.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/expense_backup_job.py",
+      "bytes": 2853
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/expense_repository.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/expense_repository.py",
+      "bytes": 28974
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/expense_finance_bridge.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/expense_finance_bridge.py",
+      "bytes": 9427
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/backup_restore.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/backup_restore.py",
+      "bytes": 11670
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/database_review_snapshot.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/database_review_snapshot.py",
+      "bytes": 1183
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/expense_importer.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/expense_importer.py",
+      "bytes": 14692
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/expense_capture_adapter.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/expense_capture_adapter.py",
+      "bytes": 5210
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/expense_review_control.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/expense_review_control.py",
+      "bytes": 5509
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/cli.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/cli.py",
+      "bytes": 4597
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/expense_review_cli.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/expense_review_cli.py",
+      "bytes": 1442
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/loader.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/loader.py",
+      "bytes": 5213
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/schema.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/schema.py",
+      "bytes": 5662
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/expense_import_cli.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/expense_import_cli.py",
+      "bytes": 1872
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/expense_review_tray.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/expense_review_tray.py",
+      "bytes": 9340
+    },
+    {
+      "source": "/home/tomdean88/pi-services/seer-finance/seer_finance/ledger/sqlite_finance_writer.py",
+      "destination": "pi-services/seer-finance/seer_finance/ledger/sqlite_finance_writer.py",
+      "bytes": 2486
+    },
+    {
+      "source": "/home/tomdean88/pi-services/l1-voice-telephony/tests/test_approval.py",
+      "destination": "pi-services/l1-voice-telephony/tests/test_approval.py",
+      "bytes": 3513
+    },
+    {
+      "source": "/home/tomdean88/pi-services/l1-voice-telephony/tests/test_executor.py",
+      "destination": "pi-services/l1-voice-telephony/tests/test_executor.py",
+      "bytes": 3146
+    },
+    {
+      "source": "/home/tomdean88/pi-services/l1-voice-telephony/src/l1_voice_telephony/__init__.py",
+      "destination": "pi-services/l1-voice-telephony/src/l1_voice_telephony/__init__.py",
+      "bytes": 316
+    },
+    {
+      "source": "/home/tomdean88/pi-services/l1-voice-telephony/src/l1_voice_telephony/approval.py",
+      "destination": "pi-services/l1-voice-telephony/src/l1_voice_telephony/approval.py",
+      "bytes": 6878
+    },
+    {
+      "source": "/home/tomdean88/pi-services/l1-voice-telephony/src/l1_voice_telephony/executor.py",
+      "destination": "pi-services/l1-voice-telephony/src/l1_voice_telephony/executor.py",
+      "bytes": 3850
+    }
+  ]
+}

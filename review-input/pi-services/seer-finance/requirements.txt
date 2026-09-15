@@ -1,0 +1,4 @@
+# Runtime dependency for SEER finance system
+openpyxl>=3.1
+# Dev only (to run the test suite):
+# pytest>=7.0

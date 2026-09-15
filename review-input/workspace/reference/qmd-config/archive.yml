@@ -1,0 +1,16 @@
+# Deliberate, on-demand historical research index. Never included in core search.
+collections:
+  daily-memory:
+    path: /home/tomdean88/.openclaw/workspace/memory
+    pattern: "**/*.md"
+    ignore:
+      - "backups/**"
+  sharepoint-history:
+    path: /home/tomdean88/.openclaw/workspace/sharepoint-cache
+    pattern: "**/*.md"
+  reference-transcripts:
+    path: /home/tomdean88/.openclaw/workspace/reference/transcripts
+    pattern: "**/*.md"
+  legacy-rolling-logs:
+    path: /home/tomdean88/.openclaw/workspace
+    pattern: "*LOG*.md"

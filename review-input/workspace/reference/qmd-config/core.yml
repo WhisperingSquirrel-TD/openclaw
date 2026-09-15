@@ -1,0 +1,28 @@
+# Default retrieval index: current operational truth only.
+collections:
+  workspace-root:
+    path: /home/tomdean88/.openclaw/workspace
+    pattern: "*.md"
+    ignore:
+      - "WHATSAPP_LOG.md"
+      - "WHATSAPP_BACKLOG.md"
+      - "FILES-TO-DELETE.md"
+  stackstone-current:
+    path: /home/tomdean88/.openclaw/workspace/stackstone
+    pattern: "*.md"
+  operating-reference:
+    path: /home/tomdean88/.openclaw/workspace/reference
+    pattern: "**/*.md"
+    ignore:
+      - "transcripts/**"
+      - "pi-audit-exports/**"
+      - "reconciliation/**"
+      - "expense-suppressions/**"
+      - "**/*.pre-*"
+      - "**/backups/**"
+  workspace-control-panel:
+    path: /home/tomdean88/.openclaw/workspace/projects/workspace-control-panel
+    pattern: "**/*.md"
+  workspace-control-panel-repo:
+    path: /home/tomdean88/.openclaw/workspace/projects/workspace-control-panel-repo
+    pattern: "**/*.md"
