@@ -3,6 +3,9 @@
 This is the remediation register for the [current audit](current-audit.md).
 It does not certify the Pi deployment or complete the whole-product review.
 
+The subsequent [Pi source-candidate review](pi-source-candidate-review.md)
+records additional fixes, current validation, and the deployment boundary.
+
 ## Implemented in this checkout
 
 | Finding                                                       | Source repair                                                                                                                                                                                                                                                                      | Verification                                                                                                                                                                                                                    |
@@ -34,10 +37,10 @@ was replaced or self-approved.
   tracker adapter and approval binding were not recovered. No substitute
   business schema, fake completion, or alternate financial executor was built.
   Guarded skill proposals do not implement the missing runtime capability.
-- **Schedule policy:** existing 06:55 health and Monday 06:00 briefing
-  declarations conflict with the stated scheduling rule. They are not declared
-  approved merely because they exist. No live schedule was moved; explicit
-  owner/runtime reconciliation remains necessary.
+- **Schedule wording:** the rule restricts new jobs; pre-existing 06:55 health
+  and Monday 06:00 briefing declarations alone do not prove a violation or live
+  collision. After clarification, the user accepted leaving them unchanged.
+  Documentation differs on which job occupies 06:00; no schedule was moved.
 - **Actual expense trigger ownership:** source ambiguity is clarified, but
   active timers/router units must still be inspected before migration/removal.
 - **CRM and other procedural skills:** source absence of a dedicated worker

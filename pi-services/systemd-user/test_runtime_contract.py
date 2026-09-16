@@ -13,6 +13,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -92,7 +93,9 @@ class RuntimeContractStaticTests(unittest.TestCase):
         self.assertRegex(script, r"(?m)^\s*hours = 48$")
         self.assertNotRegex(script, r"(?m)^\s*(?:HOURS|hours)\s*=\s*72\b")
         self.assertIn("'window_hours': hours", script)
-        self.assertIn("'coverage_complete': parse_errors == 0", script)
+        self.assertIn("'coverage_complete': coverage_complete", script)
+        self.assertIn("coverage_reasons.append('retention_limits')", script)
+        self.assertIn("message absence is not verified", script)
         self.assertIn("48-hour", WHATSAPP_DOC.read_text(encoding="utf-8"))
 
     def test_whatsapp_recent_runtime_distinguishes_missing_failed_and_empty(self) -> None:
@@ -158,6 +161,126 @@ class RuntimeContractStaticTests(unittest.TestCase):
             self.assertFalse(failed["coverage_complete"])
             self.assertIsNone(failed["retained_message_count"])
             self.assertIsNone(failed["source_message_count"])
+
+    def _run_whatsapp_fixture(self, records: list[str]) -> tuple[dict, str]:
+        """Run the renderer against an isolated, offline transcript fixture."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            raw = home / ".openclaw" / "credentials" / "whatsapp" / "watch-transcripts" / "whatsapp-watch-default.jsonl"
+            workspace = home / ".openclaw" / "workspace"
+            window = workspace / "memory" / "whatsapp-recent-window.json"
+            raw.parent.mkdir(parents=True)
+            raw.write_text("\n".join(records) + "\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["HOME"] = str(home)
+            result = subprocess.run(
+                ["bash", str(WHATSAPP_RECENT)],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            return json.loads(window.read_text(encoding="utf-8")), (workspace / "WHATSAPP_RECENT.md").read_text(encoding="utf-8")
+
+    @staticmethod
+    def _direct_fixture(body: str, peer: str = "Alice", timestamp: str | None = None) -> str:
+        return json.dumps({
+            "channel": "whatsapp",
+            "timestamp": timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "chatType": "direct",
+            "isFromMe": False,
+            "senderName": peer,
+            "senderNumber": "+447700900123",
+            "body": body,
+        })
+
+    @staticmethod
+    def _group_fixture(body: str, timestamp: str | None = None) -> str:
+        return json.dumps({
+            "channel": "whatsapp",
+            "timestamp": timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "chatType": "group",
+            "isFromMe": False,
+            "chatName": "Review group",
+            "senderName": "Alice",
+            "senderNumber": "+447700900123",
+            "body": body,
+        })
+
+    def test_whatsapp_recent_nine_direct_records_are_incomplete_at_eight_record_cap(self) -> None:
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        sidecar, recent = self._run_whatsapp_fixture([
+            self._direct_fixture(f"direct-{index}", timestamp=timestamp)
+            for index in range(1, 10)
+        ])
+
+        self.assertEqual(9, sidecar["source_message_count"])
+        self.assertEqual(8, sidecar["retained_message_count"])
+        self.assertTrue(sidecar["truncated"])
+        self.assertEqual("incomplete", sidecar["coverage_status"])
+        self.assertFalse(sidecar["coverage_complete"])
+        self.assertEqual("retention_limits", sidecar["coverage_reason"])
+        self.assertNotIn("direct-1", recent)
+        self.assertIn("direct-9", recent)
+        self.assertIn("truncated by retention limits", recent)
+        self.assertIn("message absence is not verified", recent)
+
+    def test_whatsapp_recent_malformed_record_with_valid_records_shows_parse_warning(self) -> None:
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        sidecar, recent = self._run_whatsapp_fixture([
+            self._direct_fixture("valid-before", timestamp=timestamp),
+            '{"channel":"whatsapp","timestamp":',
+            self._direct_fixture("valid-after", timestamp=timestamp),
+        ])
+
+        self.assertEqual(2, sidecar["source_message_count"])
+        self.assertEqual(1, sidecar["source_parse_error_count"])
+        self.assertEqual("failed", sidecar["source_status"])
+        self.assertEqual("incomplete", sidecar["coverage_status"])
+        self.assertFalse(sidecar["coverage_complete"])
+        self.assertEqual("invalid_transcript_records", sidecar["coverage_reason"])
+        self.assertIn("valid-before", recent)
+        self.assertIn("valid-after", recent)
+        self.assertIn("source reported failures", recent)
+        self.assertIn("could not be parsed", recent)
+        self.assertNotIn("(no messages in the last 48 hours)", recent)
+
+    def test_whatsapp_recent_group_cap_is_incomplete_and_visible(self) -> None:
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        sidecar, recent = self._run_whatsapp_fixture([
+            self._group_fixture(f"group-{index}", timestamp=timestamp)
+            for index in range(1, 502)
+        ])
+
+        self.assertEqual(501, sidecar["source_message_count"])
+        self.assertEqual(500, sidecar["retained_message_count"])
+        self.assertTrue(sidecar["truncated"])
+        self.assertFalse(sidecar["coverage_complete"])
+        self.assertEqual("retention_limits", sidecar["coverage_reason"])
+        self.assertNotIn("] Alice: group-1\n", recent)
+        self.assertIn("group-501", recent)
+        self.assertIn("truncated by retention limits", recent)
+
+    def test_whatsapp_recent_total_cap_is_incomplete_and_visible(self) -> None:
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        records = [
+            self._direct_fixture(
+                f"total-{peer_index}-{message_index}",
+                peer=f"Peer-{peer_index}",
+                timestamp=timestamp,
+            )
+            for peer_index in range(151)
+            for message_index in range(8)
+        ]
+        sidecar, recent = self._run_whatsapp_fixture(records)
+
+        self.assertEqual(1208, sidecar["source_message_count"])
+        self.assertEqual(1200, sidecar["retained_message_count"])
+        self.assertTrue(sidecar["truncated"])
+        self.assertFalse(sidecar["coverage_complete"])
+        self.assertEqual("retention_limits", sidecar["coverage_reason"])
+        self.assertIn("truncated by retention limits", recent)
 
     def test_installer_google_recovery_matches_phone_callback_pollers(self) -> None:
         installer = INSTALLER.read_text(encoding="utf-8")

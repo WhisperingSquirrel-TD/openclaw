@@ -42,6 +42,13 @@ The following facts are now explicit and testable in this checkout:
    `coverage_status: incomplete` and null message counts; a readable empty
    transcript alone may report a verified zero. The generated feed likewise
    distinguishes unavailable coverage from a genuine no-message window.
+   Retention limits remain fixed at the latest 8 messages per direct thread,
+   500 group messages, and 1200 total messages, but any content dropped by
+   those limits now marks the sidecar incomplete. Malformed or otherwise
+   unrenderable records likewise prevent a complete status. When valid rows
+   remain, `WHATSAPP_RECENT.md` prints explicit coverage warnings for source
+   failures, parse loss, and retention truncation rather than presenting the
+   retained rows as a complete or no-data result.
    The documentation explicitly rejects widening routine checks to 72 hours or
    falling back to the full log. The pinned `whatsapp-check` contract recorded
    by the operations audit is version
@@ -100,7 +107,11 @@ configuration suite. It checks:
 - unchanged installer schedule expressions and explicit pending schedule
   inconsistency (without silently grandfathering approval);
 - 48-hour WhatsApp shell/renderer configuration, atomic incomplete-source
-  handling, and missing/failed/empty runtime behavior;
+  handling, missing/failed/empty runtime behavior, and offline fixtures for
+  nine direct rows, mixed malformed/valid rows, the 500-row group cap, and
+  the 1200-row total cap. These fixtures verify that dropped or lost content
+  sets `coverage_complete: false` and that rendered Markdown retains a clear
+  warning without making a false no-data claim;
 - phone-first Google recovery instructions matching Calendar `--auth` on 8765
   and Gmail `--auth` on 8766 without token deletion guidance;
 - presence of this fixed-source/live-unknown/recoverability record.
@@ -110,7 +121,7 @@ checkout. After the repairs, the focused static suite passes:
 
 ```text
 python3 -m unittest -v pi-services/systemd-user/test_runtime_contract.py
-Ran 8 tests
+Ran 12 tests
 OK
 ```
 

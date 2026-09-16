@@ -92,6 +92,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -3038,6 +3039,204 @@ _GIT_SAFE_CONFIG = [
     "-c", "remote.origin.proxy=",
 ]
 
+# Git network operations must not resolve `git` through the developer PATH.
+# npm and repository-local tooling intentionally keep the existing developer
+# PATH, but that PATH includes user-writable locations where a project
+# dependency or npm install can plant an executable.  These are the only
+# system/Nix locations from which the management bot will accept Git.
+#
+# Debian uses /usr/bin (with /bin as the compatibility spelling).  NixOS and
+# the workspace Nix runtime use immutable /nix/store outputs or the
+# /run/current-system and /run/wrappers profiles.  The final executable must
+# be root-owned on Debian, or be an immutable, non-writable Nix store output
+# in workspace runtimes; every resolved path component below the trusted
+# prefix must be non-writable by group/other.  This is a trust-boundary check,
+# not a same-user filesystem sandbox: a process that can alter the trusted
+# system/Nix roots or inspect this process remains outside the guarantee.
+_GIT_TRUSTED_BIN_PATHS = (
+    Path("/usr/bin/git"),
+    Path("/bin/git"),
+    Path("/usr/local/bin/git"),
+    Path("/run/current-system/sw/bin/git"),
+    Path("/run/wrappers/bin/git"),
+)
+_GIT_TRUSTED_PREFIXES = (
+    Path("/usr/bin"),
+    Path("/bin"),
+    Path("/usr/local/bin"),
+    Path("/nix/store"),
+    Path("/run/current-system/sw/bin"),
+    Path("/run/wrappers/bin"),
+    Path("/usr/lib/git-core"),
+    Path("/usr/libexec/git-core"),
+    Path("/usr/local/libexec/git-core"),
+    Path("/usr/local/lib/git-core"),
+)
+_GIT_EXEC_PATH_SUFFIXES = (
+    Path("libexec/git-core"),
+    Path("lib/git-core"),
+)
+
+
+def _path_is_below(path: Path, root: Path) -> bool:
+    """Return whether *path* is below *root*, without string-prefix traps."""
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _root_controlled_path(path: Path, *, executable: bool = False) -> Path | None:
+    """Resolve and validate a system/Nix path controlled outside the workspace."""
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+
+    trusted_prefix = None
+    for prefix in _GIT_TRUSTED_PREFIXES:
+        try:
+            resolved_prefix = prefix.resolve(strict=False)
+            if _path_is_below(resolved, resolved_prefix):
+                trusted_prefix = resolved_prefix
+                break
+        except OSError:
+            continue
+    if trusted_prefix is None:
+        return None
+
+    # Validate the resolved path and all of its parents.  Checking the
+    # resolved path avoids accepting a symlink whose target is safe today but
+    # whose user-writable parent could be swapped between validation and exec.
+    nix_store_path = _path_is_below(resolved, Path("/nix/store"))
+    current = resolved
+    while True:
+        if current == trusted_prefix:
+            break
+        try:
+            info = current.stat()
+        except OSError:
+            return None
+        if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            return None
+        if nix_store_path and info.st_uid != 0 and info.st_mode & stat.S_IWUSR:
+            return None
+        if current == current.parent:
+            return None
+        current = current.parent
+    # A workspace Nix store can be mounted with a writable store root while
+    # each content-addressed output is immutable and non-writable.  Permit
+    # that runtime-specific mount only when the output itself is root-owned;
+    # otherwise a same-user process could add a fake output under a writable
+    # store root.  A normal Nix store is root-owned/non-writable and passes.
+    if trusted_prefix != Path("/nix/store"):
+        try:
+            if trusted_prefix.stat().st_mode & (
+                stat.S_IWGRP | stat.S_IWOTH
+            ):
+                return None
+        except OSError:
+            return None
+
+    try:
+        final_info = resolved.stat()
+    except OSError:
+        return None
+    if executable:
+        if nix_store_path and final_info.st_uid != 0:
+            try:
+                store_info = Path("/nix/store").stat()
+            except OSError:
+                return None
+            if store_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                return None
+        if (
+            not resolved.is_file()
+            or (final_info.st_uid != 0 and not nix_store_path)
+            or not (final_info.st_mode & stat.S_IXUSR)
+        ):
+            return None
+    elif not resolved.is_dir() or not (final_info.st_mode & stat.S_IXUSR):
+        return None
+    return resolved
+
+
+def _trusted_git_candidates() -> list[Path]:
+    """Return fixed and validated-prefix Git candidates in preference order."""
+    candidates = list(_GIT_TRUSTED_BIN_PATHS)
+    # A Nix store Git has a content-addressed directory name, so include
+    # absolute PATH entries as candidates while rejecting all workspace/home
+    # directories through _root_controlled_path().
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if entry:
+            candidate = Path(entry) / "git"
+            if candidate not in candidates:
+                candidates.append(candidate)
+    return candidates
+
+
+def _validated_git_binary() -> str:
+    """Return an absolute root-controlled Git binary or fail closed."""
+    for candidate in _trusted_git_candidates():
+        resolved = _root_controlled_path(candidate, executable=True)
+        if resolved is not None:
+            return str(resolved)
+    raise RuntimeError(
+        "No root-controlled Git executable found in supported Debian/Nix paths"
+    )
+
+
+def _validated_git_runtime() -> tuple[str, str, str]:
+    """Return Git binary, helper directory, and a trusted child PATH."""
+    git_binary = Path(_validated_git_binary())
+    prefixes = []
+    for suffix in _GIT_EXEC_PATH_SUFFIXES:
+        prefixes.append(git_binary.parent.parent / suffix)
+    # Debian's /usr/bin/git and locally installed /usr/local/bin/git are
+    # covered by the prefix-derived paths above; these explicit locations also
+    # cover a /bin compatibility path after symlink resolution.
+    prefixes.extend([
+        Path("/usr/lib/git-core"),
+        Path("/usr/libexec/git-core"),
+        Path("/usr/local/libexec/git-core"),
+        Path("/usr/local/lib/git-core"),
+    ])
+    git_exec_path = None
+    for candidate in prefixes:
+        resolved_dir = _root_controlled_path(candidate)
+        helper = candidate / "git-remote-https"
+        if resolved_dir is not None and _root_controlled_path(
+            helper, executable=True
+        ) is not None:
+            git_exec_path = resolved_dir
+            break
+    if git_exec_path is None:
+        raise RuntimeError(
+            f"No root-controlled git-remote-https helper found for {git_binary}"
+        )
+
+    # Git's remote helper and its credential-helper shell children must not
+    # fall back to the developer PATH.  Include the binary/helper directories
+    # plus standard system command directories, but never HOME or a project
+    # node_modules/.bin directory.
+    path_dirs = []
+    for candidate in (
+        git_exec_path,
+        git_binary.parent,
+        Path("/usr/bin"),
+        Path("/bin"),
+        Path("/usr/local/bin"),
+    ):
+        resolved_dir = _root_controlled_path(candidate)
+        if resolved_dir is not None and resolved_dir not in path_dirs:
+            path_dirs.append(resolved_dir)
+    if not path_dirs:
+        raise RuntimeError("No trusted PATH available for Git network helpers")
+    return str(git_binary), str(git_exec_path), os.pathsep.join(
+        str(path) for path in path_dirs
+    )
+
 
 def _redact_sensitive_text(value: object, credential: str = "") -> str:
     """Remove credential values and credential-bearing URLs from diagnostics."""
@@ -3084,7 +3283,9 @@ def _git_command_with_scoped_credentials(command: list, env: dict) -> list:
     """Return a hardened Git command with optional in-memory GitHub credentials."""
     if not command or command[0] != "git":
         return command
-    result = ["git", *_GIT_SAFE_CONFIG]
+    # Do not let PATH (which remains intentionally developer-friendly for
+    # local/npm work) select the executable for any Git phase.
+    result = [_validated_git_binary(), *_GIT_SAFE_CONFIG]
     if env.get("GITHUB_TOKEN"):
         # This applies only to the current invocation and replaces any helper
         # configured elsewhere; no `git config` mutation is made.
@@ -3097,7 +3298,12 @@ def _git_command_with_scoped_credentials(command: list, env: dict) -> list:
 
 def _git_network_env(clean_env: dict, github_token: str) -> dict:
     """Create the only child environment allowed to carry a GitHub token."""
+    _, git_exec_path, trusted_path = _validated_git_runtime()
     env = dict(clean_env)
+    # The remote helper and the POSIX shell used by the scoped credential
+    # helper must resolve only root-controlled commands.
+    env["PATH"] = trusted_path
+    env["GIT_EXEC_PATH"] = git_exec_path
     # Permit only HTTPS Git transport while authentication is available.
     env["GIT_ALLOW_PROTOCOL"] = "https"
     if github_token:
@@ -3250,7 +3456,7 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
 
     env = _dev_env()
     github_token = os.environ.get("GITHUB_TOKEN", "")
-    network_env = _git_network_env(env, github_token)
+    network_env = None
     send(token, chat_id, _redact_sensitive_text(
         f"🔧 *Dev-cmd — {project}*\n"
         f"`{operation}`"
@@ -3275,6 +3481,12 @@ def _execute_dev_cmd(token: str, chat_id: str, cmd_file: Path) -> None:
     def run_network(cmd: list, cwd: Path | None = None,
                     timeout: int = 120) -> tuple[int, str]:
         """Run the narrow, hook-disabled Git network phase with token access."""
+        nonlocal network_env
+        if network_env is None:
+            try:
+                network_env = _git_network_env(env, github_token)
+            except Exception as exc:
+                return 1, _redact_sensitive_text(exc, github_token)
         return _run(cmd, network_env, cwd, timeout)
 
     def ok(detail: str = "") -> None:

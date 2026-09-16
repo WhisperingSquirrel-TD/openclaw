@@ -20,28 +20,37 @@ The repaired queue path:
 3. builds a minimal child environment for repository and npm work. It retains
    only `HOME`, `PATH`, locale/timezone, and temporary-directory settings plus
    fixed safe Git/npm config controls; it does not inherit bot credentials,
-   arbitrary `GIT_CONFIG_*` overrides, or configured helpers;
-4. supplies `GITHUB_TOKEN` only to the narrow Git network child environment
-   and only through a command-scoped Git credential helper;
-5. clones with `--no-checkout`, Git hooks/templates/global config and LFS
+   arbitrary `GIT_CONFIG_*` overrides, or configured helpers. The developer
+   `PATH` remains available for clean local/npm functionality;
+4. resolves Git through a validated absolute executable from root-controlled
+   Debian paths (`/usr/bin`, `/bin`, `/usr/local/bin`) or immutable system/Nix
+   paths (`/nix/store`, `/run/current-system/sw`, `/run/wrappers`). It rejects
+   user-writable candidates and fails closed if no supported executable is
+   available;
+5. gives authenticated Git its own trusted `PATH` and validated
+   `GIT_EXEC_PATH`, covering `git-remote-https` and its shell children without
+   any `HOME/bin` or project `node_modules/.bin` entry. `GITHUB_TOKEN` is
+   supplied only to this narrow Git network environment and only through a
+   command-scoped Git credential helper;
+6. clones with `--no-checkout`, Git hooks/templates/global config and LFS
    filter pathways disabled, and HTTPS transport restricted. It then scrubs and validates the
    origin with the clean environment before a separate hook-disabled checkout
    receives no token;
-6. separates existing pull/rebase behavior into authenticated `git fetch`
+7. separates existing pull/rebase behavior into authenticated `git fetch`
    followed by clean-environment merge/rebase. Push/fetch commands retain the
    hook/global-config/filter defenses, use HTTPS-only transport, force the
    standard Git upload/receive programs, clear any remote proxy override, and
    require a scrubbed canonical GitHub HTTPS origin before receiving the token;
-7. resets any configured credential helper and installs the GitHub-only helper
+8. resets any configured credential helper and installs the GitHub-only helper
    with Git `-c` options for that invocation only. The helper emits credentials
    only for `https://github.com`, and its command text contains no credential
    value;
-8. checks clone destinations and repositories before remote operations, and
+9. checks clone destinations and repositories before remote operations, and
    removes legacy GitHub URL userinfo and credential query parameters from
    `origin`; and
-9. redacts configured credential values, URL userinfo, and common
-   token/password query parameters before Git output or queue exceptions are
-   sent to Telegram or stderr.
+10. redacts configured credential values, URL userinfo, and common
+    token/password query parameters before Git output or queue exceptions are
+    sent to Telegram or stderr.
 
 Every Git command also receives command-scoped `core.fsmonitor=false` and an
 empty `core.fsmonitorHookVersion`. This prevents a repository-local fsmonitor
@@ -127,11 +136,24 @@ absent from all local/identity subprocess environments. A companion local
 identity case verifies local `user.name`/`user.email` suppress the global
 fallback. No network Git operation is performed.
 
+The planted-executable regression now runs one real, offline Git subprocess
+with a synthetic token and a `HOME/.npm-global/bin/git` impostor. It verifies
+that the command uses the validated absolute system/Nix Git, the trusted
+network `PATH` excludes the planted directory, and the impostor never runs
+(so it cannot observe the token). The targeted isolated suite currently
+contains **11 tests, all passing**; it performs no network operation and uses
+no real credential.
+
 ## Residual risks
 
 - A privileged local process that can inspect another process's environment is
   outside this repair's argv/file exposure boundary; Git still needs the token
   in its inherited environment to authenticate.
+- The root-controlled executable check is not a same-user filesystem sandbox.
+  It is intended to block user-writable HOME/project PATH planting; a
+  same-user process that can rewrite a trusted system/Nix path, replace files
+  during execution, or inspect this process's environment is outside this
+  boundary.
 - The static helper uses Git's shell-helper protocol and therefore depends on
   the normal POSIX shell available to Git on the supported Pi environment.
 - Repositories that require a non-GitHub remote, SSH Git transport, custom

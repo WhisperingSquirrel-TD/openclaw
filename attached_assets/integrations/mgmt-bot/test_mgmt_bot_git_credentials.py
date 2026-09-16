@@ -59,6 +59,15 @@ class GitCredentialHandlingTests(unittest.TestCase):
             args = args[2:]
         return args
 
+    @staticmethod
+    def _is_git_argv(argv):
+        """Git must be invoked through the validated absolute binary."""
+        return (
+            argv
+            and Path(argv[0]).name == "git"
+            and Path(argv[0]).is_absolute()
+        )
+
     def _fake_git(self, push_output=""):
         def fake_run(argv, **kwargs):
             argv = list(argv)
@@ -118,7 +127,7 @@ class GitCredentialHandlingTests(unittest.TestCase):
                 "TMPDIR", "TMP", "TEMP", "GIT_CONFIG_NOSYSTEM",
                 "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT",
                 "npm_config_userconfig", "npm_config_globalconfig",
-                "GIT_ALLOW_PROTOCOL", "GITHUB_TOKEN",
+                "GIT_ALLOW_PROTOCOL", "GIT_EXEC_PATH", "GITHUB_TOKEN",
             }
             self.assertFalse(
                 set(kwargs["env"]) - allowed_keys,
@@ -132,7 +141,7 @@ class GitCredentialHandlingTests(unittest.TestCase):
                 "GIT_CONFIG_COUNT" in kwargs["env"],
                 "repo subprocess must not inherit caller Git config overrides",
             )
-            if argv[0] != "git":
+            if not self._is_git_argv(argv):
                 self.assertNotIn(
                     "GITHUB_TOKEN", kwargs["env"],
                     "npm must not inherit the GitHub token",
@@ -228,6 +237,57 @@ class GitCredentialHandlingTests(unittest.TestCase):
         self.assertEqual(kwargs["env"]["GIT_CONFIG_GLOBAL"], os.devnull)
         self.assertEqual(kwargs["env"]["GIT_CONFIG_NOSYSTEM"], "1")
 
+    def test_authenticated_git_ignores_home_planted_binary_offline(self):
+        """A real local Git invocation must not execute a HOME/bin impostor."""
+        home = Path(self.tmpdir.name) / "planted-home"
+        planted_bin = home / ".npm-global" / "bin"
+        planted_bin.mkdir(parents=True)
+        marker = home / "attacker-ran.txt"
+        (planted_bin / "git").write_text(
+            "#!/bin/sh\n"
+            f"printf 'GITHUB_TOKEN=%s\\n' \"$GITHUB_TOKEN\" > {marker!s}\n"
+            "exit 97\n"
+        )
+        # This is a fixture file under TemporaryDirectory, not a system or
+        # repository permission change.
+        os.chmod(planted_bin / "git", 0o755)
+
+        with patch.dict(os.environ, {
+            "HOME": str(home),
+            "PATH": str(planted_bin) + ":/usr/bin:/bin",
+            "GITHUB_TOKEN": self.fixture_token,
+            "SESSION_SECRET": self.fixture_session_secret,
+            "LANG": "C",
+        }, clear=True):
+            clean_env = mgmt_bot._dev_env()
+            network_env = mgmt_bot._git_network_env(
+                clean_env, self.fixture_token
+            )
+            git_cmd = mgmt_bot._git_command_with_scoped_credentials(
+                ["git", "--version"], network_env
+            )
+            result = subprocess.run(
+                git_cmd,
+                capture_output=True,
+                text=True,
+                env=network_env,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(
+            Path(git_cmd[0]).is_absolute(),
+            "authenticated Git must use an absolute executable",
+        )
+        self.assertNotIn(
+            str(planted_bin), network_env["PATH"],
+            "authenticated Git PATH must exclude HOME/bin",
+        )
+        self.assertFalse(
+            marker.exists(),
+            "HOME/bin planted Git ran or received the synthetic token",
+        )
+
     def test_pull_fetches_with_token_then_merges_without_it(self):
         config = self.project_dir / ".git" / "config"
         config.parent.mkdir(parents=True, exist_ok=True)
@@ -267,7 +327,7 @@ class GitCredentialHandlingTests(unittest.TestCase):
         def local_with_fake_push(argv, **kwargs):
             argv = list(argv)
             calls.append((argv, kwargs))
-            if argv[0] == "git" and self._git_args(argv)[:1] == ["push"]:
+            if self._is_git_argv(argv) and self._git_args(argv)[:1] == ["push"]:
                 return SimpleNamespace(returncode=0, stdout="pushed", stderr="")
             return real_run(argv, **kwargs)
 
@@ -300,7 +360,7 @@ class GitCredentialHandlingTests(unittest.TestCase):
                 "SESSION_SECRET" in child_env or "GIT_CONFIG_COUNT" in child_env,
                 "identity/repository subprocess inherited an unsafe environment variable",
             )
-            if argv[0] == "git" and self._git_args(argv)[:1] == ["push"]:
+            if self._is_git_argv(argv) and self._git_args(argv)[:1] == ["push"]:
                 self.assertEqual(child_env.get("GITHUB_TOKEN"), self.fixture_token)
             else:
                 self.assertFalse(

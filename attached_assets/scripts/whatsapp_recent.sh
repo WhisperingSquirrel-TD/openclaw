@@ -209,6 +209,7 @@ for line in raw_jsonl.read_text(encoding='utf-8').splitlines():
     objs.append((obj, dt))
 
 rendered = []
+unrendered_records = 0
 for obj, dt in objs:
     ts_local = dt.astimezone().strftime('%Y-%m-%d %H:%M')
     chat_type = obj.get('chatType')
@@ -227,6 +228,10 @@ for obj, dt in objs:
             rendered.append((f'[{ts_local}] Tom -> {peer}: {body}', dt))
         else:
             rendered.append((f'[{ts_local}] {peer}: {body}', dt))
+    else:
+        # A valid WhatsApp record with an unsupported chat type is still
+        # source content. Do not silently call the resulting feed complete.
+        unrendered_records += 1
 
 direct_lines_by_peer: dict[str, list[tuple[str, datetime]]] = {}
 group_lines: list[tuple[str, datetime]] = []
@@ -265,6 +270,16 @@ for line, dt in merged:
     unique.setdefault(line, dt)
 retained = sorted(unique.items(), key=lambda pair: pair[1])
 lines = [line for line, _ in retained]
+truncated = len(retained) < len(rendered)
+coverage_reasons = []
+if parse_errors:
+    coverage_reasons.append('invalid_transcript_records')
+if unrendered_records:
+    coverage_reasons.append('unrendered_transcript_records')
+if truncated:
+    coverage_reasons.append('retention_limits')
+coverage_complete = not coverage_reasons
+source_status = 'ok' if not parse_errors and not unrendered_records else 'failed'
 window_json.parent.mkdir(parents=True, exist_ok=True)
 sidecar = {
     'schema_version': 1,
@@ -275,11 +290,11 @@ sidecar = {
     'retained_message_count': len(retained),
     'source_message_count': len(objs),
     'source_parse_error_count': parse_errors,
-    'truncated': len(retained) < len(rendered),
-    'source_status': 'ok' if parse_errors == 0 else 'failed',
-    'coverage_status': 'complete' if parse_errors == 0 else 'incomplete',
-    'coverage_complete': parse_errors == 0,
-    'coverage_reason': None if parse_errors == 0 else 'invalid_transcript_records',
+    'truncated': truncated,
+    'source_status': source_status,
+    'coverage_status': 'complete' if coverage_complete else 'incomplete',
+    'coverage_complete': coverage_complete,
+    'coverage_reason': None if coverage_complete else ','.join(coverage_reasons),
 }
 with tempfile.NamedTemporaryFile(
     mode='w',
@@ -296,10 +311,26 @@ updated = datetime.now().strftime('%Y-%m-%d %H:%M')
 print(f'# WhatsApp Recent (last {hours}h)')
 print(f'_Updated: {updated} — showing last {hours} hours (max {max_lines} lines, with direct-thread preservation). Source: structured WhatsApp transcript stream; legacy full log: WHATSAPP_LOG.md_')
 print()
+warnings = []
+if source_status != 'ok':
+    warnings.append('⚠️ Coverage incomplete: the WhatsApp transcript source reported failures; message absence is not verified.')
+if parse_errors:
+    warnings.append(f'⚠️ Coverage incomplete: {parse_errors} transcript record(s) could not be parsed; displayed messages may be incomplete.')
+if unrendered_records:
+    warnings.append(f'⚠️ Coverage incomplete: {unrendered_records} valid transcript record(s) could not be rendered; displayed messages may be incomplete.')
+if truncated:
+    warnings.append(
+        f'⚠️ Coverage incomplete: output was truncated by retention limits '
+        f'(latest {direct_thread_recent_lines} per direct thread, {group_max_lines} group messages, '
+        f'{max_lines} total); displayed messages may be incomplete and message absence is not verified.'
+    )
+if warnings:
+    print('\n'.join(warnings))
+    print()
 if lines:
     print('\n'.join(lines))
-elif parse_errors:
-    print('_(coverage incomplete: transcript records could not be parsed; message absence is not verified)_')
+elif warnings:
+    print('_(coverage incomplete: message absence is not verified)_')
 else:
     print(f'_(no messages in the last {hours} hours)_')
 PY
