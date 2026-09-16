@@ -1318,6 +1318,47 @@ else
     warn "SharePoint queue processor not found at $SP_QUEUE_SRC — skipping"
 fi
 
+# The expense route is default-off. Enable it only after the bridge, queue,
+# cache, and service-owned inbound-media directory are all present.
+EXPENSE_BRIDGE="$SEER_FINANCE_ROOT/seer_finance/agent_expense_bridge.py"
+EXPENSE_MEDIA_ROOT="$HOME/.openclaw/media/inbound"
+EXPENSE_DEFAULT_STATE_DIR="$HOME/.openclaw"
+if [ "${OPENCLAW_HOME:-$HOME}" != "$HOME" ] || [ "${OPENCLAW_STATE_DIR:-$HOME/.openclaw}" != "$EXPENSE_DEFAULT_STATE_DIR" ]; then
+    warn "Expense SharePoint route remains disabled: only the verified default Pi profile $EXPENSE_DEFAULT_STATE_DIR is supported"
+elif [ -f "$EXPENSE_BRIDGE" ] && [ -f "$SP_QUEUE_DST" ] && [ -d "$HOME/.openclaw/workspace/sharepoint-cache" ]; then
+    mkdir -p "$EXPENSE_MEDIA_ROOT"
+    chmod 700 "$HOME/.openclaw/media" "$EXPENSE_MEDIA_ROOT"
+    sudo chattr -i "$CONFIG_FILE" 2>/dev/null || true
+    python3 - <<PYEOF
+import json
+from pathlib import Path
+
+config_path = Path("$CONFIG_FILE")
+with config_path.open(encoding="utf-8") as handle:
+    config = json.load(handle)
+plugins = config.setdefault("plugins", {})
+entries = plugins.setdefault("entries", {})
+skilzvolt = entries.setdefault("skilzvolt", {})
+skilzvolt["enabled"] = True
+plugin_config = skilzvolt.setdefault("config", {})
+plugin_config["expenseSharePointEnabled"] = True
+tools = config.setdefault("tools", {})
+also_allow = tools.setdefault("alsoAllow", [])
+if not isinstance(also_allow, list):
+    also_allow = []
+    tools["alsoAllow"] = also_allow
+if "expense_sharepoint" not in also_allow:
+    also_allow.append("expense_sharepoint")
+with config_path.open("w", encoding="utf-8") as handle:
+    json.dump(config, handle, indent=2)
+    handle.write("\\n")
+PYEOF
+    sudo chattr +i "$CONFIG_FILE" 2>/dev/null || true
+    info "Expense SharePoint route enabled after finance queue/media prerequisites (tools.alsoAllow)"
+else
+    warn "Expense SharePoint route remains disabled: default-profile finance bridge, queue processor, or cache prerequisite missing"
+fi
+
 # ---------------------------------------------------------------------------
 # SharePoint housekeeping sweep
 # Anthropic-batched entity-by-entity CRM normalisation.

@@ -18,7 +18,7 @@ describe("SkilzVolt plugin registration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not expose either native tool to non-owner senders", async () => {
+  it("keeps the expense boundary default-off even when SkilzVolt is enabled", async () => {
     const factories: OpenClawPluginToolFactory[] = [];
     const hooks: Array<{
       name: string;
@@ -35,8 +35,8 @@ describe("SkilzVolt plugin registration", () => {
 
     registerSkilzVolt(api);
 
-    expect(factories).toHaveLength(2);
-    expect(factories.map((factory) => factory({ senderIsOwner: false }))).toEqual([null, null]);
+    expect(factories).toHaveLength(3);
+    expect(factories.map((factory) => factory({ senderIsOwner: false }))).toEqual([null, null, null]);
     expect(
       factories
         .map((factory) => factory({ senderIsOwner: true }))
@@ -49,6 +49,7 @@ describe("SkilzVolt plugin registration", () => {
     ).toEqual([
       { name: "skilzvolt", ownerOnly: true },
       { name: "skilzvolt_local_migration", ownerOnly: true },
+      undefined,
     ]);
 
     const promptHook = hooks.find((hook) => hook.name === "before_prompt_build");
@@ -62,5 +63,24 @@ describe("SkilzVolt plugin registration", () => {
     // or guessed data.
     expect(mainResult?.appendSystemContext).toContain("unavailable");
     expect(await promptHook?.handler({}, { agentId: "other" })).toBeUndefined();
+  });
+
+  it("exposes the fixed expense boundary only for an owner after explicit opt-in", () => {
+    const factories: OpenClawPluginToolFactory[] = [];
+    const api = {
+      pluginConfig: { agentIds: ["main"], expenseSharePointEnabled: true },
+      registerTool: vi.fn((factory: OpenClawPluginToolFactory) => factories.push(factory)),
+      on: vi.fn(),
+      logger: { info: vi.fn(), warn: vi.fn() },
+    } as unknown as OpenClawPluginApi;
+
+    registerSkilzVolt(api);
+
+    const expenseFactory = factories[2];
+    expect(expenseFactory?.({ senderIsOwner: false })).toBeNull();
+    expect(expenseFactory?.({ senderIsOwner: true })).toMatchObject({
+      name: "expense_sharepoint",
+      ownerOnly: true,
+    });
   });
 });

@@ -5,6 +5,7 @@ import { SkilzVoltCatalogue } from "./src/catalogue.js";
 import { SkilzVoltClient } from "./src/client.js";
 import { resolveSkilzVoltConfig } from "./src/config.js";
 import { SkilzVoltMigrationManager } from "./src/migration.js";
+import { createExpenseSharePointTool } from "./src/expense-tool.js";
 import { createSkilzVoltMigrationTool, createSkilzVoltTool } from "./src/tool.js";
 
 const STATIC_GUIDANCE = `SkilzVolt is the authoritative source for organisation-specific skills and operating guidance.
@@ -61,6 +62,17 @@ export default function registerSkilzVolt(api: OpenClawPluginApi) {
       }),
     });
     return createSkilzVoltMigrationTool(migration);
+  });
+
+  // This is deliberately separate from the live SkilzVolt RPC adapter: it is
+  // a local fixed route to the Pi's already-installed, queue-backed finance
+  // boundary. It has no arbitrary command, file, destination, email, or
+  // message capability and does not alter approval gates on those tools.
+  api.registerTool((ctx) => {
+    if (ctx.senderIsOwner !== true || !config.expenseSharePointEnabled) {
+      return null;
+    }
+    return createExpenseSharePointTool({ workspaceDir: ctx.workspaceDir });
   });
 
   api.on("before_prompt_build", async (_event, ctx) => {

@@ -14,6 +14,8 @@ from typing import Any, Mapping
 from .ledger.sharepoint_contract import (
     SharePointDocumentStore,
     SharePointContractError,
+    SharePointMutationBlocked,
+    SharePointRebaseRequired,
     SharePointWritePending,
     _clean_path,
 )
@@ -63,9 +65,15 @@ class SharePointBoundary:
             )
         try:
             reference = self.store.write(path=canonical, content=content)
+        except SharePointWritePending as exc:
+            return _boundary_result(
+                operation=operation, path=canonical,
+                accepted=not isinstance(exc, (SharePointMutationBlocked, SharePointRebaseRequired)),
+                content=content, blocker=str(exc),
+            )
         except SharePointContractError as exc:
             return _boundary_result(
-                operation=operation, path=canonical, accepted=True, verified=False,
+                operation=operation, path=canonical, accepted=False, verified=False,
                 content=content, blocker=str(exc),
             )
         return _boundary_result(
@@ -102,11 +110,16 @@ class SharePointBoundary:
                 expected_snapshot=expected_snapshot,
                 semantic_workbook_sha256=semantic_workbook_sha256,
             )
+        except SharePointWritePending as exc:
+            return _boundary_result(
+                operation=operation, path=canonical,
+                accepted=not isinstance(exc, (SharePointMutationBlocked, SharePointRebaseRequired)),
+                content=content_base64, blocker=str(exc),
+            )
         except (SharePointContractError, ValueError) as exc:
             return _boundary_result(
                 operation=operation, path=canonical,
-                accepted=not isinstance(exc, ValueError), verified=False,
-                content=content_base64, blocker=str(exc),
+                accepted=False, verified=False, content=content_base64, blocker=str(exc),
             )
         return _boundary_result(
             operation=operation, path=canonical, accepted=True, verified=True,
@@ -146,7 +159,7 @@ class SharePointBoundary:
             return _boundary_result(
                 operation="upload_binary",
                 path=canonical,
-                accepted=True,
+                accepted=not isinstance(exc, (SharePointMutationBlocked, SharePointRebaseRequired)),
                 verified=False,
                 blocker=str(exc),
             )

@@ -24,8 +24,12 @@ from .expense_repository import (
     _ALLOWED_TRANSITIONS,
     _validated_facts,
 )
-from .sharepoint_contract import EXPENSE_LEDGER_PATH, SharePointDocumentStore
+from .sharepoint_contract import EXPENSE_LEDGER_PATH, SharePointDocumentStore, SharePointWritePending
 from .workbook_codec import WorkbookCodec, WorkbookCodecError
+
+
+class CaptureCollisionPending(SharePointWritePending):
+    """A conflicting capture was durably queued for review, never accepted."""
 
 
 class SharePointExpenseRepository:
@@ -44,6 +48,7 @@ class SharePointExpenseRepository:
         state, snapshot = self._read_state_snapshot()
         existing = next((item for item in state["expenses"] if item["source_ref"] == source_ref), None)
         changed = False
+        conflicts: dict[str, Any] = {}
         if existing is None:
             now = _now()
             values = {
@@ -105,7 +110,14 @@ class SharePointExpenseRepository:
                 pass
         if not changed:
             return _expense(existing)
-        self._write_state(state, source_ref=source_ref, snapshot=snapshot)
+        try:
+            self._write_state(state, source_ref=source_ref, snapshot=snapshot)
+        except SharePointWritePending as exc:
+            if conflicts:
+                raise CaptureCollisionPending(
+                    "expense capture conflicts with existing source-linked facts"
+                ) from exc
+            raise
         found = next(item for item in state["expenses"] if item["source_ref"] == source_ref)
         return _expense(found)
 

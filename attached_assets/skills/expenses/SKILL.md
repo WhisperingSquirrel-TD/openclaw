@@ -55,7 +55,55 @@ append to, or otherwise edit that file, and must not call generic SharePoint
 identity, queue locking, idempotency, table-preserving workbook encoding, and
 remote readback.
 
+## Owner chat route
+
+For an owner-initiated receipt capture, L1 uses the fixed
+`expense_sharepoint` tool, not `exec`, a generic file tool, or a generic
+SharePoint tool. It has exactly three no-TOTP actions:
+
+This route is supported only on the verified default Pi service profile:
+`HOME=/home/tomdean88`, `OPENCLAW_HOME` unset or `/home/tomdean88`, and
+`OPENCLAW_STATE_DIR=/home/tomdean88/.openclaw`. It intentionally fails closed
+with `unsupported_state_layout` for custom/alternate profiles because the
+installed SharePoint queue and cache workers use this same fixed layout. Do not
+attempt to work around that result with shell, direct queue edits, or another
+SharePoint tool.
+
+* `read_expense_workbook` reads only `/Expenses/Expense ledger.xlsx` and
+  returns bounded, paginated visible expense rows, matching evidence/status
+  events, and authenticated metadata (`eTag`, version, sync timestamp and
+  hashes). It never returns raw XLSX bytes or Base64 and does not authorize a
+  raw workbook replacement from chat. Use `page` (zero-based) and `pageSize`
+  (1–50) when more rows are needed.
+* `capture_expense` merges only source-linked, validated expense facts into
+  the visible canonical expense table using the existing
+  `SharePointExpenseRepository`. It always fixes the source surface to
+  `owner_chat`; it cannot choose a workbook, queue, or remote destination.
+  Its only tool fact keys are `sourceTimestamp`, `observedTimestamp`,
+  `supplier`, `amountPence`, `currency`, `expenseDate`, `category`,
+  `evidenceRef`, `evidenceState`, `settlementState`, `financeLedgerRef`, and
+  `validationResult`. It returns the canonical `observed_timestamp` and
+  `finance_ledger_ref` where recorded. Do not invent a `line_items` field: the current
+  canonical workbook schema has no visible item-level table, so preserve the
+  original receipt as evidence and record only supported, observed facts.
+* `upload_expense_receipt` accepts only an inbound OpenClaw media path. The
+  bridge validates the regular file, computes its SHA-256 itself, derives MIME
+  from the allowed extension, and writes only to the content-addressed path
+  `/Expenses/Receipt evidence/<sha256>.<extension>`; do not supply a hash,
+  MIME type, or destination name.
+
+This narrow route cannot send email/messages, execute commands, read arbitrary
+files, or choose another SharePoint path. It reports `complete: false` for an
+accepted queue operation until the queue processor has produced verified
+binary/semantic readback; “accepted” or “queued” is not a saved expense. A
+blocked/rebase result, conflicting repeat capture, incoming-field mismatch, or
+unresolved collision is `accepted: false` and never complete.
+
 ## Workbook snapshot and mutation contract
+
+This is the internal finance repository/queue-worker contract, not an
+`expense_sharepoint` owner-chat action. The owner route cannot receive raw
+workbook bytes, Base64, hashes, or a workbook-write action.
 
 Every canonical mutation must be based on one authenticated
 `read_workbook_snapshot(...)` result for the current workbook. Preserve the

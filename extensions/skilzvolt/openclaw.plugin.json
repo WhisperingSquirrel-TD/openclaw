@@ -16,6 +16,11 @@
         "default": true,
         "description": "Allow the three governed SkilzVolt proposal operations."
       },
+      "expenseSharePointEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Explicitly enable the fixed owner-only expense SharePoint boundary after the Pi finance service, queue processor, and media permissions have been installed. Enabling SkilzVolt alone never enables this route."
+      },
       "agentIds": {
         "type": "array",
         "items": {
