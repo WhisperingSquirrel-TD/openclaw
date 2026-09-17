@@ -1352,6 +1352,14 @@ elif [ -f "$EXPENSE_BRIDGE_SOURCE" ] && [ -f "$SP_QUEUE_DST" ] && [ -d "$HOME/.o
         fail "Could not activate protected expense bridge deployment"
     fi
     sudo rm -rf "$EXPENSE_DEPLOY_PREVIOUS"
+    env -i \
+        HOME="$HOME" \
+        PYTHONPATH="$EXPENSE_DEPLOY_ROOT" \
+        PYTHONNOUSERSITE=1 \
+        LANG=C.UTF-8 \
+        LC_ALL=C.UTF-8 \
+        /usr/bin/python3 -c "from seer_finance.agent_expense_bridge import handle" \
+        || fail "Protected expense bridge import check failed"
     info "Protected expense bridge deployed: $EXPENSE_DEPLOY_ROOT"
 
     sudo chattr -i "$CONFIG_FILE" 2>/dev/null || true
