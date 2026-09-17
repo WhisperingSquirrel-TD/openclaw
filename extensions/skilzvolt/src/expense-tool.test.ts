@@ -393,4 +393,13 @@ describe("expense_sharepoint", () => {
     expect(schema).toContain("observedTimestamp");
     expect(schema).toContain("financeLedgerRef");
   });
+
+  it("documents that Telegram photos use the inbound media path directly", () => {
+    const tool = createExpenseSharePointTool({ run: vi.fn(), workspaceDir: "/workspace" });
+    const schema = JSON.stringify(tool.parameters);
+
+    expect(schema).toContain("Telegram photo");
+    expect(schema).toContain("[media attached:");
+    expect(schema).toContain("receiptMediaPath");
+  });
 });
