@@ -69,6 +69,8 @@ class RuntimeContractStaticTests(unittest.TestCase):
             installer,
         )
         self.assertIn('if [ -L "$QUEUE_FILE" ]', installer)
+        self.assertIn("QUEUE_ACTUAL_OWNER=", installer)
+        self.assertIn("QUEUE_ACTUAL_MODE=", installer)
 
     def test_protected_expense_runtime_vendors_its_python_dependencies(self) -> None:
         installer = INSTALLER.read_text(encoding="utf-8")

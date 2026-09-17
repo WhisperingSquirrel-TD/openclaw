@@ -27,6 +27,7 @@ vi.mock("node:fs/promises", () => ({
         pathname.startsWith("/opt/openclaw/")
           ? 0
           : (process.getuid?.() ?? 0),
+      gid: process.getgid?.() ?? 0,
       mode: 0o755,
     };
   }),

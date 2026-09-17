@@ -1323,7 +1323,12 @@ if [ -f "$SP_QUEUE_SRC" ]; then
         sudo install -o "$(id -u)" -g "$(id -g)" -m 600 /dev/null "$QUEUE_FILE"
         printf '[]\n' | sudo tee "$QUEUE_FILE" >/dev/null
     fi
-    info "SharePoint queue ownership repaired: $QUEUE_FILE ($QUEUE_OWNER, mode 600)"
+    QUEUE_ACTUAL_OWNER="$(stat -c '%u:%g' "$QUEUE_FILE" 2>/dev/null || true)"
+    QUEUE_ACTUAL_MODE="$(stat -c '%a' "$QUEUE_FILE" 2>/dev/null || true)"
+    if [ "$QUEUE_ACTUAL_OWNER" != "$QUEUE_OWNER" ] || [ "$QUEUE_ACTUAL_MODE" != "600" ]; then
+        fail "SharePoint queue ownership repair did not verify: $QUEUE_FILE ($QUEUE_ACTUAL_OWNER, mode $QUEUE_ACTUAL_MODE)"
+    fi
+    info "SharePoint queue ownership repaired: $QUEUE_FILE ($QUEUE_ACTUAL_OWNER, mode $QUEUE_ACTUAL_MODE)"
 
     SP_QUEUE_CRON="* * * * * python3 $SP_QUEUE_DST >> $SP_QUEUE_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "sharepoint_queue_processor.py"; echo "$SP_QUEUE_CRON" ) | crontab -
