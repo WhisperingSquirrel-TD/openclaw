@@ -107,6 +107,19 @@ class QueueSafetyTests(unittest.TestCase):
         queue_processor._clear_queue()
         self.assertEqual(queue_processor.QUEUE_FILE.stat().st_mode & 0o777, 0o600)
 
+    def test_results_and_lock_remain_private_even_with_wide_umask(self):
+        previous_umask = os.umask(0)
+        try:
+            queue_processor._write_results_json([{"id": "private", "success": True}])
+            queue_processor._write_results([{"id": "private", "success": True}])
+            with queue_processor._Lock(blocking=True):
+                pass
+        finally:
+            os.umask(previous_umask)
+        self.assertEqual(queue_processor.RESULT_JSON.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(queue_processor.RESULT_MD.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(queue_processor.LOCK_FILE.stat().st_mode & 0o777, 0o600)
+
     def test_successful_operation_ids_are_deduplicated(self):
         queue_processor._write_queue([
             {"id": "same-id", "operation": "update", "path": "/Finance/a.md", "content": "x"},

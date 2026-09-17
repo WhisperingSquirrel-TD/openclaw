@@ -314,6 +314,7 @@ class _Lock:
         try:
             import fcntl
             self._fd = LOCK_FILE.open("a+")
+            os.chmod(LOCK_FILE, 0o600)
             flags = fcntl.LOCK_EX
             if not self.blocking:
                 flags |= fcntl.LOCK_NB
@@ -950,6 +951,7 @@ def _write_results(results: list[dict]) -> None:
 
     lines.append("_Results written by sharepoint_queue_processor.py_")
     RESULT_MD.write_text("\n".join(lines))
+    os.chmod(RESULT_MD, 0o600)
 
 
 def _write_results_json(results: list[dict]) -> None:
@@ -967,6 +969,7 @@ def _write_results_json(results: list[dict]) -> None:
     bounded = sorted(merged.values(), key=lambda item: str(item.get("processed_at", "")))[-1000:]
     tmp = RESULT_JSON.with_suffix(".tmp")
     tmp.write_text(json.dumps(bounded, indent=2, sort_keys=True))
+    os.chmod(tmp, 0o600)
     tmp.replace(RESULT_JSON)
 
 
