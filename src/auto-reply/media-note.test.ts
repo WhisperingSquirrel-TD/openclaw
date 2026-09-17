@@ -29,8 +29,9 @@ describe("buildInboundMediaNote", () => {
 
   it("skips media notes for attachments with understanding output", () => {
     const note = buildInboundMediaNote({
-      MediaPaths: ["/tmp/a.png", "/tmp/b.png"],
-      MediaUrls: ["https://example.com/a.png", "https://example.com/b.png"],
+      MediaPaths: ["/tmp/a.ogg", "/tmp/b.png"],
+      MediaUrls: ["https://example.com/a.ogg", "https://example.com/b.png"],
+      MediaTypes: ["audio/ogg", "image/png"],
       MediaUnderstanding: [
         {
           kind: "audio.transcription",
@@ -40,7 +41,7 @@ describe("buildInboundMediaNote", () => {
         },
       ],
     });
-    expect(note).toBe("[media attached: /tmp/b.png | https://example.com/b.png]");
+    expect(note).toBe("[media attached: /tmp/b.png (image/png) | https://example.com/b.png]");
   });
 
   it("only suppresses attachments when media understanding succeeded", () => {
@@ -75,17 +76,24 @@ describe("buildInboundMediaNote", () => {
     );
   });
 
-  it("suppresses attachments when media understanding succeeds via decisions", () => {
+  it("keeps local image paths when image understanding succeeds via decisions", () => {
     const note = buildInboundMediaNote({
       MediaPaths: ["/tmp/a.png", "/tmp/b.png"],
       MediaUrls: ["https://example.com/a.png", "https://example.com/b.png"],
+      MediaTypes: ["image/png", "image/png"],
       MediaUnderstandingDecisions: [
         createSuccessfulImageMediaDecision() as unknown as NonNullable<
           Parameters<typeof buildInboundMediaNote>[0]["MediaUnderstandingDecisions"]
         >[number],
       ],
     });
-    expect(note).toBe("[media attached: /tmp/b.png | https://example.com/b.png]");
+    expect(note).toBe(
+      [
+        "[media attached: 2 files]",
+        "[media attached 1/2: /tmp/a.png (image/png) | https://example.com/a.png]",
+        "[media attached 2/2: /tmp/b.png (image/png) | https://example.com/b.png]",
+      ].join("\n"),
+    );
   });
 
   it("strips audio attachments when transcription succeeded via MediaUnderstanding (issue #4197)", () => {

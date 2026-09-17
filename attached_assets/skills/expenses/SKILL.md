@@ -92,18 +92,23 @@ SharePoint tool.
   canonical workbook schema has no visible item-level table, so preserve the
   original receipt as evidence and record only supported, observed facts.
 - `upload_expense_receipt` requires an inbound OpenClaw media path and
-  `receiptFolder`, one exact existing folder name: `Anthropic`, `ChatGPT`,
+  `receiptFolder`, one exact approved destination: `Expenses` for the
+  `/Expenses` root, or an existing subfolder name `Anthropic`, `ChatGPT`,
   `Meals & Refreshments`, `Not organised`, `OpenAI API`, `Receipts`, `Replit`,
   or `SEER`. The bridge validates the original regular file, computes its
   SHA-256 itself, derives MIME from the allowed extension, and preserves the
   original bytes using the non-colliding content-addressed name
-  `/Expenses/<receiptFolder>/<sha256>.<extension>`. It cannot create a new
-  tree or accept a nested, encoded-separator, or traversal-like folder value.
+  `/Expenses/<sha256>.<extension>` for the root option or
+  `/Expenses/<receiptFolder>/<sha256>.<extension>` for a subfolder. It cannot
+  create a new tree or accept a nested, encoded-separator, or traversal-like
+  folder value.
   For a Telegram photo, use the exact local path shown in the current inbound
   context line `[media attached: <path> (image/...)]` as `receiptMediaPath`;
   Telegram already downloads compressed chat photos into OpenClaw inbound
-  media, so do not ask the owner to resend the photo as a document. Do not
-  supply a hash, MIME type, destination name, or arbitrary path.
+  media, so do not ask the owner to resend the photo as a document. If the
+  category cannot be determined confidently, use `receiptFolder: "Expenses"`
+  so the actual image is saved at the `/Expenses` root. Do not supply a hash,
+  MIME type, destination name, or arbitrary path.
   Classify the Lidl Madrid conference-food receipt as
   `receiptFolder: "Meals & Refreshments"`.
 
