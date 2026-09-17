@@ -295,6 +295,7 @@ describe("expense_sharepoint", () => {
     const approvedFolders = [
       "Anthropic",
       "ChatGPT",
+      "Expenses",
       "Meals & Refreshments",
       "Not organised",
       "OpenAI API",
@@ -389,6 +390,7 @@ describe("expense_sharepoint", () => {
     }
     expect(schema).toContain("receiptMediaPath");
     expect(schema).toContain("receiptFolder");
+    expect(schema).toContain("Expenses");
     expect(schema).not.toContain("destinationPath");
     expect(schema).toContain("observedTimestamp");
     expect(schema).toContain("financeLedgerRef");
