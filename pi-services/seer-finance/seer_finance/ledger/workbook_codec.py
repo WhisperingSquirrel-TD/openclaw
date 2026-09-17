@@ -34,6 +34,7 @@ WORKBOOK_SCHEMA_VERSION = 1
 _EXPENSE_SHEETS = ("Expenses", "Events", "Collisions", "Evidence")
 _FINANCE_SHEETS = ("Transactions",)
 _METADATA_SHEET = "Workbook"
+_OPTIONAL_EXPENSE_SHEETS = frozenset({"Receipt items"})
 _TYPE_SUFFIX = " [type]"
 _TYPE_VALUES = frozenset({
     "missing", "null", "str", "int", "float", "bool", "date", "datetime", "time", "json",
@@ -54,6 +55,15 @@ def _kind_sheets(kind: str) -> tuple[str, ...]:
         return _EXPENSE_SHEETS
     if kind == FINANCE_WORKBOOK_KIND:
         return _FINANCE_SHEETS
+    raise WorkbookCodecError(f"unknown workbook kind {kind!r}")
+
+
+def _optional_sheets(kind: str) -> frozenset[str]:
+    """Return approved visible auxiliary sheets preserved outside ledger state."""
+    if kind == EXPENSE_WORKBOOK_KIND:
+        return _OPTIONAL_EXPENSE_SHEETS
+    if kind == FINANCE_WORKBOOK_KIND:
+        return frozenset()
     raise WorkbookCodecError(f"unknown workbook kind {kind!r}")
 
 
@@ -604,11 +614,12 @@ class WorkbookCodec:
                 raise WorkbookValidationError(
                     f"workbook kind is {workbook_kind!r}, expected {kind!r}"
                 )
-            expected_sheets = set(_kind_sheets(workbook_kind)) | {_METADATA_SHEET}
+            required_sheets = set(_kind_sheets(workbook_kind)) | {_METADATA_SHEET}
+            allowed_sheets = required_sheets | set(_optional_sheets(workbook_kind))
             actual_sheets = set(workbook.sheetnames)
-            if actual_sheets != expected_sheets:
-                unknown = sorted(actual_sheets - expected_sheets)
-                missing = sorted(expected_sheets - actual_sheets)
+            if not required_sheets.issubset(actual_sheets) or not actual_sheets.issubset(allowed_sheets):
+                unknown = sorted(actual_sheets - allowed_sheets)
+                missing = sorted(required_sheets - actual_sheets)
                 detail = []
                 if missing:
                     detail.append("missing " + ", ".join(missing))
