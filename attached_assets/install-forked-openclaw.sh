@@ -1353,6 +1353,12 @@ elif [ -f "$EXPENSE_BRIDGE_SOURCE" ] && [ -f "$SP_QUEUE_DST" ] && [ -d "$HOME/.o
     sudo rm -rf "$EXPENSE_DEPLOY_STAGING" "$EXPENSE_DEPLOY_PREVIOUS"
     sudo install -d -o root -g root -m 755 "$EXPENSE_DEPLOY_STAGING"
     sudo cp -a "$SEER_FINANCE_ROOT/seer_finance" "$EXPENSE_DEPLOY_STAGING/"
+    sudo install -d -o root -g root -m 755 "$EXPENSE_DEPLOY_STAGING/vendor"
+    sudo /usr/bin/python3 -m pip install \
+        --quiet --break-system-packages --disable-pip-version-check --no-cache-dir \
+        --target "$EXPENSE_DEPLOY_STAGING/vendor" \
+        -r "$SEER_FINANCE_REQUIREMENTS" \
+        || fail "Protected expense bridge dependency install failed"
     sudo find "$EXPENSE_DEPLOY_STAGING" -type d -name __pycache__ -prune -exec rm -rf {} +
     sudo find "$EXPENSE_DEPLOY_STAGING" -type f -name '*.pyc' -delete
     sudo chown -R root:root "$EXPENSE_DEPLOY_STAGING"
@@ -1368,7 +1374,7 @@ elif [ -f "$EXPENSE_BRIDGE_SOURCE" ] && [ -f "$SP_QUEUE_DST" ] && [ -d "$HOME/.o
     sudo rm -rf "$EXPENSE_DEPLOY_PREVIOUS"
     env -i \
         HOME="$HOME" \
-        PYTHONPATH="$EXPENSE_DEPLOY_ROOT" \
+        PYTHONPATH="$EXPENSE_DEPLOY_ROOT/vendor:$EXPENSE_DEPLOY_ROOT" \
         PYTHONNOUSERSITE=1 \
         LANG=C.UTF-8 \
         LC_ALL=C.UTF-8 \

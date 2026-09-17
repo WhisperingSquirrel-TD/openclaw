@@ -70,6 +70,21 @@ class RuntimeContractStaticTests(unittest.TestCase):
         )
         self.assertIn('if [ -L "$QUEUE_FILE" ]', installer)
 
+    def test_protected_expense_runtime_vendors_its_python_dependencies(self) -> None:
+        installer = INSTALLER.read_text(encoding="utf-8")
+        self.assertIn(
+            'sudo /usr/bin/python3 -m pip install',
+            installer,
+        )
+        self.assertIn(
+            '--target "$EXPENSE_DEPLOY_STAGING/vendor"',
+            installer,
+        )
+        self.assertIn(
+            'PYTHONPATH="$EXPENSE_DEPLOY_ROOT/vendor:$EXPENSE_DEPLOY_ROOT"',
+            installer,
+        )
+
     def test_expense_operating_doc_separates_policy_from_live_activation(self) -> None:
         operating = OPERATING.read_text(encoding="utf-8").lower()
         self.assertIn("source policy (fixed)", operating)

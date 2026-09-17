@@ -56,6 +56,7 @@ type ExpenseBridgeRunner = (
 ) => Promise<Record<string, unknown>>;
 
 const financeRoot = "/opt/openclaw/expense-sharepoint";
+const financeVendorRoot = path.join(financeRoot, "vendor");
 const bridgePath = path.join(financeRoot, "seer_finance", "agent_expense_bridge.py");
 const PYTHON_INTERPRETER = "/usr/bin/python3";
 const MAX_BRIDGE_OUTPUT_BYTES = 90 * 1024 * 1024;
@@ -240,7 +241,7 @@ export function createExpenseBridgeEnvironment(
     SEER_FINANCE_SHAREPOINT_QUEUE_LOCK: paths.queueLockPath,
     SEER_FINANCE_SHAREPOINT_MUTATION_JOURNAL: paths.journalPath,
     SEER_FINANCE_EXPENSE_MEDIA_ROOT: paths.mediaRoot,
-    PYTHONPATH: financeRoot,
+    PYTHONPATH: [financeVendorRoot, financeRoot].join(path.delimiter),
     PYTHONNOUSERSITE: "1",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
@@ -311,6 +312,7 @@ async function assertBridgeDeployment(environment: NodeJS.ProcessEnv): Promise<v
   const paths: Array<[string, "file" | "directory"]> = [
     [path.dirname(root), "directory"],
     [root, "directory"],
+    [financeVendorRoot, "directory"],
     [path.join(financeRoot, "seer_finance"), "directory"],
     [path.join(financeRoot, "seer_finance", "ledger"), "directory"],
     [bridgePath, "file"],
