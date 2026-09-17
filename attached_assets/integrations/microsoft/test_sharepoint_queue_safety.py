@@ -107,6 +107,13 @@ class QueueSafetyTests(unittest.TestCase):
         queue_processor._clear_queue()
         self.assertEqual(queue_processor.QUEUE_FILE.stat().st_mode & 0o777, 0o600)
 
+    def test_queue_read_repairs_an_existing_widened_mode(self):
+        queue_processor.QUEUE_FILE.write_text("[]")
+        os.chmod(queue_processor.QUEUE_FILE, 0o664)
+
+        self.assertEqual(queue_processor._read_queue(), [])
+        self.assertEqual(queue_processor.QUEUE_FILE.stat().st_mode & 0o777, 0o600)
+
     def test_results_and_lock_remain_private_even_with_wide_umask(self):
         previous_umask = os.umask(0)
         try:

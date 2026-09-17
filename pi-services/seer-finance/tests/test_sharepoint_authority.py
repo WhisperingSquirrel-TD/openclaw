@@ -25,6 +25,7 @@ from seer_finance.ledger.sharepoint_contract import (
     SharePointMutationBlocked,
     SharePointRebaseRequired,
     SharePointWritePending,
+    _atomic_json,
 )
 from seer_finance.ledger.sharepoint_finance_writer import SharePointFinanceWriter
 from seer_finance.sharepoint_boundary import SharePointBoundary
@@ -93,6 +94,16 @@ class SharePointAuthorityTests(unittest.TestCase):
 
     def _operation(self) -> dict:
         return json.loads(self.queue.read_text(encoding="utf-8"))[0]
+
+    def test_queue_json_rewrite_reasserts_private_mode(self) -> None:
+        self.queue.write_text("[]", encoding="utf-8")
+        os.chmod(self.queue, 0o664)
+        previous_umask = os.umask(0)
+        try:
+            _atomic_json(self.queue, [{"id": "private"}])
+        finally:
+            os.umask(previous_umask)
+        self.assertEqual(self.queue.stat().st_mode & 0o777, 0o600)
 
     def _queue_workbook(self, content: bytes) -> None:
         snapshot = self.writer.store.read_workbook_snapshot(FINANCE_LEDGER_PATH)
