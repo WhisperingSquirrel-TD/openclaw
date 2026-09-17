@@ -99,7 +99,11 @@ SharePoint tool.
   original bytes using the non-colliding content-addressed name
   `/Expenses/<receiptFolder>/<sha256>.<extension>`. It cannot create a new
   tree or accept a nested, encoded-separator, or traversal-like folder value.
-  Do not supply a hash, MIME type, destination name, or arbitrary path.
+  For a Telegram photo, use the exact local path shown in the current inbound
+  context line `[media attached: <path> (image/...)]` as `receiptMediaPath`;
+  Telegram already downloads compressed chat photos into OpenClaw inbound
+  media, so do not ask the owner to resend the photo as a document. Do not
+  supply a hash, MIME type, destination name, or arbitrary path.
   Classify the Lidl Madrid conference-food receipt as
   `receiptFolder: "Meals & Refreshments"`.
 
