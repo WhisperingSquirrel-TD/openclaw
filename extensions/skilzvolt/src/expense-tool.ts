@@ -268,15 +268,19 @@ function blockedStateLayout(error: unknown): Record<string, unknown> | undefined
 
 async function assertServiceOwned(pathname: string, kind: "file" | "directory"): Promise<void> {
   const entry = await lstat(pathname);
+  const mode = (entry.mode & 0o7777).toString(8).padStart(4, "0");
+  const details = `uid=${entry.uid}, gid=${entry.gid ?? "unknown"}, mode=${mode}, symlink=${entry.isSymbolicLink()}`;
   if ((kind === "file" && !entry.isFile()) || (kind === "directory" && !entry.isDirectory())) {
-    throw new Error(`Expense bridge deployment has an invalid ${kind}: ${pathname}`);
+    throw new Error(`Expense bridge deployment has an invalid ${kind}: ${pathname} (${details})`);
   }
   if (entry.isSymbolicLink() || (entry.mode & 0o022) !== 0) {
-    throw new Error(`Expense bridge deployment is not safely permissioned: ${pathname}`);
+    throw new Error(
+      `Expense bridge deployment is not safely permissioned: ${pathname} (${details})`,
+    );
   }
   if (typeof process.getuid === "function" && entry.uid !== process.getuid()) {
     throw new Error(
-      `Expense bridge deployment is not owned by the OpenClaw service user: ${pathname}`,
+      `Expense bridge deployment is not owned by the OpenClaw service user: ${pathname} (${details})`,
     );
   }
 }

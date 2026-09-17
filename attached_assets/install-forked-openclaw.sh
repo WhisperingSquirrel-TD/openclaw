@@ -1309,21 +1309,41 @@ if [ -f "$SP_QUEUE_SRC" ]; then
 
     # Initialise empty queue if it doesn't exist yet
     QUEUE_FILE="$HOME/.openclaw/sharepoint-queue.json"
-    QUEUE_OWNER="$(id -u):$(id -g)"
-    if [ -L "$QUEUE_FILE" ] || { [ -e "$QUEUE_FILE" ] && [ ! -f "$QUEUE_FILE" ]; }; then
-        fail "SharePoint queue path is not a regular file: $QUEUE_FILE"
-    fi
-    if [ -e "$QUEUE_FILE" ]; then
-        # Older installs and root-run repairs may leave this transport file
-        # root-owned. Preserve its pending operations, but return ownership to
-        # the OpenClaw service user before enabling the governed expense route.
-        sudo chown "$QUEUE_OWNER" "$QUEUE_FILE"
-        sudo chmod 600 "$QUEUE_FILE"
-    else
-        sudo install -o "$(id -u)" -g "$(id -g)" -m 600 /dev/null "$QUEUE_FILE"
-        printf '[]\n' | sudo tee "$QUEUE_FILE" >/dev/null
-    fi
-    info "SharePoint queue ownership repaired: $QUEUE_FILE ($QUEUE_OWNER, mode 600)"
+    QUEUE_UID="$(id -u)"
+    QUEUE_GID="$(id -g)"
+    QUEUE_OWNER="$QUEUE_UID:$QUEUE_GID"
+
+    repair_private_transport_file() {
+        local file="$1"
+        local initial_content="${2:-}"
+        if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
+            fail "SharePoint transport path is not a regular file: $file"
+        fi
+        if [ -e "$file" ]; then
+            # Older installs and root-run repairs may leave transport files
+            # group-writable. Preserve their contents, but return ownership to
+            # the OpenClaw service user before enabling the governed route.
+            sudo chown "$QUEUE_OWNER" "$file"
+            sudo chmod 600 "$file"
+        else
+            sudo install -o "$QUEUE_UID" -g "$QUEUE_GID" -m 600 /dev/null "$file"
+            if [ -n "$initial_content" ]; then
+                printf '%s\n' "$initial_content" | sudo tee "$file" >/dev/null
+            fi
+        fi
+        local actual_owner
+        local actual_mode
+        actual_owner="$(stat -c '%u:%g' "$file" 2>/dev/null || true)"
+        actual_mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+        if [ "$actual_owner" != "$QUEUE_OWNER" ] || [ "$actual_mode" != "600" ]; then
+            fail "SharePoint transport permission repair did not verify: $file ($actual_owner, mode $actual_mode)"
+        fi
+        info "SharePoint transport secured: $file ($actual_owner, mode $actual_mode)"
+    }
+
+    repair_private_transport_file "$QUEUE_FILE" "[]"
+    repair_private_transport_file "$HOME/.openclaw/sharepoint-queue-results.json" "[]"
+    repair_private_transport_file "$HOME/.openclaw/integrations/microsoft/sp-queue.lock"
 
     SP_QUEUE_CRON="* * * * * python3 $SP_QUEUE_DST >> $SP_QUEUE_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "sharepoint_queue_processor.py"; echo "$SP_QUEUE_CRON" ) | crontab -
