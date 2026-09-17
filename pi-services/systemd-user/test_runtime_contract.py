@@ -59,6 +59,17 @@ class RuntimeContractStaticTests(unittest.TestCase):
             r"(?im)^\s*(?:cp|install|ln(?:\s+-sf)?)\b[^\n]*expense-intake-watcher\.(?:service|timer)",
         )
 
+    def test_sharepoint_queue_is_repaired_to_service_owned_private_file(self) -> None:
+        installer = INSTALLER.read_text(encoding="utf-8")
+        self.assertIn('QUEUE_OWNER="$(id -u):$(id -g)"', installer)
+        self.assertIn('sudo chown "$QUEUE_OWNER" "$QUEUE_FILE"', installer)
+        self.assertIn('sudo chmod 600 "$QUEUE_FILE"', installer)
+        self.assertIn(
+            'sudo install -o "$(id -u)" -g "$(id -g)" -m 600 /dev/null "$QUEUE_FILE"',
+            installer,
+        )
+        self.assertIn('if [ -L "$QUEUE_FILE" ]', installer)
+
     def test_expense_operating_doc_separates_policy_from_live_activation(self) -> None:
         operating = OPERATING.read_text(encoding="utf-8").lower()
         self.assertIn("source policy (fixed)", operating)
