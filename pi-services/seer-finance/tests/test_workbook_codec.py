@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import unittest
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import load_workbook
 from openpyxl.comments import Comment
@@ -10,6 +11,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from seer_finance.ledger.workbook_codec import (
     WorkbookCodec,
     WorkbookValidationError,
+    _editable_package_parts,
     encode_expense_workbook,
     encode_finance_workbook,
 )
@@ -152,6 +154,84 @@ class WorkbookCodecTests(unittest.TestCase):
         )
         self.assertEqual("receipt-1", result["Receipt items"]["A2"].value)
         self.assertEqual("Conference meal", result["Receipt items"]["B2"].value)
+
+    def test_expense_update_preserves_custom_xml_package_members_byte_for_byte(self) -> None:
+        original = encode_expense_workbook({
+            "schema_version": 1,
+            "expenses": [{"expense_id": "e-1", "amount_pence": 10}],
+            "events": [],
+            "collisions": [],
+            "evidence": [],
+        })
+        custom_parts = {
+            "customXml/item1.xml": b"<root>one</root>",
+            "customXml/item2.xml": b"<root>two</root>",
+            "customXml/item3.xml": b"<root>three</root>",
+            "customXml/itemProps1.xml": b"<props>one</props>",
+            "customXml/itemProps2.xml": b"<props>two</props>",
+            "customXml/itemProps3.xml": b"<props>three</props>",
+            "customXml/_rels/item1.xml.rels": (
+                b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps1.xml"/>'
+                b"</Relationships>"
+            ),
+            "customXml/_rels/item2.xml.rels": (
+                b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps2.xml"/>'
+                b"</Relationships>"
+            ),
+            "customXml/_rels/item3.xml.rels": (
+                b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps3.xml"/>'
+                b"</Relationships>"
+            ),
+        }
+        with ZipFile(BytesIO(original), "r") as source_zip:
+            custom_parts["[Content_Types].xml"] = (
+                source_zip.read("[Content_Types].xml")
+                .replace(
+                    b"</Types>",
+                    b'<Override PartName="/customXml/item1.xml" ContentType="application/xml"/>'
+                    b'<Override PartName="/customXml/item2.xml" ContentType="application/xml"/>'
+                    b'<Override PartName="/customXml/item3.xml" ContentType="application/xml"/>'
+                    b'<Override PartName="/customXml/itemProps1.xml" ContentType="application/vnd.openxmlformats-officedocument.customXmlProperties+xml"/>'
+                    b'<Override PartName="/customXml/itemProps2.xml" ContentType="application/vnd.openxmlformats-officedocument.customXmlProperties+xml"/>'
+                    b'<Override PartName="/customXml/itemProps3.xml" ContentType="application/vnd.openxmlformats-officedocument.customXmlProperties+xml"/>'
+                    b"</Types>",
+                )
+            )
+            members = {
+                name: source_zip.read(name) for name in source_zip.namelist()
+            }
+        members.update(custom_parts)
+        packaged = BytesIO()
+        with ZipFile(packaged, "w", compression=ZIP_DEFLATED) as archive:
+            for name, payload in members.items():
+                archive.writestr(name, payload)
+
+        updated = WorkbookCodec.update_expense(
+            packaged.getvalue(),
+            {
+                "schema_version": 1,
+                "expenses": [{"expense_id": "e-1", "amount_pence": 11}],
+                "events": [],
+                "collisions": [],
+                "evidence": [],
+            },
+        )
+        editable = _editable_package_parts(packaged.getvalue(), "expense")
+        with ZipFile(BytesIO(packaged.getvalue()), "r") as before, ZipFile(
+            BytesIO(updated), "r"
+        ) as after:
+            self.assertEqual(set(before.namelist()), set(after.namelist()))
+            for name in set(before.namelist()) - editable:
+                self.assertEqual(before.read(name), after.read(name), name)
+            for name, payload in custom_parts.items():
+                self.assertEqual(payload, after.read(name), name)
+        self.assertEqual(
+            11,
+            WorkbookCodec.decode_expense(updated)["expenses"][0]["amount_pence"],
+        )
 
     def test_unapproved_expense_auxiliary_sheet_is_rejected(self) -> None:
         original = encode_expense_workbook({

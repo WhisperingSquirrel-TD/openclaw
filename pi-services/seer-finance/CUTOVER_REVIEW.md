@@ -11,7 +11,10 @@ it through the binary `update_workbook` request. It must not reread and
 authorize against a newer cache snapshot; a concurrent human edit therefore
 causes a queue rebase failure rather than a silent whole-workbook overwrite.
 Workbook updates preserve supported source-package formatting/comments/widths/
-validations and fail closed for unsupported package features.
+validations. Only the edited worksheet/table members are regenerated; every
+other source ZIP member, including custom XML, relationships, and content-type
+references, is copied unchanged so unsupported package features are not
+silently discarded.
 
 ## Safe migration/recovery parity check
 
