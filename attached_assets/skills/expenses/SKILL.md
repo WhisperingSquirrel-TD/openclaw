@@ -17,6 +17,11 @@ unresolved fields in the existing visible Excel tables. Do not create a second
 expense ledger or a Markdown substitute. Workbook table structure, sheet names,
 and existing rows must survive the edit.
 
+The expense workbook may also contain one approved visible auxiliary sheet named
+`Receipt items`. It is preserved byte-for-byte in spirit during ledger updates,
+but it is not part of the typed expense state and must not be treated as a
+second expense ledger. Other unexpected worksheets remain a schema error.
+
 ## Public API and queue-operation distinction (MANDATORY)
 
 The package-level public `seer_finance` boundary does **not** expose a Python
@@ -69,13 +74,13 @@ installed SharePoint queue and cache workers use this same fixed layout. Do not
 attempt to work around that result with shell, direct queue edits, or another
 SharePoint tool.
 
-* `read_expense_workbook` reads only `/Expenses/Expense ledger.xlsx` and
+- `read_expense_workbook` reads only `/Expenses/Expense ledger.xlsx` and
   returns bounded, paginated visible expense rows, matching evidence/status
   events, and authenticated metadata (`eTag`, version, sync timestamp and
   hashes). It never returns raw XLSX bytes or Base64 and does not authorize a
   raw workbook replacement from chat. Use `page` (zero-based) and `pageSize`
   (1–50) when more rows are needed.
-* `capture_expense` merges only source-linked, validated expense facts into
+- `capture_expense` merges only source-linked, validated expense facts into
   the visible canonical expense table using the existing
   `SharePointExpenseRepository`. It always fixes the source surface to
   `owner_chat`; it cannot choose a workbook, queue, or remote destination.
@@ -86,7 +91,7 @@ SharePoint tool.
   `finance_ledger_ref` where recorded. Do not invent a `line_items` field: the current
   canonical workbook schema has no visible item-level table, so preserve the
   original receipt as evidence and record only supported, observed facts.
-* `upload_expense_receipt` requires an inbound OpenClaw media path and
+- `upload_expense_receipt` requires an inbound OpenClaw media path and
   `receiptFolder`, one exact existing folder name: `Anthropic`, `ChatGPT`,
   `Meals & Refreshments`, `Not organised`, `OpenAI API`, `Receipts`, `Replit`,
   or `SEER`. The bridge validates the original regular file, computes its
@@ -131,14 +136,14 @@ snapshot unchanged while merging the complete workbook, and pass its exact
 `expected_snapshot` to `write_workbook_verified(...)`. The submitted request
 contains:
 
-* `path: "/Expenses/Expense ledger.xlsx"`;
-* `content_base64`: the complete merged XLSX bytes, not a fragment or decoded
+- `path: "/Expenses/Expense ledger.xlsx"`;
+- `content_base64`: the complete merged XLSX bytes, not a fragment or decoded
   JSON payload;
-* `content_sha256`: SHA-256 of those exact submitted bytes;
-* `base_etag`: the opaque native SharePoint `eTag` from `snapshot["etag"]`;
-* `expected_source_sha256`: SHA-256 of the exact current source bytes from
+- `content_sha256`: SHA-256 of those exact submitted bytes;
+- `base_etag`: the opaque native SharePoint `eTag` from `snapshot["etag"]`;
+- `expected_source_sha256`: SHA-256 of the exact current source bytes from
   `snapshot["content_bytes"]`; and
-* `semantic_workbook_sha256`: the visible-table semantic identity of the
+- `semantic_workbook_sha256`: the visible-table semantic identity of the
   submitted workbook, excluding Office ZIP/XML metadata.
 
 The conceptual queue payload includes `operation: "update_workbook"`, the
@@ -277,8 +282,8 @@ writer is gated, blocked, or needs approval.
 **Required mechanism:** first read this invariant, `SYSTEM_MAP.md`, and the
 live owning service/state; then resolve the declared non-gated route all the
 way to its concrete invocation contract (the `seer_finance` workbook boundary,
-  the exact `write_workbook_verified(...)` call and its conceptual
-  `operation: "update_workbook"` fields, its worker/consumer, and the
+the exact `write_workbook_verified(...)` call and its conceptual
+`operation: "update_workbook"` fields, its worker/consumer, and the
 canonical workbook readback proof). Attempt that route before considering any
 shell/exec path. A chat-shell execution gate, or inability to use arbitrary
 `exec`, is never evidence that routine expense processing requires TOTP.
@@ -495,7 +500,7 @@ it automatically without TOTP:
 3. parse the JSON response for subject, received date, amount, receipt/invoice
    numbers, and downloaded attachments;
 4. merge the complete known details into the appropriate visible Excel table
-    through the `seer_finance` `write_workbook_verified(...)` contract; and
+   through the `seer_finance` `write_workbook_verified(...)` contract; and
 5. preserve a receipt-evidence reference in that workbook row. If a binary
    retention route is available, use that already-governed route; never create
    a Markdown ledger or use a generic append operation as a substitute.
@@ -991,10 +996,10 @@ retained invoice is not a substitute for primary settlement evidence.
 4. Merge the new or corrected row into the current workbook while preserving
    tables, sheets, existing rows, source references, receipt evidence, and
    unresolved fields.
- 5. Submit exactly one complete workbook mutation through
-    `get_boundary().write_workbook_verified(...)`; its worker consumes the
-    resulting `operation: "update_workbook"` request with all hashes and the
-    native `eTag`.
+5. Submit exactly one complete workbook mutation through
+   `get_boundary().write_workbook_verified(...)`; its worker consumes the
+   resulting `operation: "update_workbook"` request with all hashes and the
+   native `eTag`.
 6. If information is incomplete, preserve a precise pending/blocked state in
    the workbook and monitored proof layer.
 7. For forwarded receipts, a visible preview is not enough when the exact
@@ -1013,11 +1018,11 @@ retained invoice is not a substitute for primary settlement evidence.
 11. For each seen item, explicitly classify:
     `logged` / `duplicate already represented` / `pending with blocker`; and
     separately classify evidence as `reference retained` / `queued through an
-    established route` / `blocked`.
+established route` / `blocked`.
 12. For a monitored inbound signal, leave a durable proof path through the
     workbook plus monitored state and/or operational activity log. If the pass
     cannot safely prove completion, classify it as `blocked` or `coverage
-    incomplete`.
+incomplete`.
 13. Before finishing, state whether every newly seen forwarded receipt was
     handled as logged, blocked-and-raised, or duplicate-already-represented.
 

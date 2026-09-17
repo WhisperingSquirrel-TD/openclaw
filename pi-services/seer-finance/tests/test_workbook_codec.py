@@ -117,6 +117,58 @@ class WorkbookCodecTests(unittest.TestCase):
         table = next(iter(result.tables.values()))
         self.assertEqual("TableStyleMedium2", table.tableStyleInfo.name)
 
+    def test_expense_update_preserves_approved_receipt_items_sheet(self) -> None:
+        original = encode_expense_workbook({
+            "schema_version": 1,
+            "expenses": [{"expense_id": "e-1", "amount_pence": 10}],
+            "events": [],
+            "collisions": [],
+            "evidence": [],
+        })
+        workbook = load_workbook(BytesIO(original))
+        receipt_items = workbook.create_sheet("Receipt items")
+        receipt_items.append(["Receipt ID", "Description"])
+        receipt_items.append(["receipt-1", "Conference meal"])
+        edited = BytesIO()
+        workbook.save(edited)
+
+        decoded = WorkbookCodec.decode_expense(edited.getvalue())
+        self.assertEqual(1, len(decoded["expenses"]))
+
+        updated = WorkbookCodec.update_expense(
+            edited.getvalue(),
+            {
+                "schema_version": 1,
+                "expenses": [{"expense_id": "e-1", "amount_pence": 11}],
+                "events": [],
+                "collisions": [],
+                "evidence": [],
+            },
+        )
+        result = load_workbook(BytesIO(updated), data_only=False)
+        self.assertEqual(
+            ["Receipt ID", "Description"],
+            [result["Receipt items"]["A1"].value, result["Receipt items"]["B1"].value],
+        )
+        self.assertEqual("receipt-1", result["Receipt items"]["A2"].value)
+        self.assertEqual("Conference meal", result["Receipt items"]["B2"].value)
+
+    def test_unapproved_expense_auxiliary_sheet_is_rejected(self) -> None:
+        original = encode_expense_workbook({
+            "schema_version": 1,
+            "expenses": [],
+            "events": [],
+            "collisions": [],
+            "evidence": [],
+        })
+        workbook = load_workbook(BytesIO(original))
+        workbook.create_sheet("Unexpected data")
+        edited = BytesIO()
+        workbook.save(edited)
+
+        with self.assertRaisesRegex(WorkbookValidationError, "unknown Unexpected data"):
+            WorkbookCodec.decode_expense(edited.getvalue())
+
     def test_blank_marker_accepts_an_ordinary_value_without_marker_edit(self) -> None:
         original = encode_expense_workbook({
             "schema_version": 1,
