@@ -61,14 +61,41 @@ class RuntimeContractStaticTests(unittest.TestCase):
 
     def test_sharepoint_queue_is_repaired_to_service_owned_private_file(self) -> None:
         installer = INSTALLER.read_text(encoding="utf-8")
-        self.assertIn('QUEUE_OWNER="$(id -u):$(id -g)"', installer)
-        self.assertIn('sudo chown "$QUEUE_OWNER" "$QUEUE_FILE"', installer)
-        self.assertIn('sudo chmod 600 "$QUEUE_FILE"', installer)
+        self.assertIn('QUEUE_UID="$(id -u)"', installer)
+        self.assertIn('QUEUE_GID="$(id -g)"', installer)
+        self.assertIn('repair_private_transport_file "$QUEUE_FILE" "[]"', installer)
         self.assertIn(
-            'sudo install -o "$(id -u)" -g "$(id -g)" -m 600 /dev/null "$QUEUE_FILE"',
+            'repair_private_transport_file "$HOME/.openclaw/sharepoint-queue-results.json" "[]"',
             installer,
         )
-        self.assertIn('if [ -L "$QUEUE_FILE" ]', installer)
+        self.assertIn(
+            'repair_private_transport_file "$HOME/.openclaw/integrations/microsoft/sp-queue.lock"',
+            installer,
+        )
+        self.assertIn('sudo chown "$QUEUE_OWNER" "$file"', installer)
+        self.assertIn('sudo chmod 600 "$file"', installer)
+        self.assertIn(
+            'sudo install -o "$QUEUE_UID" -g "$QUEUE_GID" -m 600 /dev/null "$file"',
+            installer,
+        )
+        self.assertIn('if [ -L "$file" ]', installer)
+        self.assertIn("actual_owner=", installer)
+        self.assertIn("actual_mode=", installer)
+
+    def test_protected_expense_runtime_vendors_its_python_dependencies(self) -> None:
+        installer = INSTALLER.read_text(encoding="utf-8")
+        self.assertIn(
+            'sudo /usr/bin/python3 -m pip install',
+            installer,
+        )
+        self.assertIn(
+            '--target "$EXPENSE_DEPLOY_STAGING/vendor"',
+            installer,
+        )
+        self.assertIn(
+            'PYTHONPATH="$EXPENSE_DEPLOY_ROOT/vendor:$EXPENSE_DEPLOY_ROOT"',
+            installer,
+        )
 
     def test_expense_operating_doc_separates_policy_from_live_activation(self) -> None:
         operating = OPERATING.read_text(encoding="utf-8").lower()

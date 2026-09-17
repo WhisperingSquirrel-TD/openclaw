@@ -27,6 +27,7 @@ vi.mock("node:fs/promises", () => ({
         pathname.startsWith("/opt/openclaw/")
           ? 0
           : (process.getuid?.() ?? 0),
+      gid: process.getgid?.() ?? 0,
       mode: 0o755,
     };
   }),
@@ -111,7 +112,7 @@ describe("expense_sharepoint", () => {
             "seer-finance-mutation-journal.json",
           ),
           SEER_FINANCE_EXPENSE_MEDIA_ROOT: path.join(stateDir, "media", "inbound"),
-          PYTHONPATH: "/opt/openclaw/expense-sharepoint",
+          PYTHONPATH: "/opt/openclaw/expense-sharepoint/vendor:/opt/openclaw/expense-sharepoint",
           PYTHONNOUSERSITE: "1",
         }),
       }),
@@ -188,7 +189,7 @@ describe("expense_sharepoint", () => {
         "seer-finance-mutation-journal.json",
       ),
       SEER_FINANCE_EXPENSE_MEDIA_ROOT: path.join(stateDir, "media", "inbound"),
-      PYTHONPATH: "/opt/openclaw/expense-sharepoint",
+      PYTHONPATH: "/opt/openclaw/expense-sharepoint/vendor:/opt/openclaw/expense-sharepoint",
       PYTHONNOUSERSITE: "1",
       LANG: "C.UTF-8",
       LC_ALL: "C.UTF-8",

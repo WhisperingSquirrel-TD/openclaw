@@ -352,6 +352,10 @@ def _read_queue() -> list[dict]:
     if not QUEUE_FILE.exists():
         return []
     try:
+        # Repair legacy or externally-created queue files before the next
+        # producer/bridge safety check sees them.  The queue is private
+        # transport state, not a user-editable document.
+        os.chmod(QUEUE_FILE, 0o600)
         raw = QUEUE_FILE.read_text().strip()
         if not raw:
             return []
@@ -374,6 +378,10 @@ def _write_queue(items: list[dict]) -> None:
         # atomically promoted over the protected queue.
         os.chmod(tmp, 0o600)
         tmp.replace(QUEUE_FILE)
+        # Reassert the invariant on the published pathname as well.  This
+        # protects upgrades from older processors that left a reusable .tmp
+        # file group-writable and makes the final mode explicit.
+        os.chmod(QUEUE_FILE, 0o600)
     except OSError as e:
         log(f"ERROR: Could not write queue: {e}")
         tmp.unlink(missing_ok=True)
@@ -404,8 +412,7 @@ enqueue = enqueue_operation
 
 
 def _clear_queue() -> None:
-    QUEUE_FILE.write_text("[]")
-    os.chmod(QUEUE_FILE, 0o600)
+    _write_queue([])
 
 
 # ---------------------------------------------------------------------------

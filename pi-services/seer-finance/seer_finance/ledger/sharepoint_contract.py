@@ -78,7 +78,12 @@ def _atomic_json(path: Path, value: Any) -> None:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
+        # mkstemp is private on supported platforms, but keep the transport
+        # contract explicit so a queue rewrite cannot inherit a wider mode
+        # from a future implementation or filesystem wrapper.
+        os.chmod(temporary, 0o600)
         os.replace(temporary, path)
+        os.chmod(path, 0o600)
     except Exception:
         Path(temporary).unlink(missing_ok=True)
         raise
