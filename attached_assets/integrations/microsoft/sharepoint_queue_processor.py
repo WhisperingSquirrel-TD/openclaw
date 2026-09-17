@@ -368,6 +368,10 @@ def _write_queue(items: list[dict]) -> None:
     tmp = QUEUE_FILE.with_suffix(".tmp")
     try:
         tmp.write_text(json.dumps(items, indent=2))
+        # The queue is a service-owned capability boundary.  Do not let the
+        # process umask widen the permissions when this temporary file is
+        # atomically promoted over the protected queue.
+        os.chmod(tmp, 0o600)
         tmp.replace(QUEUE_FILE)
     except OSError as e:
         log(f"ERROR: Could not write queue: {e}")
@@ -400,6 +404,7 @@ enqueue = enqueue_operation
 
 def _clear_queue() -> None:
     QUEUE_FILE.write_text("[]")
+    os.chmod(QUEUE_FILE, 0o600)
 
 
 # ---------------------------------------------------------------------------

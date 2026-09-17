@@ -3,11 +3,12 @@ import importlib.util
 import hashlib
 import io
 import json
+import os
 import subprocess
 import tempfile
 import threading
 import unittest
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -93,6 +94,18 @@ class QueueSafetyTests(unittest.TestCase):
         queued = queue_processor._read_queue()
         self.assertEqual({entry["id"] for entry in queued},
                          {entry["id"] for entry in entries})
+        self.assertEqual(queue_processor.QUEUE_FILE.stat().st_mode & 0o777, 0o600)
+
+    def test_queue_rewrites_remain_private_even_with_wide_umask(self):
+        queue_processor.QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        previous_umask = os.umask(0)
+        try:
+            queue_processor._write_queue([{"id": "private", "operation": "append"}])
+        finally:
+            os.umask(previous_umask)
+        self.assertEqual(queue_processor.QUEUE_FILE.stat().st_mode & 0o777, 0o600)
+        queue_processor._clear_queue()
+        self.assertEqual(queue_processor.QUEUE_FILE.stat().st_mode & 0o777, 0o600)
 
     def test_successful_operation_ids_are_deduplicated(self):
         queue_processor._write_queue([
