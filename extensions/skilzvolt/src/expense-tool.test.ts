@@ -12,15 +12,21 @@ vi.mock("node:child_process", async (importOriginal) => ({
 }));
 vi.mock("node:fs/promises", () => ({
   lstat: vi.fn(async (pathname: string) => {
-    const isFile = pathname === "/usr/bin/python3"
-      || pathname.endsWith(".py")
-      || pathname.endsWith(".json")
-      || pathname.endsWith(".lock");
+    const isFile =
+      pathname === "/usr/bin/python3" ||
+      pathname.endsWith(".py") ||
+      pathname.endsWith(".json") ||
+      pathname.endsWith(".lock");
     return {
       isFile: () => isFile,
       isDirectory: () => !isFile,
       isSymbolicLink: () => false,
-      uid: pathname === "/usr/bin/python3" ? 0 : process.getuid?.() ?? 0,
+      uid:
+        pathname === "/usr/bin/python3" ||
+        pathname === "/opt/openclaw" ||
+        pathname.startsWith("/opt/openclaw/")
+          ? 0
+          : (process.getuid?.() ?? 0),
       mode: 0o755,
     };
   }),
@@ -68,7 +74,9 @@ describe("expense_sharepoint", () => {
       return child;
     });
     try {
-      await expect(runExpenseBridge({ action: "read_expense_workbook" })).resolves.toEqual({ ok: true });
+      await expect(runExpenseBridge({ action: "read_expense_workbook" })).resolves.toEqual({
+        ok: true,
+      });
     } finally {
       if (originalHome === undefined) delete process.env.HOME;
       else process.env.HOME = originalHome;
@@ -83,33 +91,37 @@ describe("expense_sharepoint", () => {
 
     expect(spawnMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
-      [expect.stringContaining("agent_expense_bridge.py")],
+      ["/opt/openclaw/expense-sharepoint/seer_finance/agent_expense_bridge.py"],
       expect.objectContaining({
-        cwd: expect.stringContaining("pi-services/seer-finance"),
+        cwd: "/opt/openclaw/expense-sharepoint",
         env: expect.objectContaining({
           HOME: home,
           OPENCLAW_STATE_DIR: stateDir,
           SEER_FINANCE_SHAREPOINT_QUEUE: path.join(stateDir, "sharepoint-queue.json"),
-          SEER_FINANCE_SHAREPOINT_RESULTS:
-            path.join(stateDir, "sharepoint-queue-results.json"),
-          SEER_FINANCE_SHAREPOINT_CACHE:
-            path.join(stateDir, "workspace", "sharepoint-cache"),
-          SEER_FINANCE_SHAREPOINT_QUEUE_LOCK:
-            path.join(stateDir, "integrations", "microsoft", "sp-queue.lock"),
-          SEER_FINANCE_SHAREPOINT_MUTATION_JOURNAL:
-            path.join(stateDir, "seer-finance-mutation-journal.json"),
-          SEER_FINANCE_EXPENSE_MEDIA_ROOT:
-            path.join(stateDir, "media", "inbound"),
+          SEER_FINANCE_SHAREPOINT_RESULTS: path.join(stateDir, "sharepoint-queue-results.json"),
+          SEER_FINANCE_SHAREPOINT_CACHE: path.join(stateDir, "workspace", "sharepoint-cache"),
+          SEER_FINANCE_SHAREPOINT_QUEUE_LOCK: path.join(
+            stateDir,
+            "integrations",
+            "microsoft",
+            "sp-queue.lock",
+          ),
+          SEER_FINANCE_SHAREPOINT_MUTATION_JOURNAL: path.join(
+            stateDir,
+            "seer-finance-mutation-journal.json",
+          ),
+          SEER_FINANCE_EXPENSE_MEDIA_ROOT: path.join(stateDir, "media", "inbound"),
+          PYTHONPATH: "/opt/openclaw/expense-sharepoint",
           PYTHONNOUSERSITE: "1",
         }),
       }),
     );
-    expect((spawnMock.mock.calls[0]?.[2] as { env: Record<string, string> }).env).not.toHaveProperty(
-      "PATH",
-    );
-    expect((spawnMock.mock.calls[0]?.[2] as { env: Record<string, string> }).env).not.toHaveProperty(
-      "EXPENSE_RUNNER_TEST_SECRET",
-    );
+    expect(
+      (spawnMock.mock.calls[0]?.[2] as { env: Record<string, string> }).env,
+    ).not.toHaveProperty("PATH");
+    expect(
+      (spawnMock.mock.calls[0]?.[2] as { env: Record<string, string> }).env,
+    ).not.toHaveProperty("EXPENSE_RUNNER_TEST_SECRET");
   });
 
   it("fails closed for an unsupported custom profile before a child can spawn", async () => {
@@ -165,12 +177,18 @@ describe("expense_sharepoint", () => {
       SEER_FINANCE_SHAREPOINT_QUEUE: path.join(stateDir, "sharepoint-queue.json"),
       SEER_FINANCE_SHAREPOINT_RESULTS: path.join(stateDir, "sharepoint-queue-results.json"),
       SEER_FINANCE_SHAREPOINT_CACHE: path.join(stateDir, "workspace", "sharepoint-cache"),
-      SEER_FINANCE_SHAREPOINT_QUEUE_LOCK:
-        path.join(stateDir, "integrations", "microsoft", "sp-queue.lock"),
-      SEER_FINANCE_SHAREPOINT_MUTATION_JOURNAL:
-        path.join(stateDir, "seer-finance-mutation-journal.json"),
+      SEER_FINANCE_SHAREPOINT_QUEUE_LOCK: path.join(
+        stateDir,
+        "integrations",
+        "microsoft",
+        "sp-queue.lock",
+      ),
+      SEER_FINANCE_SHAREPOINT_MUTATION_JOURNAL: path.join(
+        stateDir,
+        "seer-finance-mutation-journal.json",
+      ),
       SEER_FINANCE_EXPENSE_MEDIA_ROOT: path.join(stateDir, "media", "inbound"),
-      PYTHONPATH: expect.stringContaining("pi-services/seer-finance"),
+      PYTHONPATH: "/opt/openclaw/expense-sharepoint",
       PYTHONNOUSERSITE: "1",
       LANG: "C.UTF-8",
       LC_ALL: "C.UTF-8",
@@ -274,8 +292,14 @@ describe("expense_sharepoint", () => {
     const run = vi.fn().mockResolvedValue({ ok: true });
     const tool = createExpenseSharePointTool({ run, workspaceDir: "/workspace" });
     const approvedFolders = [
-      "Anthropic", "ChatGPT", "Meals & Refreshments", "Not organised",
-      "OpenAI API", "Receipts", "Replit", "SEER",
+      "Anthropic",
+      "ChatGPT",
+      "Meals & Refreshments",
+      "Not organised",
+      "OpenAI API",
+      "Receipts",
+      "Replit",
+      "SEER",
     ];
     for (const receiptFolder of approvedFolders) {
       await tool.execute("call", {
@@ -293,14 +317,19 @@ describe("expense_sharepoint", () => {
       );
     }
     for (const receiptFolder of [
-      "../Receipts", "Receipts/2026", "Receipts%2F2026", "Meals & Refreshments/..",
+      "../Receipts",
+      "Receipts/2026",
+      "Receipts%2F2026",
+      "Meals & Refreshments/..",
     ]) {
-      await expect(tool.execute("call", {
-        action: "upload_expense_receipt",
-        sourceRef: "receipt-1",
-        receiptMediaPath: "/home/tom/.openclaw/media/inbound/receipt.jpg",
-        receiptFolder,
-      })).rejects.toThrow(/receiptFolder must be one of/);
+      await expect(
+        tool.execute("call", {
+          action: "upload_expense_receipt",
+          sourceRef: "receipt-1",
+          receiptMediaPath: "/home/tom/.openclaw/media/inbound/receipt.jpg",
+          receiptFolder,
+        }),
+      ).rejects.toThrow(/receiptFolder must be one of/);
     }
   });
 
@@ -343,8 +372,17 @@ describe("expense_sharepoint", () => {
     const schema = JSON.stringify(tool.parameters);
 
     for (const forbidden of [
-      "send_email", "send_message", "exec", "shell", "read_file", "delete",
-      "write_expense_workbook", "contentSha256", "contentBase64", "receiptName", "mimeType",
+      "send_email",
+      "send_message",
+      "exec",
+      "shell",
+      "read_file",
+      "delete",
+      "write_expense_workbook",
+      "contentSha256",
+      "contentBase64",
+      "receiptName",
+      "mimeType",
     ]) {
       expect(schema).not.toContain(forbidden);
     }
