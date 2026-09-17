@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import os
 import tempfile
@@ -43,7 +42,7 @@ class _Boundary:
                     "evidence_id": "evidence-1",
                     "source_ref": "whatsapp:lidl-1",
                     "evidence_kind": "receipt",
-                    "sharepoint_path": "/Expenses/Receipt evidence/example.jpg",
+                    "sharepoint_path": "/Expenses/Meals & Refreshments/example.jpg",
                 }],
                 "events": [{
                     "event_id": "event-1",
@@ -121,6 +120,7 @@ class AgentExpenseBridgeTests(unittest.TestCase):
         self.assertEqual("Lidl", result["rows"][0]["supplier"])
         self.assertEqual(1, len(result["evidence"]))
         self.assertEqual(1, len(result["status_events"]))
+        self.assertEqual("Meals & Refreshments", result["metadata"]["approved_receipt_folders"][2])
         self.assertNotIn("content_base64", result)
         self.assertNotIn("content_bytes", result)
 
@@ -138,13 +138,14 @@ class AgentExpenseBridgeTests(unittest.TestCase):
             os.environ["OPENCLAW_STATE_DIR"] = str(state_dir)
             try:
                 boundary = _Boundary(receipt_result=BoundaryResult(
-                    operation="upload_binary", path="/Expenses/Receipt evidence/lidl.jpg",
+                    operation="upload_binary", path="/Expenses/Meals & Refreshments/lidl.jpg",
                     accepted=True, verified=False, blocker="queued",
                 ))
                 result = handle({
                     "action": "upload_expense_receipt",
                     "source_ref": "whatsapp:lidl-1",
                     "receipt_media_path": str(receipt),
+                    "receipt_folder": "Meals & Refreshments",
                 }, boundary=boundary)
             finally:
                 if old_state_dir is None:
@@ -161,7 +162,7 @@ class AgentExpenseBridgeTests(unittest.TestCase):
         self.assertEqual(boundary.receipt_calls[0]["mime_type"], "image/jpeg")
         self.assertEqual(
             boundary.receipt_calls[0]["path"],
-            f"/Expenses/Receipt evidence/{expected_hash}.jpg",
+            f"/Expenses/Meals & Refreshments/{expected_hash}.jpg",
         )
 
     def test_receipt_upload_rejects_non_media_path_without_calling_boundary(self):
@@ -170,6 +171,7 @@ class AgentExpenseBridgeTests(unittest.TestCase):
             "action": "upload_expense_receipt",
             "source_ref": "receipt-1",
             "receipt_media_path": "/etc/shadow",
+            "receipt_folder": "Receipts",
         }, boundary=boundary)
 
         self.assertFalse(result["ok"])
@@ -182,11 +184,63 @@ class AgentExpenseBridgeTests(unittest.TestCase):
             "action": "upload_expense_receipt",
             "source_ref": "receipt-1",
             "receipt_media_path": "/not-used",
+            "receipt_folder": "Receipts",
             "content_sha256": "a" * 64,
         }, boundary=boundary)
 
         self.assertFalse(result["ok"])
         self.assertIn("unsupported field", result["error"])
+        self.assertEqual(boundary.receipt_calls, [])
+
+    def test_receipt_upload_uses_each_approved_existing_expenses_folder(self):
+        approved_folders = (
+            "Anthropic", "ChatGPT", "Meals & Refreshments", "Not organised",
+            "OpenAI API", "Receipts", "Replit", "SEER",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            media_root = Path(temporary) / "media" / "inbound"
+            media_root.mkdir(parents=True)
+            receipt = media_root / "receipt.png"
+            receipt.write_bytes(b"original receipt bytes")
+            old_media_root = os.environ.get("SEER_FINANCE_EXPENSE_MEDIA_ROOT")
+            os.environ["SEER_FINANCE_EXPENSE_MEDIA_ROOT"] = str(media_root)
+            try:
+                expected_hash = hashlib.sha256(receipt.read_bytes()).hexdigest()
+                for folder in approved_folders:
+                    boundary = _Boundary(receipt_result=BoundaryResult(
+                        operation="upload_binary", path="/unused", accepted=True, verified=True,
+                    ))
+                    result = handle({
+                        "action": "upload_expense_receipt",
+                        "source_ref": "whatsapp:receipt-1",
+                        "receipt_media_path": str(receipt),
+                        "receipt_folder": folder,
+                    }, boundary=boundary)
+                    self.assertTrue(result["ok"], folder)
+                    self.assertEqual(
+                        boundary.receipt_calls[0]["path"],
+                        f"/Expenses/{folder}/{expected_hash}.png",
+                    )
+            finally:
+                if old_media_root is None:
+                    os.environ.pop("SEER_FINANCE_EXPENSE_MEDIA_ROOT", None)
+                else:
+                    os.environ["SEER_FINANCE_EXPENSE_MEDIA_ROOT"] = old_media_root
+
+    def test_receipt_upload_rejects_unapproved_or_path_like_folder_values(self):
+        boundary = _Boundary()
+        for receipt_folder in (
+            "../Receipts", "Receipts/2026", "Receipts%2F2026",
+            "Meals & Refreshments/..", "Receipt evidence", "",
+        ):
+            result = handle({
+                "action": "upload_expense_receipt",
+                "source_ref": "receipt-1",
+                "receipt_media_path": "/not-used",
+                "receipt_folder": receipt_folder,
+            }, boundary=boundary)
+            self.assertFalse(result["ok"], receipt_folder)
+            self.assertIn("receipt_folder", result["error"])
         self.assertEqual(boundary.receipt_calls, [])
 
     def test_raw_workbook_write_is_not_an_approved_agent_operation(self):

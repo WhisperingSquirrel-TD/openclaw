@@ -245,7 +245,7 @@ describe("expense_sharepoint", () => {
         accepted: true,
         verified: false,
         complete: false,
-        path: "/Expenses/Receipt evidence/lidl.jpg",
+        path: "/Expenses/Meals & Refreshments/lidl.jpg",
         blocker: "receipt readback pending",
       },
     });
@@ -255,6 +255,7 @@ describe("expense_sharepoint", () => {
       action: "upload_expense_receipt",
       sourceRef: "whatsapp:lidl-2026-09-16",
       receiptMediaPath: "/home/tom/.openclaw/media/inbound/lidl.jpg",
+      receiptFolder: "Meals & Refreshments",
     });
 
     expect(run).toHaveBeenCalledWith(
@@ -262,10 +263,45 @@ describe("expense_sharepoint", () => {
         action: "upload_expense_receipt",
         source_ref: "whatsapp:lidl-2026-09-16",
         receipt_media_path: "/home/tom/.openclaw/media/inbound/lidl.jpg",
+        receipt_folder: "Meals & Refreshments",
       }),
       undefined,
     );
     expect(resultText(result)).toContain('"complete": false');
+  });
+
+  it("allows only the existing Expenses receipt folder enum", async () => {
+    const run = vi.fn().mockResolvedValue({ ok: true });
+    const tool = createExpenseSharePointTool({ run, workspaceDir: "/workspace" });
+    const approvedFolders = [
+      "Anthropic", "ChatGPT", "Meals & Refreshments", "Not organised",
+      "OpenAI API", "Receipts", "Replit", "SEER",
+    ];
+    for (const receiptFolder of approvedFolders) {
+      await tool.execute("call", {
+        action: "upload_expense_receipt",
+        sourceRef: "receipt-1",
+        receiptMediaPath: "/home/tom/.openclaw/media/inbound/receipt.jpg",
+        receiptFolder,
+      });
+    }
+    expect(run).toHaveBeenCalledTimes(approvedFolders.length);
+    for (const receiptFolder of approvedFolders) {
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({ receipt_folder: receiptFolder }),
+        undefined,
+      );
+    }
+    for (const receiptFolder of [
+      "../Receipts", "Receipts/2026", "Receipts%2F2026", "Meals & Refreshments/..",
+    ]) {
+      await expect(tool.execute("call", {
+        action: "upload_expense_receipt",
+        sourceRef: "receipt-1",
+        receiptMediaPath: "/home/tom/.openclaw/media/inbound/receipt.jpg",
+        receiptFolder,
+      })).rejects.toThrow(/receiptFolder must be one of/);
+    }
   });
 
   it("refuses raw workbook replacement, unsupported actions, and unsupported fact keys", async () => {
@@ -277,6 +313,7 @@ describe("expense_sharepoint", () => {
         action: "upload_expense_receipt",
         sourceRef: "receipt-1",
         receiptMediaPath: "/etc/shadow",
+        receiptFolder: "Receipts",
       }),
     ).resolves.toBeTruthy();
     await expect(
@@ -291,7 +328,12 @@ describe("expense_sharepoint", () => {
     ).rejects.toThrow(/action/);
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith(
-      { action: "upload_expense_receipt", source_ref: "receipt-1", receipt_media_path: "/etc/shadow" },
+      {
+        action: "upload_expense_receipt",
+        source_ref: "receipt-1",
+        receipt_media_path: "/etc/shadow",
+        receipt_folder: "Receipts",
+      },
       undefined,
     );
   });
@@ -307,6 +349,7 @@ describe("expense_sharepoint", () => {
       expect(schema).not.toContain(forbidden);
     }
     expect(schema).toContain("receiptMediaPath");
+    expect(schema).toContain("receiptFolder");
     expect(schema).not.toContain("destinationPath");
     expect(schema).toContain("observedTimestamp");
     expect(schema).toContain("financeLedgerRef");

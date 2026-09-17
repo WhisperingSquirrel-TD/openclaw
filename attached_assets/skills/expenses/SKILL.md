@@ -86,11 +86,17 @@ SharePoint tool.
   `finance_ledger_ref` where recorded. Do not invent a `line_items` field: the current
   canonical workbook schema has no visible item-level table, so preserve the
   original receipt as evidence and record only supported, observed facts.
-* `upload_expense_receipt` accepts only an inbound OpenClaw media path. The
-  bridge validates the regular file, computes its SHA-256 itself, derives MIME
-  from the allowed extension, and writes only to the content-addressed path
-  `/Expenses/Receipt evidence/<sha256>.<extension>`; do not supply a hash,
-  MIME type, or destination name.
+* `upload_expense_receipt` requires an inbound OpenClaw media path and
+  `receiptFolder`, one exact existing folder name: `Anthropic`, `ChatGPT`,
+  `Meals & Refreshments`, `Not organised`, `OpenAI API`, `Receipts`, `Replit`,
+  or `SEER`. The bridge validates the original regular file, computes its
+  SHA-256 itself, derives MIME from the allowed extension, and preserves the
+  original bytes using the non-colliding content-addressed name
+  `/Expenses/<receiptFolder>/<sha256>.<extension>`. It cannot create a new
+  tree or accept a nested, encoded-separator, or traversal-like folder value.
+  Do not supply a hash, MIME type, destination name, or arbitrary path.
+  Classify the Lidl Madrid conference-food receipt as
+  `receiptFolder: "Meals & Refreshments"`.
 
 This narrow route cannot send email/messages, execute commands, read arbitrary
 files, or choose another SharePoint path. It reports `complete: false` for an
@@ -98,6 +104,20 @@ accepted queue operation until the queue processor has produced verified
 binary/semantic readback; “accepted” or “queued” is not a saved expense. A
 blocked/rebase result, conflicting repeat capture, incoming-field mismatch, or
 unresolved collision is `accepted: false` and never complete.
+
+### Receipt-to-ledger sequence
+
+1. Upload the inbound original with its exact approved `receiptFolder`.
+2. If the upload response is queued or has `verified: false`/`complete: false`,
+   it is **not saved** and it must not be linked into the ledger yet.
+3. Only after a verified upload response (`accepted: true`, `verified: true`,
+   `complete: true`) exposes the verified `canonical_ref`/path may
+   `capture_expense` be called for the same `sourceRef`, with
+   `evidenceRef` set to that verified receipt reference and
+   `evidenceState: "uploaded"`.
+4. Treat the receipt as linked only when that subsequent capture has matching,
+   collision-free verified readback. A queued capture is not a linked ledger
+   record.
 
 ## Workbook snapshot and mutation contract
 

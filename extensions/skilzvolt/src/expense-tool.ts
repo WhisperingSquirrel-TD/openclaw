@@ -14,8 +14,19 @@ const EXPENSE_ACTIONS = [
   "capture_expense",
   "upload_expense_receipt",
 ] as const;
+const RECEIPT_FOLDERS = [
+  "Anthropic",
+  "ChatGPT",
+  "Meals & Refreshments",
+  "Not organised",
+  "OpenAI API",
+  "Receipts",
+  "Replit",
+  "SEER",
+] as const;
 
 type ExpenseAction = (typeof EXPENSE_ACTIONS)[number];
+type ReceiptFolder = (typeof RECEIPT_FOLDERS)[number];
 type ExpenseFacts = {
   source_timestamp?: string;
   observed_timestamp?: string;
@@ -37,6 +48,7 @@ type ExpenseBridgeRequest = {
   source_ref?: string;
   facts?: ExpenseFacts;
   receipt_media_path?: string;
+  receipt_folder?: ReceiptFolder;
 };
 
 type ExpenseBridgeRunner = (
@@ -164,7 +176,18 @@ function prepareRequest(rawParams: unknown): ExpenseBridgeRequest {
     action: expenseAction,
     source_ref: requiredString(params, "sourceRef"),
     receipt_media_path: requiredString(params, "receiptMediaPath"),
+    receipt_folder: requiredReceiptFolder(params),
   };
+}
+
+function requiredReceiptFolder(params: Record<string, unknown>): ReceiptFolder {
+  const value = requiredString(params, "receiptFolder");
+  if (!RECEIPT_FOLDERS.includes(value as ReceiptFolder)) {
+    throw new ToolInputError(
+      `receiptFolder must be one of: ${RECEIPT_FOLDERS.join(", ")}`,
+    );
+  }
+  return value as ReceiptFolder;
 }
 
 type ExpenseBridgeRuntimePaths = {
@@ -368,7 +391,7 @@ export function createExpenseSharePointTool(options: {
     name: "expense_sharepoint",
     label: "Expense SharePoint Ledger",
     description:
-      "Owner-only, no-TOTP expense route. It only reads or source-linked captures into the canonical /Expenses/Expense ledger.xlsx contract and uploads inbound receipt media to content-addressed paths under /Expenses/Receipt evidence. It cannot send messages, run commands, access arbitrary files, or choose SharePoint destinations. A queued operation is not complete until verified readback is returned.",
+      "Owner-only, no-TOTP expense route. It only reads or source-linked captures into the canonical /Expenses/Expense ledger.xlsx contract and uploads inbound receipt media to a content-addressed name in one approved existing /Expenses category folder. It cannot send messages, run commands, access arbitrary files, or choose SharePoint destinations. A queued operation is not complete until verified readback is returned.",
     ownerOnly: true,
     parameters: Type.Object(
       {
@@ -391,6 +414,9 @@ export function createExpenseSharePointTool(options: {
           validationResult: Type.Optional(Type.String()),
         }, { additionalProperties: false })),
         receiptMediaPath: Type.Optional(Type.String()),
+        receiptFolder: Type.Optional(
+          Type.Union(RECEIPT_FOLDERS.map((value) => Type.Literal(value))),
+        ),
       },
       { additionalProperties: false },
     ),

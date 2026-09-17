@@ -3,8 +3,9 @@
 This is intentionally a JSON stdin/stdout adapter, not a general command or
 SharePoint client. The OpenClaw tool can invoke only three actions: read the
 fixed expense workbook, source-linked capture through its typed repository, or
-upload one verified inbound-media receipt to a content-addressed fixed evidence
-folder. The queue processor remains the only Graph/remote writer.
+upload one verified inbound-media receipt to a content-addressed filename in an
+approved existing Expenses folder. The queue processor remains the only
+Graph/remote writer.
 """
 
 from __future__ import annotations
@@ -30,7 +31,10 @@ from seer_finance.ledger.sharepoint_repository import (
 from seer_finance.ledger.workbook_codec import WorkbookCodec
 
 EXPENSE_WORKBOOK_PATH = "/Expenses/Expense ledger.xlsx"
-RECEIPT_EVIDENCE_DIR = "/Expenses/Receipt evidence"
+APPROVED_RECEIPT_FOLDERS = frozenset({
+    "Anthropic", "ChatGPT", "Meals & Refreshments", "Not organised",
+    "OpenAI API", "Receipts", "Replit", "SEER",
+})
 MAX_RECEIPT_BYTES = 50 * 1024 * 1024
 _SOURCE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MIME_BY_SUFFIX = {
@@ -40,7 +44,9 @@ _MIME_BY_SUFFIX = {
 _REQUEST_KEYS = {
     "read_expense_workbook": frozenset({"action", "page", "page_size"}),
     "capture_expense": frozenset({"action", "source_ref", "facts"}),
-    "upload_expense_receipt": frozenset({"action", "source_ref", "receipt_media_path"}),
+    "upload_expense_receipt": frozenset({
+        "action", "source_ref", "receipt_media_path", "receipt_folder",
+    }),
 }
 _FACT_KEYS = frozenset({
     "source_timestamp", "observed_timestamp", "supplier", "amount_pence",
@@ -123,11 +129,14 @@ def _validate_request_shape(request: Mapping[str, Any], action: Any) -> str:
 
 def _upload_receipt(request: Mapping[str, Any], boundary: SharePointBoundary) -> dict[str, Any]:
     source_ref = _required_string(request, "source_ref")
+    receipt_folder = _required_string(request, "receipt_folder")
     if not _SOURCE_REF.fullmatch(source_ref):
         raise ValueError("source_ref contains unsupported characters")
+    if receipt_folder not in APPROVED_RECEIPT_FOLDERS:
+        raise ValueError("receipt_folder must be one approved existing Expenses folder")
     local_path, content_sha256, mime_type = _validated_receipt_path(request.get("receipt_media_path"))
     result = boundary.upload_receipt_verified(
-        path=f"{RECEIPT_EVIDENCE_DIR}/{content_sha256}{local_path.suffix.lower()}",
+        path=f"/Expenses/{receipt_folder}/{content_sha256}{local_path.suffix.lower()}",
         source_ref=source_ref,
         local_path=str(local_path),
         content_sha256=content_sha256,
@@ -296,6 +305,7 @@ def _read_expense_workbook(
             "page": page,
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size,
+            "approved_receipt_folders": sorted(APPROVED_RECEIPT_FOLDERS),
         },
         "rows": [_public_expense_row(row) for row in selected],
         "evidence": public_evidence,
