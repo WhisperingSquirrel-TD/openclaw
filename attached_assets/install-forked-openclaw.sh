@@ -1309,7 +1309,21 @@ if [ -f "$SP_QUEUE_SRC" ]; then
 
     # Initialise empty queue if it doesn't exist yet
     QUEUE_FILE="$HOME/.openclaw/sharepoint-queue.json"
-    [ -f "$QUEUE_FILE" ] || echo "[]" > "$QUEUE_FILE"
+    QUEUE_OWNER="$(id -u):$(id -g)"
+    if [ -L "$QUEUE_FILE" ] || { [ -e "$QUEUE_FILE" ] && [ ! -f "$QUEUE_FILE" ]; }; then
+        fail "SharePoint queue path is not a regular file: $QUEUE_FILE"
+    fi
+    if [ -e "$QUEUE_FILE" ]; then
+        # Older installs and root-run repairs may leave this transport file
+        # root-owned. Preserve its pending operations, but return ownership to
+        # the OpenClaw service user before enabling the governed expense route.
+        sudo chown "$QUEUE_OWNER" "$QUEUE_FILE"
+        sudo chmod 600 "$QUEUE_FILE"
+    else
+        sudo install -o "$(id -u)" -g "$(id -g)" -m 600 /dev/null "$QUEUE_FILE"
+        printf '[]\n' | sudo tee "$QUEUE_FILE" >/dev/null
+    fi
+    info "SharePoint queue ownership repaired: $QUEUE_FILE ($QUEUE_OWNER, mode 600)"
 
     SP_QUEUE_CRON="* * * * * python3 $SP_QUEUE_DST >> $SP_QUEUE_LOG 2>&1"
     ( crontab -l 2>/dev/null | grep -v "sharepoint_queue_processor.py"; echo "$SP_QUEUE_CRON" ) | crontab -
