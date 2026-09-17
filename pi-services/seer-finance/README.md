@@ -65,11 +65,12 @@ use the semantic identity while the journal retains the exact submitted bytes.
 Generated packages are deterministic.
 
 Automated updates modify the original workbook package in place. Existing table
-styles, widths, comments, and data validations are retained; package features
-known not to round-trip safely fail closed rather than being discarded. A
-normal edit from a blank/null value infers a safe scalar type without requiring
-the operator to edit the adjacent marker. Formula cells are rejected because
-this source-only package cannot safely evaluate them.
+styles, widths, comments, and data validations are retained. Openpyxl output is
+used only for the edited worksheet/table members; every other source ZIP member
+is copied unchanged, including custom XML, relationships, content types, and
+other package metadata. A normal edit from a blank/null value infers a safe
+scalar type without requiring the operator to edit the adjacent marker. Formula
+cells are rejected because this source-only package cannot safely evaluate them.
 
 SQLite is not a live authority. `ExpenseRepository`, `SqliteFinanceWriter`, and
 `sqlite_loader` are retained for explicit migration, replay, and recovery only.

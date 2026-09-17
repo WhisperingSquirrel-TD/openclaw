@@ -15,11 +15,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import posixpath
 from collections.abc import Mapping
 from datetime import date, datetime, time
 from io import BytesIO
 from copy import copy
 from typing import Any
+from xml.etree import ElementTree
 from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile, ZipInfo
 
 from openpyxl import Workbook, load_workbook
@@ -343,49 +345,134 @@ def _stable_xlsx_bytes(content: bytes) -> bytes:
     return output.getvalue()
 
 
-def _reject_unsupported_package_parts(content: bytes) -> None:
-    """Reject package features known to be lost by openpyxl save."""
+_PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_WORKBOOK_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_DOCUMENT_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _package_target(source_part: str, target: str) -> str:
+    """Resolve an OOXML relationship target to a ZIP member name."""
+    if target.startswith("/"):
+        return target.lstrip("/")
+    return posixpath.normpath(posixpath.join(posixpath.dirname(source_part), target))
+
+
+def _relationship_part(source_part: str) -> str:
+    directory, filename = posixpath.split(source_part)
+    return posixpath.join(directory, "_rels", filename + ".rels")
+
+
+def _editable_package_parts(content: bytes, kind: str) -> set[str]:
+    """Return only worksheet/table members changed by a visible-table update.
+
+    Relationship files and package content types are deliberately not in this
+    set.  The source package remains authoritative for those files, including
+    relationships to package features that openpyxl does not understand.
+    """
     try:
         with ZipFile(BytesIO(content), "r") as archive:
-            names = archive.namelist()
+            names = set(archive.namelist())
+            workbook_xml = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+            workbook_rels = ElementTree.fromstring(
+                archive.read("xl/_rels/workbook.xml.rels")
+            )
+            relationship_targets = {
+                relationship.attrib["Id"]: _package_target(
+                    "xl/workbook.xml", relationship.attrib["Target"]
+                )
+                for relationship in workbook_rels.findall(
+                    f"{{{_PACKAGE_REL_NS}}}Relationship"
+                )
+                if relationship.attrib.get("Type") == f"{_DOCUMENT_REL_NS}/officeDocument"
+                or relationship.attrib.get("Type") == f"{_DOCUMENT_REL_NS}/worksheet"
+            }
+            requested_sheets = set(_kind_sheets(kind)) | {_METADATA_SHEET}
+            parts: set[str] = set()
+            for sheet in workbook_xml.findall(
+                f"{{{_WORKBOOK_NS}}}sheets/{{{_WORKBOOK_NS}}}sheet"
+            ):
+                if sheet.attrib.get("name") not in requested_sheets:
+                    continue
+                relationship_id = sheet.attrib.get(f"{{{_DOCUMENT_REL_NS}}}id")
+                worksheet_part = relationship_targets.get(relationship_id or "")
+                if not worksheet_part or worksheet_part not in names:
+                    raise WorkbookCodecError(
+                        f"workbook sheet {sheet.attrib.get('name')!r} has no valid worksheet part"
+                    )
+                parts.add(worksheet_part)
+                worksheet_rels_name = _relationship_part(worksheet_part)
+                if worksheet_rels_name not in names:
+                    raise WorkbookCodecError(
+                        f"worksheet {worksheet_part!r} has no relationship part"
+                    )
+                worksheet_rels = ElementTree.fromstring(
+                    archive.read(worksheet_rels_name)
+                )
+                for relationship in worksheet_rels.findall(
+                    f"{{{_PACKAGE_REL_NS}}}Relationship"
+                ):
+                    if relationship.attrib.get("Type") == f"{_DOCUMENT_REL_NS}/table":
+                        table_part = _package_target(
+                            worksheet_part, relationship.attrib["Target"]
+                        )
+                        if table_part not in names:
+                            raise WorkbookCodecError(
+                                f"worksheet {worksheet_part!r} references missing table {table_part!r}"
+                            )
+                        parts.add(table_part)
+            return parts
     except (BadZipFile, OSError) as exc:
         raise WorkbookCodecError(f"invalid XLSX package: {exc}") from exc
-    unsupported_markers = (
-        "vbaProject",
-        "/pivot",
-        "pivotCache",
-        "/slicer",
-        "threadedComment",
-        "/persons/",
-        "customXml",
-        "/embeddings/",
-        "externalLink",
-    )
-    unsupported = [
-        name for name in names
-        if any(marker.lower() in name.lower() for marker in unsupported_markers)
-    ]
-    if unsupported:
-        raise WorkbookCodecError(
-            "source XLSX contains unsupported package parts that cannot be "
-            "safely preserved: " + ", ".join(sorted(unsupported))
-        )
 
 
-def _ensure_package_parts_preserved(source: bytes, updated: bytes) -> None:
-    """Fail closed if openpyxl silently drops a source package member."""
+def _merge_updated_package(
+    source: bytes, updated: bytes, *, editable_parts: set[str]
+) -> bytes:
+    """Use openpyxl output only for edited worksheets/tables.
+
+    The source archive is the authority for every other member.  This is
+    stronger than checking for dropped members after an openpyxl save: an
+    unknown relationship, content-type declaration, custom XML part, or
+    embedded package is copied byte-for-byte rather than merely allowed to
+    survive if openpyxl happens not to rewrite it.
+    """
     try:
         with ZipFile(BytesIO(source), "r") as original, ZipFile(
             BytesIO(updated), "r"
         ) as rewritten:
-            missing = sorted(set(original.namelist()) - set(rewritten.namelist()))
+            source_names = set(original.namelist())
+            updated_names = set(rewritten.namelist())
+            missing_editable = sorted(editable_parts - updated_names)
+            if missing_editable:
+                raise WorkbookCodecError(
+                    "updated XLSX package is missing edited parts: "
+                    + ", ".join(missing_editable)
+                )
+            unexpected = sorted(updated_names - source_names)
+            if unexpected:
+                raise WorkbookCodecError(
+                    "automated update introduced unexpected XLSX package parts: "
+                    + ", ".join(unexpected)
+                )
+            output = BytesIO()
+            with ZipFile(
+                output, "w", compression=ZIP_DEFLATED, compresslevel=9
+            ) as merged:
+                for name in sorted(source_names):
+                    original_info = original.getinfo(name)
+                    info = ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                    info.compress_type = ZIP_DEFLATED
+                    info.external_attr = original_info.external_attr
+                    info.create_system = original_info.create_system
+                    payload = (
+                        rewritten.read(name)
+                        if name in editable_parts
+                        else original.read(name)
+                    )
+                    merged.writestr(info, payload)
+            return output.getvalue()
     except (BadZipFile, OSError) as exc:
         raise WorkbookCodecError(f"updated XLSX package is invalid: {exc}") from exc
-    if missing:
-        raise WorkbookCodecError(
-            "automated update would drop source XLSX package parts: "
-            + ", ".join(missing)
-        )
 
 
 def _field_order(rows: list[Mapping[str, Any]]) -> list[str]:
@@ -520,7 +607,7 @@ class WorkbookCodec:
         if not isinstance(content, (bytes, bytearray)) or not content:
             raise WorkbookCodecError("source workbook content must be non-empty XLSX bytes")
         WorkbookCodec.decode(bytes(content), kind=kind)
-        _reject_unsupported_package_parts(bytes(content))
+        editable_parts = _editable_package_parts(bytes(content), kind)
         if not isinstance(payload, Mapping):
             raise WorkbookCodecError("workbook payload must be an object")
         workbook = load_workbook(BytesIO(bytes(content)), data_only=False, read_only=False)
@@ -570,8 +657,10 @@ class WorkbookCodec:
             output = BytesIO()
             workbook.save(output)
             updated = output.getvalue()
-            _ensure_package_parts_preserved(bytes(content), updated)
-            return _stable_xlsx_bytes(updated)
+            merged = _merge_updated_package(
+                bytes(content), updated, editable_parts=editable_parts
+            )
+            return _stable_xlsx_bytes(merged)
         finally:
             workbook.close()
 
