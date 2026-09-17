@@ -120,7 +120,7 @@ class AgentExpenseBridgeTests(unittest.TestCase):
         self.assertEqual("Lidl", result["rows"][0]["supplier"])
         self.assertEqual(1, len(result["evidence"]))
         self.assertEqual(1, len(result["status_events"]))
-        self.assertEqual("Meals & Refreshments", result["metadata"]["approved_receipt_folders"][2])
+        self.assertEqual("Expenses", result["metadata"]["approved_receipt_folders"][2])
         self.assertNotIn("content_base64", result)
         self.assertNotIn("content_bytes", result)
 
@@ -194,7 +194,7 @@ class AgentExpenseBridgeTests(unittest.TestCase):
 
     def test_receipt_upload_uses_each_approved_existing_expenses_folder(self):
         approved_folders = (
-            "Anthropic", "ChatGPT", "Meals & Refreshments", "Not organised",
+            "Anthropic", "ChatGPT", "Expenses", "Meals & Refreshments", "Not organised",
             "OpenAI API", "Receipts", "Replit", "SEER",
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -217,10 +217,12 @@ class AgentExpenseBridgeTests(unittest.TestCase):
                         "receipt_folder": folder,
                     }, boundary=boundary)
                     self.assertTrue(result["ok"], folder)
-                    self.assertEqual(
-                        boundary.receipt_calls[0]["path"],
-                        f"/Expenses/{folder}/{expected_hash}.png",
+                    expected_path = (
+                        f"/Expenses/{expected_hash}.png"
+                        if folder == "Expenses"
+                        else f"/Expenses/{folder}/{expected_hash}.png"
                     )
+                    self.assertEqual(boundary.receipt_calls[0]["path"], expected_path)
             finally:
                 if old_media_root is None:
                     os.environ.pop("SEER_FINANCE_EXPENSE_MEDIA_ROOT", None)

@@ -16,6 +16,7 @@ const EXPENSE_ACTIONS = [
 const RECEIPT_FOLDERS = [
   "Anthropic",
   "ChatGPT",
+  "Expenses",
   "Meals & Refreshments",
   "Not organised",
   "OpenAI API",
@@ -411,7 +412,7 @@ export function createExpenseSharePointTool(
     name: "expense_sharepoint",
     label: "Expense SharePoint Ledger",
     description:
-      "Owner-only, no-TOTP expense route. It only reads or source-linked captures into the canonical /Expenses/Expense ledger.xlsx contract and uploads inbound receipt media to a content-addressed name in one approved existing /Expenses category folder. Telegram photos are already downloaded as inbound media; pass the exact local path shown in the current [media attached: ...] context as receiptMediaPath — do not ask the owner to resend a photo as a document. It cannot send messages, run commands, access arbitrary files, or choose SharePoint destinations. A queued operation is not complete until verified readback is returned.",
+      "Owner-only, no-TOTP expense route. It only reads or source-linked captures into the canonical /Expenses/Expense ledger.xlsx contract and uploads inbound receipt media to a content-addressed name in one approved existing /Expenses folder. Telegram photos are already downloaded as inbound media; pass the exact local path shown in the current [media attached: ...] context as receiptMediaPath — do not ask the owner to resend a photo as a document. If the category is uncertain, use receiptFolder Expenses so the image is saved at the /Expenses root rather than being omitted. It cannot send messages, run commands, access arbitrary files, or choose SharePoint destinations. A queued operation is not complete until verified readback is returned.",
     ownerOnly: true,
     parameters: Type.Object(
       {
@@ -441,7 +442,7 @@ export function createExpenseSharePointTool(
         receiptMediaPath: Type.Optional(
           Type.String({
             description:
-              "Exact local inbound-media path from the current [media attached: ...] context. Telegram photos use this path directly; no document resend is required.",
+              "Exact local inbound-media path from the current [media attached: ...] context. Telegram photos use this path directly; no document resend is required. Use receiptFolder Expenses when no approved category can be determined; that fixed option saves at the /Expenses root.",
           }),
         ),
         receiptFolder: Type.Optional(

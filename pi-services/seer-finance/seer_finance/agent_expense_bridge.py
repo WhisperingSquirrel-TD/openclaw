@@ -32,7 +32,7 @@ from seer_finance.ledger.workbook_codec import WorkbookCodec
 
 EXPENSE_WORKBOOK_PATH = "/Expenses/Expense ledger.xlsx"
 APPROVED_RECEIPT_FOLDERS = frozenset({
-    "Anthropic", "ChatGPT", "Meals & Refreshments", "Not organised",
+    "Anthropic", "ChatGPT", "Expenses", "Meals & Refreshments", "Not organised",
     "OpenAI API", "Receipts", "Replit", "SEER",
 })
 MAX_RECEIPT_BYTES = 50 * 1024 * 1024
@@ -135,8 +135,13 @@ def _upload_receipt(request: Mapping[str, Any], boundary: SharePointBoundary) ->
     if receipt_folder not in APPROVED_RECEIPT_FOLDERS:
         raise ValueError("receipt_folder must be one approved existing Expenses folder")
     local_path, content_sha256, mime_type = _validated_receipt_path(request.get("receipt_media_path"))
+    sharepoint_path = (
+        f"/Expenses/{content_sha256}{local_path.suffix.lower()}"
+        if receipt_folder == "Expenses"
+        else f"/Expenses/{receipt_folder}/{content_sha256}{local_path.suffix.lower()}"
+    )
     result = boundary.upload_receipt_verified(
-        path=f"/Expenses/{receipt_folder}/{content_sha256}{local_path.suffix.lower()}",
+        path=sharepoint_path,
         source_ref=source_ref,
         local_path=str(local_path),
         content_sha256=content_sha256,
