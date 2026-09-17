@@ -1318,16 +1318,42 @@ else
     warn "SharePoint queue processor not found at $SP_QUEUE_SRC — skipping"
 fi
 
-# The expense route is default-off. Enable it only after the bridge, queue,
-# cache, and service-owned inbound-media directory are all present.
-EXPENSE_BRIDGE="$SEER_FINANCE_ROOT/seer_finance/agent_expense_bridge.py"
+# The expense route is default-off. Its Python boundary is copied out of the
+# mutable Git checkout into a root-owned, read-only runtime tree. The gateway
+# verifies this protected deployment before every no-TOTP expense operation.
+EXPENSE_BRIDGE_SOURCE="$SEER_FINANCE_ROOT/seer_finance/agent_expense_bridge.py"
+EXPENSE_DEPLOY_PARENT="/opt/openclaw"
+EXPENSE_DEPLOY_ROOT="$EXPENSE_DEPLOY_PARENT/expense-sharepoint"
+EXPENSE_DEPLOY_STAGING="$EXPENSE_DEPLOY_PARENT/.expense-sharepoint.new.$$"
+EXPENSE_DEPLOY_PREVIOUS="$EXPENSE_DEPLOY_PARENT/.expense-sharepoint.previous.$$"
 EXPENSE_MEDIA_ROOT="$HOME/.openclaw/media/inbound"
 EXPENSE_DEFAULT_STATE_DIR="$HOME/.openclaw"
 if [ "${OPENCLAW_HOME:-$HOME}" != "$HOME" ] || [ "${OPENCLAW_STATE_DIR:-$HOME/.openclaw}" != "$EXPENSE_DEFAULT_STATE_DIR" ]; then
     warn "Expense SharePoint route remains disabled: only the verified default Pi profile $EXPENSE_DEFAULT_STATE_DIR is supported"
-elif [ -f "$EXPENSE_BRIDGE" ] && [ -f "$SP_QUEUE_DST" ] && [ -d "$HOME/.openclaw/workspace/sharepoint-cache" ]; then
+elif [ -f "$EXPENSE_BRIDGE_SOURCE" ] && [ -f "$SP_QUEUE_DST" ] && [ -d "$HOME/.openclaw/workspace/sharepoint-cache" ]; then
     mkdir -p "$EXPENSE_MEDIA_ROOT"
-    chmod 700 "$HOME/.openclaw/media" "$EXPENSE_MEDIA_ROOT"
+    chmod 700 "$HOME/.openclaw" "$HOME/.openclaw/media" "$EXPENSE_MEDIA_ROOT"
+    chmod 700 "$HOME/.openclaw/workspace/sharepoint-cache"
+
+    sudo install -d -o root -g root -m 755 "$EXPENSE_DEPLOY_PARENT"
+    sudo rm -rf "$EXPENSE_DEPLOY_STAGING" "$EXPENSE_DEPLOY_PREVIOUS"
+    sudo install -d -o root -g root -m 755 "$EXPENSE_DEPLOY_STAGING"
+    sudo cp -a "$SEER_FINANCE_ROOT/seer_finance" "$EXPENSE_DEPLOY_STAGING/"
+    sudo find "$EXPENSE_DEPLOY_STAGING" -type d -name __pycache__ -prune -exec rm -rf {} +
+    sudo find "$EXPENSE_DEPLOY_STAGING" -type f -name '*.pyc' -delete
+    sudo chown -R root:root "$EXPENSE_DEPLOY_STAGING"
+    sudo find "$EXPENSE_DEPLOY_STAGING" -type d -exec chmod 755 {} +
+    sudo find "$EXPENSE_DEPLOY_STAGING" -type f -exec chmod 644 {} +
+    if [ -e "$EXPENSE_DEPLOY_ROOT" ]; then
+        sudo mv "$EXPENSE_DEPLOY_ROOT" "$EXPENSE_DEPLOY_PREVIOUS"
+    fi
+    if ! sudo mv "$EXPENSE_DEPLOY_STAGING" "$EXPENSE_DEPLOY_ROOT"; then
+        [ ! -e "$EXPENSE_DEPLOY_PREVIOUS" ] || sudo mv "$EXPENSE_DEPLOY_PREVIOUS" "$EXPENSE_DEPLOY_ROOT"
+        fail "Could not activate protected expense bridge deployment"
+    fi
+    sudo rm -rf "$EXPENSE_DEPLOY_PREVIOUS"
+    info "Protected expense bridge deployed: $EXPENSE_DEPLOY_ROOT"
+
     sudo chattr -i "$CONFIG_FILE" 2>/dev/null || true
     python3 - <<PYEOF
 import json

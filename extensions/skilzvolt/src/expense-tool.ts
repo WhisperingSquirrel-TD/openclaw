@@ -3,7 +3,6 @@ import { once } from "node:events";
 import { lstat, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Type } from "@sinclair/typebox";
 import type { AnyAgentTool } from "../../../src/agents/tools/common.js";
 import { ToolInputError, jsonResult } from "../../../src/agents/tools/common.js";
@@ -56,15 +55,12 @@ type ExpenseBridgeRunner = (
   signal?: AbortSignal,
 ) => Promise<Record<string, unknown>>;
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const financeRoot = "/opt/openclaw/expense-sharepoint";
 const bridgePath = path.join(
-  repoRoot,
-  "pi-services",
-  "seer-finance",
+  financeRoot,
   "seer_finance",
   "agent_expense_bridge.py",
 );
-const financeRoot = path.join(repoRoot, "pi-services", "seer-finance");
 const PYTHON_INTERPRETER = "/usr/bin/python3";
 const MAX_BRIDGE_OUTPUT_BYTES = 90 * 1024 * 1024;
 const MAX_READ_PAGE_SIZE = 50;
@@ -273,7 +269,7 @@ function blockedStateLayout(error: unknown): Record<string, unknown> | undefined
   };
 }
 
-async function assertDeploymentOwned(pathname: string, kind: "file" | "directory"): Promise<void> {
+async function assertServiceOwned(pathname: string, kind: "file" | "directory"): Promise<void> {
   const entry = await lstat(pathname);
   if ((kind === "file" && !entry.isFile()) || (kind === "directory" && !entry.isDirectory())) {
     throw new Error(`Expense bridge deployment has an invalid ${kind}: ${pathname}`);
@@ -288,29 +284,38 @@ async function assertDeploymentOwned(pathname: string, kind: "file" | "directory
 
 async function assertServiceFileOrProtectedParent(pathname: string): Promise<void> {
   try {
-    await assertDeploymentOwned(pathname, "file");
+    await assertServiceOwned(pathname, "file");
   } catch (error) {
     if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
       throw error;
     }
-    await assertDeploymentOwned(path.dirname(pathname), "directory");
+    await assertServiceOwned(path.dirname(pathname), "directory");
+  }
+}
+
+async function assertRootProtected(pathname: string, kind: "file" | "directory"): Promise<void> {
+  const entry = await lstat(pathname);
+  if ((kind === "file" && !entry.isFile()) || (kind === "directory" && !entry.isDirectory())) {
+    throw new Error(`Expense bridge protected deployment has an invalid ${kind}: ${pathname}`);
+  }
+  if (entry.isSymbolicLink() || entry.uid !== 0 || (entry.mode & 0o022) !== 0) {
+    throw new Error(`Expense bridge protected deployment is not root-owned and read-only: ${pathname}`);
   }
 }
 
 async function assertBridgeDeployment(environment: NodeJS.ProcessEnv): Promise<void> {
-  const root = await realpath(repoRoot);
-  if (root !== repoRoot) {
+  const root = await realpath(financeRoot);
+  if (root !== financeRoot) {
     throw new Error("Expense bridge deployment root must not be a symlink");
   }
   const paths: Array<[string, "file" | "directory"]> = [
     [root, "directory"],
-    [path.join(root, "pi-services"), "directory"],
-    [financeRoot, "directory"],
     [path.join(financeRoot, "seer_finance"), "directory"],
+    [path.join(financeRoot, "seer_finance", "ledger"), "directory"],
     [bridgePath, "file"],
   ];
   for (const [pathname, kind] of paths) {
-    await assertDeploymentOwned(pathname, kind);
+    await assertRootProtected(pathname, kind);
   }
   if ((await realpath(bridgePath)) !== bridgePath) {
     throw new Error("Expense bridge must not be a symlink");
@@ -325,11 +330,11 @@ async function assertBridgeDeployment(environment: NodeJS.ProcessEnv): Promise<v
   }
   const runtime = resolveExpenseBridgeRuntimePaths(environment);
   for (const pathname of [runtime.home, runtime.stateDir, runtime.cacheRoot, runtime.mediaRoot]) {
-    await assertDeploymentOwned(pathname, "directory");
+    await assertServiceOwned(pathname, "directory");
   }
   // The queue is the one mutable transport file this tool may indirectly use;
   // it must be a protected service-owned regular file before a child starts.
-  await assertDeploymentOwned(runtime.queuePath, "file");
+  await assertServiceOwned(runtime.queuePath, "file");
   await assertServiceFileOrProtectedParent(runtime.resultsPath);
   await assertServiceFileOrProtectedParent(runtime.queueLockPath);
   await assertServiceFileOrProtectedParent(runtime.journalPath);

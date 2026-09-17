@@ -20,7 +20,9 @@ vi.mock("node:fs/promises", () => ({
       isFile: () => isFile,
       isDirectory: () => !isFile,
       isSymbolicLink: () => false,
-      uid: pathname === "/usr/bin/python3" ? 0 : process.getuid?.() ?? 0,
+      uid: pathname === "/usr/bin/python3" || pathname.startsWith("/opt/openclaw/")
+        ? 0
+        : process.getuid?.() ?? 0,
       mode: 0o755,
     };
   }),
@@ -83,9 +85,9 @@ describe("expense_sharepoint", () => {
 
     expect(spawnMock).toHaveBeenCalledWith(
       "/usr/bin/python3",
-      [expect.stringContaining("agent_expense_bridge.py")],
+      ["/opt/openclaw/expense-sharepoint/seer_finance/agent_expense_bridge.py"],
       expect.objectContaining({
-        cwd: expect.stringContaining("pi-services/seer-finance"),
+        cwd: "/opt/openclaw/expense-sharepoint",
         env: expect.objectContaining({
           HOME: home,
           OPENCLAW_STATE_DIR: stateDir,
@@ -100,6 +102,7 @@ describe("expense_sharepoint", () => {
             path.join(stateDir, "seer-finance-mutation-journal.json"),
           SEER_FINANCE_EXPENSE_MEDIA_ROOT:
             path.join(stateDir, "media", "inbound"),
+          PYTHONPATH: "/opt/openclaw/expense-sharepoint",
           PYTHONNOUSERSITE: "1",
         }),
       }),
@@ -170,7 +173,7 @@ describe("expense_sharepoint", () => {
       SEER_FINANCE_SHAREPOINT_MUTATION_JOURNAL:
         path.join(stateDir, "seer-finance-mutation-journal.json"),
       SEER_FINANCE_EXPENSE_MEDIA_ROOT: path.join(stateDir, "media", "inbound"),
-      PYTHONPATH: expect.stringContaining("pi-services/seer-finance"),
+      PYTHONPATH: "/opt/openclaw/expense-sharepoint",
       PYTHONNOUSERSITE: "1",
       LANG: "C.UTF-8",
       LC_ALL: "C.UTF-8",
