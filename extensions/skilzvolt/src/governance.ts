@@ -57,6 +57,33 @@ const WORKFLOW_MARKER = /<!--\s*skilzvolt-workflow\s*([\s\S]*?)-->/i;
 const LEARNING_INTENT =
   /\b(?:learn|learning|improve|correction|corrected|feedback|retrospective|retrospect)\b[\s\S]{0,80}\b(?:this|that|from|mistake|error|feedback|correction|lesson)\b/i;
 const GOVERNED_MARKER = /^\s*\[skilzvolt-governed\s+skill=([^\]\r\n]+)\]\s*/i;
+// Description routing runs against every ordinary prompt. These terms are too common to establish
+// organisation-specific intent on their own, especially in incident reports and support requests.
+const DESCRIPTION_ROUTING_STOPWORDS = new Set([
+  "about",
+  "agent",
+  "assist",
+  "assistant",
+  "current",
+  "error",
+  "errors",
+  "help",
+  "issue",
+  "issues",
+  "problem",
+  "problems",
+  "reported",
+  "request",
+  "requests",
+  "system",
+  "systems",
+  "thing",
+  "things",
+  "update",
+  "updated",
+  "work",
+  "workflow",
+]);
 
 function normalize(value: string): string {
   return value.toLocaleLowerCase().replace(/\s+/g, " ").trim();
@@ -69,6 +96,14 @@ function uniqueEntries(entries: SkilzVoltCatalogueEntry[]): SkilzVoltCatalogueEn
   );
 }
 
+function routingTerms(value: string): Set<string> {
+  return new Set(
+    normalize(value)
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length >= 5 && !DESCRIPTION_ROUTING_STOPWORDS.has(term)),
+  );
+}
+
 export function routePrompt(prompt: string, entries: SkilzVoltCatalogueEntry[]): PromptRoute {
   const normalized = normalize(prompt);
   const declared = prompt.match(GOVERNED_MARKER)?.[1]?.trim();
@@ -77,7 +112,11 @@ export function routePrompt(prompt: string, entries: SkilzVoltCatalogueEntry[]):
       entries.filter((entry) => normalize(entry.name) === normalize(declared)),
     );
     if (declaredMatches.length === 1) {
-      return { kind: "match", entry: declaredMatches[0]!, reason: "declared-cron-skill" };
+      return {
+        kind: "match",
+        entry: declaredMatches[0]!,
+        reason: "declared-cron-skill",
+      };
     }
     if (declaredMatches.length > 1) {
       return {
@@ -93,7 +132,11 @@ export function routePrompt(prompt: string, entries: SkilzVoltCatalogueEntry[]):
   );
   if (/\blearn from (?:this|that)\b/i.test(normalized) || LEARNING_INTENT.test(normalized)) {
     if (learningEntries.length === 1) {
-      return { kind: "match", entry: learningEntries[0]!, reason: "explicit-learning-intent" };
+      return {
+        kind: "match",
+        entry: learningEntries[0]!,
+        reason: "explicit-learning-intent",
+      };
     }
     if (learningEntries.length > 1) {
       return {
@@ -115,7 +158,11 @@ export function routePrompt(prompt: string, entries: SkilzVoltCatalogueEntry[]):
     }),
   );
   if (exactNameMatches.length === 1) {
-    return { kind: "match", entry: exactNameMatches[0]!, reason: "exact-live-skill-name" };
+    return {
+      kind: "match",
+      entry: exactNameMatches[0]!,
+      reason: "exact-live-skill-name",
+    };
   }
   if (exactNameMatches.length > 1) {
     return {
@@ -127,18 +174,25 @@ export function routePrompt(prompt: string, entries: SkilzVoltCatalogueEntry[]):
 
   const described = uniqueEntries(
     entries.filter((entry) => {
-      const terms = normalize(entry.description)
-        .split(/[^a-z0-9]+/)
-        .filter((term) => term.length >= 5);
-      const matches = terms.filter((term) => normalized.includes(term));
+      const promptTerms = routingTerms(normalized);
+      const descriptionTerms = routingTerms(entry.description);
+      const matches = [...promptTerms].filter((term) => descriptionTerms.has(term));
       return matches.length >= 2;
     }),
   );
   if (described.length === 1) {
-    return { kind: "match", entry: described[0]!, reason: "high-confidence-live-description" };
+    return {
+      kind: "match",
+      entry: described[0]!,
+      reason: "high-confidence-live-description",
+    };
   }
   if (described.length > 1) {
-    return { kind: "ambiguous", entries: described, reason: "multiple-live-description-matches" };
+    return {
+      kind: "ambiguous",
+      entries: described,
+      reason: "multiple-live-description-matches",
+    };
   }
   return { kind: "none", reason: "no-applicable-live-skill" };
 }

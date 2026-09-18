@@ -41,7 +41,11 @@ describe("SkilzVolt governance", () => {
 
   it("does not guess between equally plausible catalogue entries", () => {
     const candidates = [
-      { ...learning, name: "review", description: "Review the inbox and recommend action" },
+      {
+        ...learning,
+        name: "review",
+        description: "Review the inbox and recommend action",
+      },
       {
         ...learning,
         skillId: "skill-review",
@@ -49,7 +53,44 @@ describe("SkilzVolt governance", () => {
         description: "Review expense records",
       },
     ];
-    expect(routePrompt("please review this", candidates)).toMatchObject({ kind: "ambiguous" });
+    expect(routePrompt("please review this", candidates)).toMatchObject({
+      kind: "ambiguous",
+    });
+  });
+
+  it("does not route ordinary support language from generic description words", () => {
+    const candidates = [
+      {
+        ...learning,
+        name: "system-definition",
+        description: "Define the system and resolve reported issues",
+      },
+      {
+        ...learning,
+        skillId: "skill-invoice",
+        name: "invoice-close",
+        description: "Close invoices and resolve reported issues",
+      },
+    ];
+
+    expect(routePrompt("I updated the system and got some issues", candidates)).toEqual({
+      kind: "none",
+      reason: "no-applicable-live-skill",
+    });
+  });
+
+  it("routes a description only when it has multiple distinctive terms", () => {
+    const candidate = {
+      ...learning,
+      name: "expense-review",
+      description: "Reconcile receipts against the canonical ledger",
+    };
+
+    expect(routePrompt("Please reconcile these receipts against the ledger", [candidate])).toEqual({
+      kind: "match",
+      entry: candidate,
+      reason: "high-confidence-live-description",
+    });
   });
 
   it("requires a machine-readable workflow contract in the live body", () => {
@@ -72,10 +113,16 @@ describe("SkilzVolt governance", () => {
       content: "live skill body",
       purpose: "learning",
     });
-    ledger.begin("run-1", { receipt, workflow: { requirements: [{ id: "capture" }] } });
+    ledger.begin("run-1", {
+      receipt,
+      workflow: { requirements: [{ id: "capture" }] },
+    });
     expect(ledger.hasReceipt("run-1")).toBe(true);
     expect(ledger.isDeliverable("run-1")).toBe(false);
-    ledger.recordProof("run-1", { requirementId: "capture", status: "complete" });
+    ledger.recordProof("run-1", {
+      requirementId: "capture",
+      status: "complete",
+    });
     expect(ledger.isDeliverable("run-1")).toBe(true);
     expect(receipt).toMatchObject({
       skillId: learning.skillId,
@@ -88,9 +135,19 @@ describe("SkilzVolt governance", () => {
 
   it("isolates receipts and proof between concurrent runs", () => {
     const ledger = new SkillGovernanceLedger();
-    const receipt = createSkillReceipt({ entry: learning, content: "same", purpose: "learning" });
-    ledger.begin("run-a", { receipt, workflow: { requirements: [{ id: "a" }] } });
-    ledger.begin("run-b", { receipt, workflow: { requirements: [{ id: "b" }] } });
+    const receipt = createSkillReceipt({
+      entry: learning,
+      content: "same",
+      purpose: "learning",
+    });
+    ledger.begin("run-a", {
+      receipt,
+      workflow: { requirements: [{ id: "a" }] },
+    });
+    ledger.begin("run-b", {
+      receipt,
+      workflow: { requirements: [{ id: "b" }] },
+    });
     ledger.recordProof("run-a", { requirementId: "a", status: "complete" });
     expect(ledger.isDeliverable("run-a")).toBe(true);
     expect(ledger.isDeliverable("run-b")).toBe(false);
@@ -107,10 +164,20 @@ describe("SkilzVolt governance", () => {
     vi.useFakeTimers();
     try {
       const ledger = new SkillGovernanceLedger();
-      const receipt = createSkillReceipt({ entry: learning, content: "same", purpose: "reply" });
+      const receipt = createSkillReceipt({
+        entry: learning,
+        content: "same",
+        purpose: "reply",
+      });
       ledger.declare("run-reply", learning.name);
-      ledger.begin("run-reply", { receipt, workflow: { requirements: [{ id: "send" }] } });
-      ledger.recordProof("run-reply", { requirementId: "send", status: "complete" });
+      ledger.begin("run-reply", {
+        receipt,
+        workflow: { requirements: [{ id: "send" }] },
+      });
+      ledger.recordProof("run-reply", {
+        requirementId: "send",
+        status: "complete",
+      });
       // The agent completion hook may happen before route-reply; no eager cleanup is performed.
       expect(ledger.isDeliverable("run-reply")).toBe(true);
       expect(ledger.isDeliverable("later-run")).toBe(false);
@@ -125,7 +192,11 @@ describe("SkilzVolt governance", () => {
 
   it("bounds retained run state by evicting only the oldest entries", () => {
     const ledger = new SkillGovernanceLedger();
-    const receipt = createSkillReceipt({ entry: learning, content: "same", purpose: "capacity" });
+    const receipt = createSkillReceipt({
+      entry: learning,
+      content: "same",
+      purpose: "capacity",
+    });
     for (let i = 0; i < 4097; i++) {
       ledger.begin(`run-${i}`, { receipt, workflow: { requirements: [] } });
     }
