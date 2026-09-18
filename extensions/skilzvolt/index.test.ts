@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi, OpenClawPluginToolFactory } from "../../src/plugins/types.js";
 import registerSkilzVolt from "./index.js";
+import { SkilzVoltCatalogue } from "./src/catalogue.js";
 
 describe("SkilzVolt plugin registration", () => {
   beforeEach(() => {
@@ -15,6 +16,7 @@ describe("SkilzVolt plugin registration", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -96,5 +98,54 @@ describe("SkilzVolt plugin registration", () => {
       name: "expense_sharepoint",
       ownerOnly: true,
     });
+  });
+
+  it("lets the model resolve ambiguous intent instead of blocking before reply", async () => {
+    const entries = [
+      {
+        skillId: "skill-estimate",
+        workspaceId: "workspace-1",
+        name: "estimation-breakdown",
+        description: "Prepare a detailed estimate breakdown for a client",
+        currentVersionId: "version-1",
+      },
+      {
+        skillId: "skill-vendor",
+        workspaceId: "workspace-1",
+        name: "vendor-brief",
+        description: "Prepare a vendor estimate breakdown for a client",
+        currentVersionId: "version-1",
+      },
+    ];
+    vi.spyOn(SkilzVoltCatalogue.prototype, "getLines").mockResolvedValue({
+      ok: true,
+      lines: entries.map((entry) => `- ${entry.name}: ${entry.description} [SkilzVolt]`),
+    });
+    vi.spyOn(SkilzVoltCatalogue.prototype, "getEntries").mockReturnValue(entries);
+    const readCurrentSkill = vi.spyOn(SkilzVoltCatalogue.prototype, "readCurrentSkill");
+    const hooks: Array<{
+      name: string;
+      handler: (...args: unknown[]) => unknown;
+    }> = [];
+    const api = {
+      pluginConfig: { agentIds: ["main"] },
+      registerTool: vi.fn(),
+      on: vi.fn((name: string, handler: (...args: unknown[]) => unknown) =>
+        hooks.push({ name, handler }),
+      ),
+      logger: { info: vi.fn(), warn: vi.fn() },
+    } as unknown as OpenClawPluginApi;
+
+    registerSkilzVolt(api);
+    const promptHook = hooks.find((hook) => hook.name === "before_prompt_build");
+    const result = (await promptHook?.handler(
+      { prompt: "Prepare the client estimate breakdown" },
+      { agentId: "main", runId: "run-1" },
+    )) as { appendSystemContext?: string; block?: boolean } | undefined;
+
+    expect(result?.block).toBeUndefined();
+    expect(result?.appendSystemContext).toContain("Intent candidates only");
+    expect(result?.appendSystemContext).toContain("Do not block");
+    expect(readCurrentSkill).not.toHaveBeenCalled();
   });
 });

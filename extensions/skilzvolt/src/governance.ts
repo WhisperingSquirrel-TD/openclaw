@@ -104,6 +104,10 @@ function routingTerms(value: string): Set<string> {
   );
 }
 
+export function promptRoutePolicy(prompt: string): "advisory" | "enforced" {
+  return GOVERNED_MARKER.test(prompt) ? "enforced" : "advisory";
+}
+
 export function routePrompt(prompt: string, entries: SkilzVoltCatalogueEntry[]): PromptRoute {
   const normalized = normalize(prompt);
   const declared = prompt.match(GOVERNED_MARKER)?.[1]?.trim();
