@@ -41,10 +41,14 @@ Periodically scans WhatsApp watch-mode transcripts for actionable items using a 
 ### Recent-feed window
 
 Routine WhatsApp checks use `WHATSAPP_RECENT.md`, a semantic **48-hour**
-rolling window generated from the structured watch transcript. Do not substitute
-the legacy full `WHATSAPP_LOG.md` for routine checks, and do not widen the
-window to 72 hours: a wider or stale mirror is `coverage incomplete` rather
-than evidence that an item was absent.
+rolling window generated from all structured watch transcripts. The mirror keeps
+every readable source message until its global 1,200-line cap; it does not
+silently keep only the newest few messages from each direct thread. The
+`memory/whatsapp-recent-window.json` sidecar records source and retained counts,
+account count, parse failures, and whether the cap truncated coverage. Do not
+substitute the legacy full `WHATSAPP_LOG.md` for routine checks, and do not
+widen the window to 72 hours: a wider or stale mirror is `coverage incomplete`
+rather than evidence that an item was absent.
 
 Config in `openclaw.json` under `channels.whatsapp`:
 
