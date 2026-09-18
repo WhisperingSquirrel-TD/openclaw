@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createSkillReceipt,
   parseWorkflowContract,
+  promptRoutePolicy,
   routePrompt,
   SkillGovernanceLedger,
   type SkilzVoltCatalogueEntry,
@@ -56,6 +57,13 @@ describe("SkilzVolt governance", () => {
     expect(routePrompt("please review this", candidates)).toMatchObject({
       kind: "ambiguous",
     });
+  });
+
+  it("keeps intent routing advisory unless the prompt explicitly declares governance", () => {
+    expect(promptRoutePolicy("Please prepare the weekly report")).toBe("advisory");
+    expect(
+      promptRoutePolicy("[skilzvolt-governed skill=weekly-review]\nRun the scheduled review"),
+    ).toBe("enforced");
   });
 
   it("does not route ordinary support language from generic description words", () => {
