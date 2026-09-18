@@ -1712,8 +1712,8 @@ fi
 
 # ---------------------------------------------------------------------------
 # WhatsApp rolling recent file
-# Generates WHATSAPP_RECENT.md (last 48h) from the full WHATSAPP_LOG.md.
-# L1 reads WHATSAPP_RECENT.md — keeps context small without losing history.
+# Generates WHATSAPP_RECENT.md (last 48h) from all structured watch transcripts.
+# L1 reads WHATSAPP_RECENT.md — bounded globally, without per-thread message loss.
 # ---------------------------------------------------------------------------
 WA_RECENT_SRC="$HOME/openclaw/attached_assets/scripts/whatsapp_recent.sh"
 WA_RECENT_DST="$HOME/.openclaw/scripts/whatsapp_recent.sh"

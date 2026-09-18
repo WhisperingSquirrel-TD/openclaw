@@ -4,15 +4,13 @@ set -euo pipefail
 WORKSPACE="$HOME/.openclaw/workspace"
 RECENT_MD="$WORKSPACE/WHATSAPP_RECENT.md"
 WINDOW_JSON="$WORKSPACE/memory/whatsapp-recent-window.json"
-RAW_JSONL="$HOME/.openclaw/credentials/whatsapp/watch-transcripts/whatsapp-watch-default.jsonl"
+RAW_DIR="$HOME/.openclaw/credentials/whatsapp/watch-transcripts"
 CONTACTS_MD="$WORKSPACE/contacts.md"
 # The approved whatsapp-check contract is a semantic 48-hour rolling window.
 # Keep this value aligned with the generated header and window sidecar; do not
 # widen routine checks to the legacy/full-log horizon.
 HOURS=48
 MAX_LINES=1200
-DIRECT_THREAD_RECENT_LINES=8
-GROUP_MAX_LINES=500
 
 mkdir -p "$WORKSPACE" "$(dirname "$WINDOW_JSON")"
 
@@ -32,6 +30,7 @@ write_incomplete_window() {
   "latest_retained_source_timestamp": null,
   "retained_message_count": null,
   "source_message_count": null,
+  "source_account_count": null,
   "source_parse_error_count": null,
   "truncated": null,
   "source_status": "${status}",
@@ -69,16 +68,10 @@ EOF
   mv -f "$tmp" "$RECENT_MD"
 }
 
-if [ ! -e "$RAW_JSONL" ]; then
+if [ ! -d "$RAW_DIR" ] || ! compgen -G "$RAW_DIR/whatsapp-watch-*.jsonl" > /dev/null; then
   write_incomplete_window "missing" "raw_transcript_missing"
   write_incomplete_recent "missing"
   exit 0
-fi
-
-if [ ! -f "$RAW_JSONL" ]; then
-  write_incomplete_window "failed" "raw_transcript_not_a_regular_file"
-  write_incomplete_recent "failed"
-  exit 1
 fi
 
 RECENT_TMP="$(mktemp "${RECENT_MD}.tmp.XXXXXX")"
@@ -89,15 +82,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 workspace = Path.home() / '.openclaw' / 'workspace'
-raw_jsonl = Path.home() / '.openclaw' / 'credentials' / 'whatsapp' / 'watch-transcripts' / 'whatsapp-watch-default.jsonl'
+raw_dir = Path.home() / '.openclaw' / 'credentials' / 'whatsapp' / 'watch-transcripts'
 window_json = workspace / 'memory' / 'whatsapp-recent-window.json'
 contacts_md = workspace / 'contacts.md'
 # Keep the renderer and sidecar on the same approved semantic window as the
 # shell header above.
 hours = 48
 max_lines = 1200
-direct_thread_recent_lines = 8
-group_max_lines = 500
 cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
 def normalize_number(num: str | None) -> str | None:
@@ -178,35 +169,42 @@ contact_map = load_contact_map(contacts_md)
 inferred_names_by_number = {}
 objs = []
 parse_errors = 0
-for line in raw_jsonl.read_text(encoding='utf-8').splitlines():
-    if not line.strip():
-        continue
+raw_paths = sorted(raw_dir.glob('whatsapp-watch-*.jsonl'))
+for raw_jsonl in raw_paths:
     try:
-        obj = json.loads(line)
-        if not isinstance(obj, dict):
-            raise ValueError('transcript record is not an object')
+        source_lines = raw_jsonl.read_text(encoding='utf-8').splitlines()
     except Exception:
         parse_errors += 1
         continue
-    if obj.get('channel') != 'whatsapp':
-        continue
-    ts_raw = obj.get('timestamp')
-    if not ts_raw:
-        parse_errors += 1
-        continue
-    try:
-        dt = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
-    except Exception:
-        parse_errors += 1
-        continue
-    if dt < cutoff:
-        continue
-    if obj.get('chatType') == 'direct' and not obj.get('isFromMe'):
-        sender_name = (obj.get('senderName') or '').strip()
-        sender_number = normalize_number(obj.get('senderNumber'))
-        if sender_name and sender_name != '---' and sender_number:
-            inferred_names_by_number[sender_number] = sender_name
-    objs.append((obj, dt))
+    for line in source_lines:
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                raise ValueError('transcript record is not an object')
+        except Exception:
+            parse_errors += 1
+            continue
+        if obj.get('channel') != 'whatsapp':
+            continue
+        ts_raw = obj.get('timestamp')
+        if not ts_raw:
+            parse_errors += 1
+            continue
+        try:
+            dt = datetime.fromisoformat(ts_raw.replace('Z', '+00:00'))
+        except Exception:
+            parse_errors += 1
+            continue
+        if dt < cutoff:
+            continue
+        if obj.get('chatType') == 'direct' and not obj.get('isFromMe'):
+            sender_name = (obj.get('senderName') or '').strip()
+            sender_number = normalize_number(obj.get('senderNumber'))
+            if sender_name and sender_name != '---' and sender_number:
+                inferred_names_by_number[sender_number] = sender_name
+        objs.append((obj, dt))
 
 rendered = []
 unrendered_records = 0
@@ -233,42 +231,11 @@ for obj, dt in objs:
         # source content. Do not silently call the resulting feed complete.
         unrendered_records += 1
 
-direct_lines_by_peer: dict[str, list[tuple[str, datetime]]] = {}
-group_lines: list[tuple[str, datetime]] = []
-other_lines: list[tuple[str, datetime]] = []
-
-for line, dt in rendered:
-    entry = (line, dt)
-    m = re.match(r'^\[(.*?)\] Tom -> (.*?): ', line)
-    if m:
-        peer = m.group(2).strip()
-        direct_lines_by_peer.setdefault(peer, []).append(entry)
-        continue
-    m = re.match(r'^\[(.*?)\] (.*?): ', line)
-    if m and not line.startswith('[' + m.group(1) + '] ['):
-        peer = m.group(2).strip()
-        direct_lines_by_peer.setdefault(peer, []).append(entry)
-        continue
-    if re.match(r'^\[.*?\] \[.*?\] ', line):
-        group_lines.append(entry)
-    else:
-        other_lines.append(entry)
-
-selected_direct: list[tuple[str, datetime]] = []
-for peer_lines in direct_lines_by_peer.values():
-    selected_direct.extend(peer_lines[-direct_thread_recent_lines:])
-
-selected_direct_set = set(selected_direct)
-selected_groups = group_lines[-group_max_lines:]
-selected_others = [entry for entry in other_lines if entry not in selected_direct_set]
-merged = (selected_others + selected_groups + selected_direct)[-max_lines:]
-
-# A compact sidecar makes the retained source window explicit. Monitoring may
-# only advance a clean event cursor when its prior cursor falls inside this window.
-unique: dict[str, datetime] = {}
-for line, dt in merged:
-    unique.setdefault(line, dt)
-retained = sorted(unique.items(), key=lambda pair: pair[1])
+# The recent file is a bounded mirror, not a per-thread summary. Keep every
+# readable source record until the single global cap is reached, then retain
+# the newest records and report incomplete coverage.
+merged = sorted(rendered, key=lambda entry: entry[1])
+retained = merged[-max_lines:]
 lines = [line for line, _ in retained]
 truncated = len(retained) < len(rendered)
 coverage_reasons = []
@@ -285,6 +252,7 @@ sidecar = {
     'schema_version': 1,
     'window_hours': hours,
     'generated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+    'source_account_count': len(raw_paths),
     'earliest_retained_source_timestamp': retained[0][1].astimezone(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z') if retained else None,
     'latest_retained_source_timestamp': retained[-1][1].astimezone(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z') if retained else None,
     'retained_message_count': len(retained),
@@ -309,7 +277,7 @@ with tempfile.NamedTemporaryFile(
 os.replace(sidecar_tmp, window_json)
 updated = datetime.now().strftime('%Y-%m-%d %H:%M')
 print(f'# WhatsApp Recent (last {hours}h)')
-print(f'_Updated: {updated} — showing last {hours} hours (max {max_lines} lines, with direct-thread preservation). Source: structured WhatsApp transcript stream; legacy full log: WHATSAPP_LOG.md_')
+print(f'_Updated: {updated} — showing last {hours} hours (max {max_lines} lines). Source: structured WhatsApp transcript streams; legacy full log: WHATSAPP_LOG.md_')
 print()
 warnings = []
 if source_status != 'ok':
@@ -321,8 +289,7 @@ if unrendered_records:
 if truncated:
     warnings.append(
         f'⚠️ Coverage incomplete: output was truncated by retention limits '
-        f'(latest {direct_thread_recent_lines} per direct thread, {group_max_lines} group messages, '
-        f'{max_lines} total); displayed messages may be incomplete and message absence is not verified.'
+        f'({max_lines} total); displayed messages may be incomplete and message absence is not verified.'
     )
 if warnings:
     print('\n'.join(warnings))
