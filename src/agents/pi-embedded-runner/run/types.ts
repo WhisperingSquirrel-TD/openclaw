@@ -33,6 +33,7 @@ export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
 };
 
 export type EmbeddedRunAttemptResult = {
+  governance?: { runId: string; skillName: string };
   aborted: boolean;
   timedOut: boolean;
   /** True if the timeout occurred while compaction was in progress or pending. */

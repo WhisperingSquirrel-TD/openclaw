@@ -55,6 +55,7 @@ export type EmbeddedPiRunMeta = {
 };
 
 export type EmbeddedPiRunResult = {
+  governance?: { runId: string; skillName: string };
   payloads?: Array<{
     text?: string;
     mediaUrl?: string;

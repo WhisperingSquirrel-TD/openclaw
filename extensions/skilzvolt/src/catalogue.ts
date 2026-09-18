@@ -1,5 +1,12 @@
+import { createHash } from "node:crypto";
 import { SkilzVoltError } from "./client.js";
 import type { SkilzVoltClient } from "./client.js";
+import {
+  createSkillReceipt,
+  parseWorkflowContract,
+  type SkillReceipt,
+  type WorkflowContract,
+} from "./governance.js";
 
 /**
  * Private routing metadata for one catalogue entry. Never shown to the model - only the compact
@@ -32,6 +39,13 @@ type CatalogueSnapshot =
 export type SkilzVoltCatalogueResult =
   | { ok: true; lines: string[] }
   | { ok: false; reason: string };
+
+export type SkilzVoltLiveSkill = {
+  entry: SkilzVoltCatalogueEntry;
+  content: string;
+  receipt: SkillReceipt;
+  workflow: WorkflowContract;
+};
 
 // SkilzVolt's own catalogue may be large; this bounds pagination in case of a cursor loop bug on
 // either side rather than hanging bootstrap indefinitely.
@@ -74,6 +88,53 @@ function readString(
     }
   }
   return undefined;
+}
+
+function readTextResult(value: unknown): Record<string, unknown> {
+  const record = asRecord(value);
+  if (!record) {
+    throw new SkilzVoltError("SkilzVolt skill response was not a JSON object", "contract_drift");
+  }
+  const data = asRecord(record.data) ?? record;
+  if (data.isError === true) {
+    throw new SkilzVoltError("SkilzVolt reported an error reading the live skill", "protocol");
+  }
+  return asRecord(data.skill) ?? data;
+}
+
+function readSkillContent(record: Record<string, unknown>): string | undefined {
+  const direct = readString(record, ["content", "markdown", "body", "text"]);
+  if (direct) return direct;
+  const chunks = record.chunks ?? record.content_chunks ?? record.contentChunks;
+  if (Array.isArray(chunks)) {
+    const texts = chunks
+      .map((chunk) => {
+        if (typeof chunk === "string") return chunk;
+        const item = asRecord(chunk);
+        return item ? readString(item, ["content", "markdown", "body", "text"]) : undefined;
+      })
+      .filter((chunk): chunk is string => Boolean(chunk));
+    if (texts.length > 0) return texts.join("");
+  }
+  return undefined;
+}
+
+function readOptionalString(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
+  for (const key of keys) {
+    if (typeof value[key] === "string") return value[key] as string;
+  }
+  return undefined;
+}
+
+function readRequiredNumber(value: Record<string, unknown>, key: string): number {
+  const number = value[key];
+  if (typeof number !== "number" || !Number.isFinite(number) || number < 0) {
+    throw new SkilzVoltError(`SkilzVolt response is missing valid ${key}`, "contract_drift");
+  }
+  return number;
 }
 
 function parseEntry(raw: unknown): SkilzVoltCatalogueEntry {
@@ -152,6 +213,268 @@ export class SkilzVoltCatalogue {
     return this.snapshot?.ok
       ? this.snapshot.entries.find((entry) => entry.skillId === skillId)
       : undefined;
+  }
+
+  /** Internal-only routing metadata for the runtime intent router. */
+  getEntries(): SkilzVoltCatalogueEntry[] {
+    return this.snapshot?.ok ? [...this.snapshot.entries] : [];
+  }
+
+  async readCurrentSkill(
+    entry: SkilzVoltCatalogueEntry,
+    purpose: string,
+    signal?: AbortSignal,
+  ): Promise<SkilzVoltLiveSkill> {
+    if (!entry.currentVersionId) {
+      throw new SkilzVoltError(
+        `SkilzVolt skill ${entry.name} has no current version`,
+        "contract_drift",
+      );
+    }
+    let startChar: number | undefined;
+    let versionId: string | undefined = entry.currentVersionId;
+    let content = "";
+    let totalChars: number | undefined;
+    let totalBytes: number | undefined;
+    let serverHash: string | undefined;
+    let resources: unknown[] = [];
+    let completed = false;
+    for (let page = 0; page < 1000; page += 1) {
+      const args: Record<string, unknown> = {
+        skill_id: entry.skillId,
+        max_chars: 12000,
+        include_metadata: true,
+        include_resources: true,
+      };
+      args.version_id = versionId;
+      if (startChar !== undefined) args.start_char = startChar;
+      const skill = readTextResult(await this.client.callTool("skills_get", args, signal));
+      const skillId = readString(skill, ["skill_id"]);
+      if (!skillId || skillId !== entry.skillId) {
+        throw new SkilzVoltError(
+          "SkilzVolt current skill identity does not match the catalogue",
+          "contract_drift",
+        );
+      }
+      if (page === 0 && skill.version_is_current !== true) {
+        throw new SkilzVoltError("SkilzVolt skill version is not current", "contract_drift");
+      }
+      const responseVersion = readOptionalString(skill, ["version_id"]);
+      if (!responseVersion || (versionId && responseVersion !== versionId)) {
+        throw new SkilzVoltError(
+          "SkilzVolt response changed version during chunked read",
+          "contract_drift",
+        );
+      }
+      versionId ??= responseVersion;
+      if (versionId !== entry.currentVersionId) {
+        throw new SkilzVoltError(
+          "SkilzVolt current skill version does not match the catalogue",
+          "contract_drift",
+        );
+      }
+      if (page === 0) {
+        totalChars = readRequiredNumber(skill, "total_content_chars");
+        totalBytes = readRequiredNumber(skill, "total_content_bytes");
+        serverHash = readOptionalString(skill, ["content_hash", "content_sha256"]);
+        if (!serverHash) {
+          throw new SkilzVoltError(
+            "SkilzVolt response lacks whole-version content hash",
+            "contract_drift",
+          );
+        }
+        resources = Array.isArray(skill.resources) ? skill.resources : [];
+      }
+      const chunkRecord = asRecord(skill.chunk);
+      if (!chunkRecord) {
+        throw new SkilzVoltError(
+          "SkilzVolt response lacks nested chunk metadata",
+          "contract_drift",
+        );
+      }
+      const expectedStart = startChar ?? 0;
+      const chunkStart = chunkRecord.start_char;
+      const chunkEnd = chunkRecord.end_char;
+      if (
+        typeof chunkStart !== "number" ||
+        typeof chunkEnd !== "number" ||
+        chunkStart !== expectedStart ||
+        chunkEnd < chunkStart
+      ) {
+        throw new SkilzVoltError("SkilzVolt chunk offsets are invalid", "contract_drift");
+      }
+      const chunk = readOptionalString(skill, ["content"]) ?? "";
+      const chunkChars = Array.from(chunk).length;
+      if (chunkEnd - chunkStart !== chunkChars) {
+        throw new SkilzVoltError("SkilzVolt chunk character count is invalid", "contract_drift");
+      }
+      if (
+        chunkRecord.content_utf8_bytes !== undefined &&
+        (typeof chunkRecord.content_utf8_bytes !== "number" ||
+          chunkRecord.content_utf8_bytes !== Buffer.byteLength(chunk, "utf8"))
+      ) {
+        throw new SkilzVoltError("SkilzVolt chunk UTF-8 byte count is invalid", "contract_drift");
+      }
+      content += chunk;
+      const next = chunkRecord.next_start_char;
+      const complete = chunkRecord.complete === true;
+      if (complete) {
+        completed = true;
+        break;
+      }
+      if (typeof next !== "number" || next <= (startChar ?? 0)) {
+        throw new SkilzVoltError(
+          "SkilzVolt skill read did not provide a valid next_start_char",
+          "contract_drift",
+        );
+      }
+      startChar = next;
+    }
+    if (
+      !completed ||
+      !versionId ||
+      totalChars === undefined ||
+      totalBytes === undefined ||
+      !serverHash
+    ) {
+      throw new SkilzVoltError(
+        "SkilzVolt skill read lacks whole-version integrity metadata",
+        "contract_drift",
+      );
+    }
+    if (
+      Array.from(content).length !== totalChars ||
+      Buffer.byteLength(content, "utf8") !== totalBytes
+    ) {
+      throw new SkilzVoltError(
+        "SkilzVolt skill content length does not match integrity metadata",
+        "contract_drift",
+      );
+    }
+    const computedHash = createHash("sha256").update(content, "utf8").digest("hex");
+    if (computedHash !== serverHash.toLowerCase()) {
+      throw new SkilzVoltError("SkilzVolt skill content hash mismatch", "contract_drift");
+    }
+    let workflow: WorkflowContract;
+    let workflowSource: "skill-body" | "resource" = "skill-body";
+    let workflowResourceId: string | undefined;
+    let workflowSha256: string | undefined = computedHash;
+    try {
+      workflow = parseWorkflowContract(content);
+    } catch (error) {
+      let resourceText: string | undefined;
+      for (const resource of resources) {
+        const record = asRecord(resource);
+        const resourceId = record ? readOptionalString(record, ["resource_id"]) : undefined;
+        if (!resourceId) continue;
+        const authoritativeHash = record
+          ? readOptionalString(record, ["content_sha256"])
+          : undefined;
+        const authoritativeSize =
+          record && typeof record.content_length === "number" ? record.content_length : undefined;
+        if (
+          !authoritativeHash ||
+          !/^[a-f0-9]{64}$/i.test(authoritativeHash) ||
+          authoritativeSize === undefined
+        ) {
+          throw new SkilzVoltError(
+            "SkilzVolt workflow resource reference is missing authoritative hash or size",
+            "contract_drift",
+          );
+        }
+        const fetched = readTextResult(
+          await this.client.callTool("skills_get_resource", { resource_id: resourceId }, signal),
+        );
+        const fetchedRecord = asRecord(fetched);
+        const mismatch = (keys: string[], expected: string) =>
+          keys.some((key) => {
+            const value = fetchedRecord ? readOptionalString(fetchedRecord, [key]) : undefined;
+            return value !== undefined && value !== expected;
+          });
+        if (
+          mismatch(["resource_id"], resourceId) ||
+          mismatch(["skill_id"], entry.skillId) ||
+          mismatch(["version_id"], entry.currentVersionId ?? "")
+        ) {
+          throw new SkilzVoltError(
+            "SkilzVolt workflow resource identity mismatch",
+            "contract_drift",
+          );
+        }
+        const text = readOptionalString(fetched, ["content", "markdown", "body", "text"]);
+        if (text) {
+          const responseHash = readOptionalString(fetched, ["content_sha256"]);
+          const responseSize =
+            fetchedRecord && typeof fetchedRecord.content_length === "number"
+              ? fetchedRecord.content_length
+              : undefined;
+          const computedResourceHash = createHash("sha256").update(text, "utf8").digest("hex");
+          if (
+            !responseHash ||
+            !/^[a-f0-9]{64}$/i.test(responseHash) ||
+            responseSize === undefined ||
+            responseHash.toLowerCase() !== authoritativeHash.toLowerCase() ||
+            responseSize !== authoritativeSize ||
+            computedResourceHash !== authoritativeHash.toLowerCase() ||
+            Buffer.byteLength(text, "utf8") !== authoritativeSize
+          ) {
+            throw new SkilzVoltError(
+              "SkilzVolt workflow resource integrity mismatch",
+              "contract_drift",
+            );
+          }
+          resourceText = text;
+          workflowSource = "resource";
+          workflowResourceId = resourceId;
+          workflowSha256 = computedResourceHash;
+          break;
+        }
+        const structured =
+          (Array.isArray(fetched.requirements) ? fetched : undefined) ??
+          asRecord(fetched.data) ??
+          asRecord(fetched.workflow) ??
+          asRecord(fetched.manifest);
+        if (structured) {
+          resourceText = JSON.stringify(structured);
+          const responseHash = readOptionalString(fetched, ["content_sha256"]);
+          const responseSize =
+            fetchedRecord && typeof fetchedRecord.content_length === "number"
+              ? fetchedRecord.content_length
+              : undefined;
+          const computedResourceHash = createHash("sha256")
+            .update(resourceText, "utf8")
+            .digest("hex");
+          if (
+            !responseHash ||
+            responseSize === undefined ||
+            responseHash.toLowerCase() !== authoritativeHash.toLowerCase() ||
+            responseSize !== authoritativeSize ||
+            computedResourceHash !== authoritativeHash.toLowerCase() ||
+            Buffer.byteLength(resourceText, "utf8") !== authoritativeSize
+          ) {
+            throw new SkilzVoltError(
+              "SkilzVolt workflow resource integrity mismatch",
+              "contract_drift",
+            );
+          }
+          workflowSource = "resource";
+          workflowResourceId = resourceId;
+          workflowSha256 = computedResourceHash;
+          break;
+        }
+      }
+      if (!resourceText) throw error;
+      workflow = parseWorkflowContract(resourceText);
+    }
+    const receipt = createSkillReceipt({
+      entry,
+      content,
+      purpose,
+      workflowSource,
+      resourceId: workflowResourceId,
+      workflowSha256,
+    });
+    return { entry, content, receipt, workflow };
   }
 
   async refresh(signal?: AbortSignal): Promise<void> {

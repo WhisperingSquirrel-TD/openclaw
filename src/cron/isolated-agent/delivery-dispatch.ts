@@ -167,7 +167,31 @@ export async function dispatchCronDelivery(
   let outputText = params.outputText;
   let synthesizedText = params.synthesizedText;
   let deliveryPayloads = params.deliveryPayloads;
-
+  if (
+    params.job.payload.kind === "agentTurn" &&
+    params.job.payload.governedSkill &&
+    params.skipMessagingToolDelivery
+  ) {
+    const result = params.withRunSession({
+      status: "error",
+      error: "governed delivery blocked: messaging-tool delivery has no runtime attestation",
+      governanceStatus: "blocked",
+      governanceBlockedReason: "messaging-tool delivery has no runtime attestation",
+      governanceProofOutcome: "incomplete",
+      governedSkill: params.job.payload.governedSkill,
+      deliveryAttempted: false,
+      ...params.telemetry,
+    });
+    return {
+      result,
+      delivered: false,
+      deliveryAttempted: false,
+      summary,
+      outputText,
+      synthesizedText,
+      deliveryPayloads,
+    };
+  }
   // `true` means we confirmed at least one outbound send reached the target.
   // Keep this strict so timer fallback can safely decide whether to wake main.
   let delivered = params.skipMessagingToolDelivery;
@@ -225,11 +249,67 @@ export async function dispatchCronDelivery(
         threadId: delivery.threadId,
         payloads: payloadsForDelivery,
         session: deliverySession,
+        metadata:
+          params.job.payload.kind === "agentTurn" && params.job.payload.governedSkill
+            ? {
+                skilzvoltRunId: params.runSessionId,
+                skilzvoltSkill: params.job.payload.governedSkill,
+              }
+            : undefined,
         identity,
         bestEffort: params.deliveryBestEffort,
         deps: createOutboundSendDeps(params.deps),
         abortSignal: params.abortSignal,
       });
+      const governedSkill =
+        params.job.payload.kind === "agentTurn" ? params.job.payload.governedSkill : undefined;
+      if (governedSkill) {
+        const attestations = deliveryResults.map((result) => result.meta ?? {});
+        const valid = attestations.every(
+          (meta) =>
+            meta.skilzvoltRunId === params.runSessionId &&
+            meta.skilzvoltSkillId &&
+            meta.skilzvoltReceiptId &&
+            meta.skilzvoltVersionId &&
+            meta.skilzvoltContentSha256 &&
+            meta.skilzvoltProofOutcome === "complete",
+        );
+        if (!valid || deliveryResults.length === 0) {
+          return params.withRunSession({
+            status: "error",
+            error: "governed delivery blocked: missing or invalid live SkilzVolt attestation",
+            governanceStatus: "blocked",
+            governanceBlockedReason: "missing or invalid live SkilzVolt attestation",
+            governanceProofOutcome: "incomplete",
+            governedSkill,
+            summary,
+            outputText,
+            deliveryAttempted,
+            ...params.telemetry,
+          });
+        }
+        const attestation = attestations[0];
+        return params.withRunSession({
+          status: "ok",
+          delivered: true,
+          governanceStatus: "proof_complete",
+          governanceProofOutcome: "complete",
+          governedSkill,
+          governanceReceiptId: String(attestation.skilzvoltReceiptId),
+          governanceVersionId: String(attestation.skilzvoltVersionId),
+          governanceContentSha256: String(attestation.skilzvoltContentSha256),
+          governanceWorkflowSource:
+            attestation.skilzvoltWorkflowSource === "resource" ? "resource" : "skill-body",
+          ...(typeof attestation.skilzvoltResourceId === "string"
+            ? { governanceResourceId: attestation.skilzvoltResourceId }
+            : {}),
+          governanceWorkflowSha256: String(attestation.skilzvoltWorkflowSha256),
+          summary,
+          outputText,
+          deliveryAttempted,
+          ...params.telemetry,
+        });
+      }
       delivered = deliveryResults.length > 0;
       return null;
     } catch (err) {
@@ -481,7 +561,9 @@ export async function dispatchCronDelivery(
     // be swallowed by ANNOUNCE_SKIP/NO_REPLY in the target agent turn, which
     // silently drops cron output for topic-bound sessions.
     const useDirectDelivery =
-      params.deliveryPayloadHasStructuredContent || params.resolvedDelivery.threadId != null;
+      params.deliveryPayloadHasStructuredContent ||
+      params.resolvedDelivery.threadId != null ||
+      (params.job.payload.kind === "agentTurn" && Boolean(params.job.payload.governedSkill));
     if (useDirectDelivery) {
       const directResult = await deliverViaDirect(params.resolvedDelivery);
       if (directResult) {

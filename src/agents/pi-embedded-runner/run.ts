@@ -1499,6 +1499,7 @@ export async function runEmbeddedPiAgent(
             });
           }
           return {
+            governance: attempt.governance,
             payloads: payloads.length ? payloads : undefined,
             meta: {
               durationMs: Date.now() - started,

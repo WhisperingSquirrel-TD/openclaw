@@ -150,6 +150,12 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
       replyToId: resolvedReplyToId ?? null,
       threadId: resolvedThreadId,
       session: outboundSession,
+      metadata: normalized.governance
+        ? {
+            skilzvoltRunId: normalized.governance.runId,
+            skilzvoltSkill: normalized.governance.skillName,
+          }
+        : undefined,
       abortSignal,
       mirror:
         params.mirror !== false && params.sessionKey

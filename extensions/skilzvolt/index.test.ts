@@ -35,8 +35,13 @@ describe("SkilzVolt plugin registration", () => {
 
     registerSkilzVolt(api);
 
-    expect(factories).toHaveLength(3);
-    expect(factories.map((factory) => factory({ senderIsOwner: false }))).toEqual([null, null, null]);
+    expect(factories).toHaveLength(4);
+    expect(factories.map((factory) => factory({ senderIsOwner: false }))).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ]);
     expect(
       factories
         .map((factory) => factory({ senderIsOwner: true }))
@@ -48,21 +53,30 @@ describe("SkilzVolt plugin registration", () => {
         }),
     ).toEqual([
       { name: "skilzvolt", ownerOnly: true },
+      { name: "skilzvolt_workflow_proof", ownerOnly: true },
       { name: "skilzvolt_local_migration", ownerOnly: true },
       undefined,
     ]);
 
     const promptHook = hooks.find((hook) => hook.name === "before_prompt_build");
-    const mainResult = (await promptHook?.handler({}, { agentId: "main" })) as
-      | { appendSystemContext: string }
-      | undefined;
+    const mainResult = (await promptHook?.handler(
+      { prompt: "hello there" },
+      { agentId: "main" },
+    )) as { appendSystemContext: string; block?: boolean } | undefined;
     expect(mainResult).toMatchObject({
       appendSystemContext: expect.stringContaining("authoritative"),
     });
     // Catalogue fetch fails (network stubbed): reports an explicit degraded state, never stale
     // or guessed data.
     expect(mainResult?.appendSystemContext).toContain("unavailable");
+    expect(mainResult?.block).toBeUndefined();
+    const governedResult = (await promptHook?.handler(
+      { prompt: "learn from this correction" },
+      { agentId: "main" },
+    )) as { block?: boolean } | undefined;
+    expect(governedResult?.block).toBe(true);
     expect(await promptHook?.handler({}, { agentId: "other" })).toBeUndefined();
+    expect(hooks.some((hook) => hook.name === "gateway_start")).toBe(true);
   });
 
   it("exposes the fixed expense boundary only for an owner after explicit opt-in", () => {
@@ -76,7 +90,7 @@ describe("SkilzVolt plugin registration", () => {
 
     registerSkilzVolt(api);
 
-    const expenseFactory = factories[2];
+    const expenseFactory = factories[3];
     expect(expenseFactory?.({ senderIsOwner: false })).toBeNull();
     expect(expenseFactory?.({ senderIsOwner: true })).toMatchObject({
       name: "expense_sharepoint",

@@ -64,6 +64,16 @@ export type CronRunOutcome = {
   summary?: string;
   sessionId?: string;
   sessionKey?: string;
+  governedSkill?: string;
+  governanceStatus?: "not_applicable" | "blocked" | "receipt_only" | "proof_complete";
+  governanceBlockedReason?: string;
+  governanceReceiptId?: string;
+  governanceVersionId?: string;
+  governanceContentSha256?: string;
+  governanceProofOutcome?: "complete" | "incomplete" | "missing";
+  governanceWorkflowSource?: "skill-body" | "resource";
+  governanceResourceId?: string;
+  governanceWorkflowSha256?: string;
 };
 
 export type CronFailureAlert = {
@@ -92,6 +102,8 @@ type CronAgentTurnPayloadFields = {
   allowUnsafeExternalContent?: boolean;
   /** If true, run with lightweight bootstrap context. */
   lightContext?: boolean;
+  /** Canonical live SkilzVolt skill required for this governed job. */
+  governedSkill?: string;
   deliver?: boolean;
   channel?: CronMessageChannel;
   to?: string;

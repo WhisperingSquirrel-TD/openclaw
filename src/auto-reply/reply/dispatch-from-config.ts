@@ -491,12 +491,18 @@ export async function dispatchReplyFromConfig(params: {
         inboundAudio,
         ttsAuto: sessionTtsAuto,
       });
-      if (shouldRouteToOriginating && originatingChannel && originatingTo) {
+      const governedFinal = Boolean(ttsReply.governance);
+      if (
+        (shouldRouteToOriginating && originatingChannel && originatingTo) ||
+        (governedFinal && channel && chatId)
+      ) {
         // Route final reply to originating channel.
         const result = await routeReply({
           payload: ttsReply,
-          channel: originatingChannel,
-          to: originatingTo,
+          channel: (shouldRouteToOriginating ? originatingChannel : channel) as Parameters<
+            typeof routeReply
+          >[0]["channel"],
+          to: (shouldRouteToOriginating ? originatingTo : chatId)!,
           sessionKey: ctx.SessionKey,
           accountId: ctx.AccountId,
           threadId: ctx.MessageThreadId,

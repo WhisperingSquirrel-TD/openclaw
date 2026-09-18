@@ -3,6 +3,7 @@ import type { AnyAgentTool } from "../../../src/agents/tools/common.js";
 import { jsonResult } from "../../../src/agents/tools/common.js";
 import type { SkilzVoltClient, SkilzVoltToolName } from "./client.js";
 import { SKILZVOLT_ALLOWED_TOOLS, SkilzVoltError } from "./client.js";
+import type { SkillGovernanceLedger, WorkflowProofStatus } from "./governance.js";
 import type { SkilzVoltMigrationManager } from "./migration.js";
 
 const stringEnum = <T extends readonly string[]>(values: T, description: string) =>
@@ -93,6 +94,46 @@ export function createSkilzVoltTool(client: SkilzVoltClient): AnyAgentTool {
   };
 }
 
+export function createSkilzVoltWorkflowProofTool(ledger: SkillGovernanceLedger): AnyAgentTool {
+  return {
+    name: "skilzvolt_workflow_proof",
+    label: "SkilzVolt Workflow Proof",
+    description:
+      "Record structured evidence for one required step of the current live SkilzVolt workflow. This does not authorize tools or delivery by itself; the runtime validates the receipt and every required step.",
+    ownerOnly: true,
+    parameters: Type.Object(
+      {
+        runId: Type.String({ description: "Runtime run identifier for this proof." }),
+        requirementId: Type.String({ description: "Required workflow requirement ID." }),
+        status: stringEnum(
+          ["complete", "blocked", "not_applicable"] as const,
+          "Structured workflow status.",
+        ),
+        evidence: Type.Optional(Type.String({ description: "Brief evidence reference." })),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_toolCallId, rawParams) {
+      const params = rawParams as {
+        runId: string;
+        requirementId: string;
+        status: WorkflowProofStatus;
+        evidence?: string;
+      };
+      try {
+        ledger.recordProof(params.runId, {
+          requirementId: params.requirementId,
+          status: params.status,
+          evidence: params.evidence,
+        });
+        return jsonResult({ ok: true, requirementId: params.requirementId, status: params.status });
+      } catch (error) {
+        return publicError(error);
+      }
+    },
+  };
+}
+
 export function createSkilzVoltMigrationTool(migration: SkilzVoltMigrationManager): AnyAgentTool {
   return {
     name: "skilzvolt_local_migration",
@@ -150,7 +191,7 @@ export function createSkilzVoltMigrationTool(migration: SkilzVoltMigrationManage
         ),
         proposalStatusArguments: Type.Optional(
           Type.Record(Type.String(), Type.Unknown(), {
-              description: "Live skills_proposal_status arguments for the recorded proposal.",
+            description: "Live skills_proposal_status arguments for the recorded proposal.",
           }),
         ),
       },
