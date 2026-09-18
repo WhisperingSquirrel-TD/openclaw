@@ -19,7 +19,52 @@ export type CronRunLogEntry = {
   runAtMs?: number;
   durationMs?: number;
   nextRunAtMs?: number;
+  governedSkill?: string;
+  governanceStatus?: "not_applicable" | "blocked" | "receipt_only" | "proof_complete";
+  governanceBlockedReason?: string;
+  governanceReceiptId?: string;
+  governanceVersionId?: string;
+  governanceContentSha256?: string;
+  governanceProofOutcome?: "complete" | "incomplete" | "missing";
+  governanceWorkflowSource?: "skill-body" | "resource";
+  governanceResourceId?: string;
+  governanceWorkflowSha256?: string;
 } & CronRunTelemetry;
+
+export type CronGovernanceAuditIssue = {
+  jobId: string;
+  reason: string;
+};
+
+export function auditCronGovernance(entries: CronRunLogEntry[]): CronGovernanceAuditIssue[] {
+  const issues: CronGovernanceAuditIssue[] = [];
+  for (const entry of entries) {
+    if (!entry.governedSkill) {
+      continue;
+    }
+    if (
+      !entry.governanceReceiptId ||
+      !entry.governanceVersionId ||
+      !entry.governanceContentSha256 ||
+      !entry.governanceWorkflowSha256
+    ) {
+      issues.push({ jobId: entry.jobId, reason: "governed run is missing a live receipt" });
+    }
+    if (entry.governanceProofOutcome !== "complete") {
+      issues.push({
+        jobId: entry.jobId,
+        reason: "governed run is missing complete workflow proof",
+      });
+    }
+    if (entry.governanceStatus === "blocked" && entry.delivered === true) {
+      issues.push({
+        jobId: entry.jobId,
+        reason: "blocked governed run was unexpectedly delivered",
+      });
+    }
+  }
+  return issues;
+}
 
 export type CronRunLogSortDir = "asc" | "desc";
 export type CronRunLogStatusFilter = "all" | "ok" | "error" | "skipped";
@@ -316,6 +361,54 @@ function parseAllRunLogEntries(raw: string, opts?: { jobId?: string }): CronRunL
       }
       if (typeof obj.sessionKey === "string" && obj.sessionKey.trim().length > 0) {
         entry.sessionKey = obj.sessionKey;
+      }
+      if (
+        obj.governanceWorkflowSource === "skill-body" ||
+        obj.governanceWorkflowSource === "resource"
+      ) {
+        entry.governanceWorkflowSource = obj.governanceWorkflowSource;
+      }
+      if (typeof obj.governanceResourceId === "string" && obj.governanceResourceId.trim()) {
+        entry.governanceResourceId = obj.governanceResourceId;
+      }
+      if (
+        typeof obj.governanceWorkflowSha256 === "string" &&
+        /^[a-f0-9]{64}$/i.test(obj.governanceWorkflowSha256)
+      ) {
+        entry.governanceWorkflowSha256 = obj.governanceWorkflowSha256.toLowerCase();
+      }
+      if (typeof obj.governedSkill === "string" && obj.governedSkill.trim()) {
+        entry.governedSkill = obj.governedSkill.trim();
+        if (
+          obj.governanceStatus === "not_applicable" ||
+          obj.governanceStatus === "blocked" ||
+          obj.governanceStatus === "receipt_only" ||
+          obj.governanceStatus === "proof_complete"
+        ) {
+          entry.governanceStatus = obj.governanceStatus;
+        }
+        if (typeof obj.governanceBlockedReason === "string") {
+          entry.governanceBlockedReason = obj.governanceBlockedReason;
+        }
+        if (typeof obj.governanceReceiptId === "string" && obj.governanceReceiptId.trim()) {
+          entry.governanceReceiptId = obj.governanceReceiptId;
+        }
+        if (typeof obj.governanceVersionId === "string" && obj.governanceVersionId.trim()) {
+          entry.governanceVersionId = obj.governanceVersionId;
+        }
+        if (
+          typeof obj.governanceContentSha256 === "string" &&
+          /^[a-f0-9]{64}$/i.test(obj.governanceContentSha256)
+        ) {
+          entry.governanceContentSha256 = obj.governanceContentSha256.toLowerCase();
+        }
+        if (
+          obj.governanceProofOutcome === "complete" ||
+          obj.governanceProofOutcome === "incomplete" ||
+          obj.governanceProofOutcome === "missing"
+        ) {
+          entry.governanceProofOutcome = obj.governanceProofOutcome;
+        }
       }
       parsed.push(entry);
     } catch {

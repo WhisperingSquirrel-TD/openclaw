@@ -3,6 +3,7 @@ import type { SessionState } from "../logging/diagnostic-session-state.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { isPlainObject } from "../utils.js";
+import { getGovernedRun } from "./pi-embedded-runner/run/governance-registry.js";
 import { normalizeToolName } from "./tool-policy.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
@@ -148,7 +149,14 @@ export async function runBeforeToolCallHook(args: {
   }
 
   const hookRunner = getGlobalHookRunner();
+  const governed = args.ctx?.runId ? getGovernedRun(args.ctx.runId) : undefined;
   if (!hookRunner?.hasHooks("before_tool_call")) {
+    if (governed) {
+      return {
+        blocked: true,
+        reason: "Governed tool call requires explicit runtime authorization",
+      };
+    }
     return { blocked: false, params: args.params };
   }
 
@@ -178,6 +186,12 @@ export async function runBeforeToolCallHook(args: {
         reason: hookResult.blockReason || "Tool call blocked by plugin hook",
       };
     }
+    if (governed && hookResult?.governanceAuthorized !== true) {
+      return {
+        blocked: true,
+        reason: "Governed tool call lacks explicit runtime authorization",
+      };
+    }
 
     if (hookResult?.params && isPlainObject(hookResult.params)) {
       if (isPlainObject(params)) {
@@ -188,6 +202,9 @@ export async function runBeforeToolCallHook(args: {
   } catch (err) {
     const toolCallId = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
     log.warn(`before_tool_call hook failed: tool=${toolName}${toolCallId} error=${String(err)}`);
+    if (governed) {
+      return { blocked: true, reason: "Governed tool call hook failed closed" };
+    }
   }
 
   return { blocked: false, params };

@@ -69,6 +69,8 @@ export type GetReplyOptions = {
 };
 
 export type ReplyPayload = {
+  /** Internal runtime governance context; never serialized to channels. */
+  governance?: { runId: string; skillName: string };
   text?: string;
   mediaUrl?: string;
   mediaUrls?: string[];

@@ -91,6 +91,13 @@ export type RunCronAgentTurnResult = {
    * cannot guarantee a final delivery ack synchronously.
    */
   deliveryAttempted?: boolean;
+  governedSkill?: string;
+  governanceStatus?: "not_applicable" | "blocked" | "receipt_only" | "proof_complete";
+  governanceBlockedReason?: string;
+  governanceReceiptId?: string;
+  governanceVersionId?: string;
+  governanceContentSha256?: string;
+  governanceProofOutcome?: "complete" | "incomplete" | "missing";
 } & CronRunOutcome &
   CronRunTelemetry;
 
@@ -357,6 +364,14 @@ export async function runCronIsolatedAgentTurn(params: {
     result: Omit<RunCronAgentTurnResult, "sessionId" | "sessionKey">,
   ): RunCronAgentTurnResult => ({
     ...result,
+    ...(agentPayload?.governedSkill
+      ? {
+          governedSkill: agentPayload.governedSkill,
+          governanceStatus:
+            result.governanceStatus ?? (governedSkill ? "blocked" : "not_applicable"),
+          governanceProofOutcome: result.governanceProofOutcome ?? "missing",
+        }
+      : {}),
     sessionId: runSessionId,
     sessionKey: runSessionKey,
   });
@@ -467,15 +482,29 @@ export async function runCronIsolatedAgentTurn(params: {
     commandBody = `${base}\n${timeLine}`.trim();
   }
   commandBody = appendCronDeliveryInstruction({ commandBody, deliveryRequested });
+  const governedSkill =
+    agentPayload?.governedSkill && agentPayload.governedSkill.trim()
+      ? agentPayload.governedSkill.trim()
+      : undefined;
+  if (governedSkill) {
+    commandBody = [
+      `[skilzvolt-governed skill=${governedSkill}]`,
+      "This scheduled run is governed by the named current live SkilzVolt skill.",
+      "The runtime must load the full live skill before any operational work and must prove every required workflow step before delivery.",
+      commandBody,
+    ].join("\n");
+  }
 
   const existingSkillsSnapshot = cronSession.sessionEntry.skillsSnapshot;
-  const skillsSnapshot = resolveCronSkillsSnapshot({
-    workspaceDir,
-    config: cfgWithAgentDefaults,
-    agentId,
-    existingSnapshot: existingSkillsSnapshot,
-    isFastTestEnv,
-  });
+  const skillsSnapshot = governedSkill
+    ? { prompt: "", skills: [], resolvedSkills: [] }
+    : resolveCronSkillsSnapshot({
+        workspaceDir,
+        config: cfgWithAgentDefaults,
+        agentId,
+        existingSnapshot: existingSkillsSnapshot,
+        isFastTestEnv,
+      });
   if (!isFastTestEnv && skillsSnapshot !== existingSkillsSnapshot) {
     cronSession.sessionEntry = {
       ...cronSession.sessionEntry,
@@ -669,6 +698,7 @@ export async function runCronIsolatedAgentTurn(params: {
 
       if (shouldRetryInterimAck) {
         const continuationPrompt = [
+          ...(governedSkill ? [`[skilzvolt-governed skill=${governedSkill}]`] : []),
           "Your previous response was only an acknowledgement and did not complete this cron task.",
           "Complete the original task now.",
           "Do not send a status update like 'on it'.",
@@ -810,6 +840,7 @@ export async function runCronIsolatedAgentTurn(params: {
   const ackMaxChars = resolveHeartbeatAckMaxChars(agentCfg);
   const skipHeartbeatDelivery = deliveryRequested && isHeartbeatOnlyResponse(payloads, ackMaxChars);
   const skipMessagingToolDelivery =
+    !governedSkill &&
     deliveryRequested &&
     finalRunResult.didSendViaMessagingTool === true &&
     (finalRunResult.messagingToolSentTargets ?? []).some((target) =>

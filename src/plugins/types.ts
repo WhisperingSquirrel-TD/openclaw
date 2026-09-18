@@ -396,6 +396,8 @@ export const isPromptInjectionHookName = (hookName: PluginHookName): boolean =>
 // Agent context shared across agent hooks
 export type PluginHookAgentContext = {
   agentId?: string;
+  /** Stable run identifier for this agent invocation. */
+  runId?: string;
   sessionKey?: string;
   sessionId?: string;
   workspaceDir?: string;
@@ -427,6 +429,11 @@ export type PluginHookBeforePromptBuildEvent = {
 };
 
 export type PluginHookBeforePromptBuildResult = {
+  /** Prevent this governed run from entering the model/tool loop. */
+  block?: boolean;
+  blockReason?: string;
+  /** Runtime-owned, non-secret governance routing metadata. */
+  governance?: { skillName: string };
   systemPrompt?: string;
   prependContext?: string;
   /**
@@ -442,10 +449,13 @@ export type PluginHookBeforePromptBuildResult = {
 };
 
 export const PLUGIN_PROMPT_MUTATION_RESULT_FIELDS = [
+  "block",
+  "blockReason",
   "systemPrompt",
   "prependContext",
   "prependSystemContext",
   "appendSystemContext",
+  "governance",
 ] as const satisfies readonly (keyof PluginHookBeforePromptBuildResult)[];
 
 type MissingPluginPromptMutationResultFields = Exclude<
@@ -560,6 +570,7 @@ export type PluginHookMessageContext = {
   channelId: string;
   accountId?: string;
   conversationId?: string;
+  sessionKey?: string;
 };
 
 // message_received hook
@@ -580,6 +591,8 @@ export type PluginHookMessageSendingEvent = {
 export type PluginHookMessageSendingResult = {
   content?: string;
   cancel?: boolean;
+  /** Internal-only metadata; never serialized into a channel payload. */
+  internalMetadata?: Record<string, unknown>;
 };
 
 // message_sent hook
@@ -617,6 +630,7 @@ export type PluginHookBeforeToolCallResult = {
   params?: Record<string, unknown>;
   block?: boolean;
   blockReason?: string;
+  governanceAuthorized?: boolean;
 };
 
 // after_tool_call hook

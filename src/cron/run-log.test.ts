@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   appendCronRunLog,
+  auditCronGovernance,
   DEFAULT_CRON_RUN_LOG_KEEP_LINES,
   DEFAULT_CRON_RUN_LOG_MAX_BYTES,
   getPendingCronRunLogWriteCountForTests,
@@ -11,6 +12,69 @@ import {
   resolveCronRunLogPruneOptions,
   resolveCronRunLogPath,
 } from "./run-log.js";
+
+describe("cron governance audit", () => {
+  it("flags missing receipt/proof and delivered blocked runs without exposing content", () => {
+    expect(
+      auditCronGovernance([
+        {
+          ts: 1,
+          jobId: "job-a",
+          action: "finished",
+          governedSkill: "learning",
+          delivered: true,
+          governanceStatus: "blocked",
+        },
+      ]),
+    ).toEqual([
+      { jobId: "job-a", reason: "governed run is missing a live receipt" },
+      { jobId: "job-a", reason: "governed run is missing complete workflow proof" },
+      { jobId: "job-a", reason: "blocked governed run was unexpectedly delivered" },
+    ]);
+    expect(
+      auditCronGovernance([
+        {
+          ts: 1,
+          jobId: "job-b",
+          action: "finished",
+          governedSkill: "learning",
+          governanceReceiptId: "receipt",
+          governanceVersionId: "v1",
+          governanceContentSha256: "a".repeat(64),
+          governanceWorkflowSource: "skill-body",
+          governanceWorkflowSha256: "b".repeat(64),
+          governanceProofOutcome: "complete",
+          governanceStatus: "proof_complete",
+          delivered: true,
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("persists and reads non-secret receipt governance fields", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cron-governance-"));
+    const file = path.join(dir, "runs.jsonl");
+    await appendCronRunLog(file, {
+      ts: 1,
+      jobId: "job-c",
+      action: "finished",
+      governedSkill: "learning",
+      governanceStatus: "proof_complete",
+      governanceReceiptId: "receipt-1",
+      governanceVersionId: "v2",
+      governanceContentSha256: "b".repeat(64),
+      governanceProofOutcome: "complete",
+    });
+    const [entry] = await readCronRunLogEntries(file);
+    expect(entry).toMatchObject({
+      governedSkill: "learning",
+      governanceReceiptId: "receipt-1",
+      governanceVersionId: "v2",
+      governanceContentSha256: "b".repeat(64),
+      governanceProofOutcome: "complete",
+    });
+  });
+});
 
 describe("cron run log", () => {
   it("resolves prune options from config with defaults", () => {

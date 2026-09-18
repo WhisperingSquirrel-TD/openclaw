@@ -26,6 +26,16 @@ export type CronEvent = {
   sessionId?: string;
   sessionKey?: string;
   nextRunAtMs?: number;
+  governedSkill?: string;
+  governanceStatus?: "not_applicable" | "blocked" | "receipt_only" | "proof_complete";
+  governanceBlockedReason?: string;
+  governanceReceiptId?: string;
+  governanceVersionId?: string;
+  governanceContentSha256?: string;
+  governanceProofOutcome?: "complete" | "incomplete" | "missing";
+  governanceWorkflowSource?: "skill-body" | "resource";
+  governanceResourceId?: string;
+  governanceWorkflowSha256?: string;
 } & CronRunTelemetry;
 
 export type Logger = {

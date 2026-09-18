@@ -28,6 +28,11 @@ import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
 import { resolveUserPath } from "../../../utils.js";
 import { normalizeMessageChannel } from "../../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../../utils/provider-utils.js";
+import { clearGovernedRun, getGovernedRun, registerGovernedRun } from "./governance-registry.js";
+
+export function isRuntimeGovernedRun(runId: string): boolean {
+  return Boolean(getGovernedRun(runId));
+}
 import { resolveOpenClawAgentDir } from "../../agent-paths.js";
 import { resolveSessionAgentIds } from "../../agent-scope.js";
 import { createAnthropicPayloadLogger } from "../../anthropic-payload-log.js";
@@ -577,6 +582,25 @@ export async function resolvePromptBuildHookResult(params: {
           })
       : undefined);
   return {
+    block:
+      promptBuildResult?.block ||
+      legacyResult?.block ||
+      (promptBuildResult?.governance &&
+        legacyResult?.governance &&
+        promptBuildResult.governance.skillName !== legacyResult.governance.skillName),
+    blockReason:
+      promptBuildResult?.blockReason ??
+      legacyResult?.blockReason ??
+      (promptBuildResult?.governance &&
+      legacyResult?.governance &&
+      promptBuildResult.governance.skillName !== legacyResult.governance.skillName
+        ? "Conflicting SkilzVolt governance declarations"
+        : undefined),
+    governance:
+      promptBuildResult?.governance ??
+      (legacyResult?.governance && !promptBuildResult?.governance
+        ? legacyResult.governance
+        : undefined),
     systemPrompt: promptBuildResult?.systemPrompt ?? legacyResult?.systemPrompt,
     prependContext: joinPresentTextSegments([
       promptBuildResult?.prependContext,
@@ -1714,6 +1738,7 @@ export async function runEmbeddedAttempt(
       const hookAgentId = sessionAgentId;
 
       let promptError: unknown = null;
+      let governance: { runId: string; skillName: string } | undefined;
       let promptErrorSource: "prompt" | "compaction" | null = null;
       let contextPreflight: EmbeddedRunAttemptResult["contextPreflight"];
       const prePromptMessageCount = activeSession.messages.length;
@@ -1725,6 +1750,7 @@ export async function runEmbeddedAttempt(
         let effectivePrompt = params.prompt;
         const hookCtx = {
           agentId: hookAgentId,
+          runId: params.runId,
           sessionKey: params.sessionKey,
           sessionId: params.sessionId,
           workspaceDir: params.workspaceDir,
@@ -1739,6 +1765,17 @@ export async function runEmbeddedAttempt(
           hookRunner,
           legacyBeforeAgentStartResult: params.legacyBeforeAgentStartResult,
         });
+        governance = hookResult?.governance
+          ? { runId: params.runId, skillName: hookResult.governance.skillName }
+          : undefined;
+        if (governance) {
+          registerGovernedRun(params.runId, governance.skillName);
+        }
+        if (hookResult?.block) {
+          throw new Error(
+            hookResult.blockReason?.trim() || "The prompt was blocked by a runtime governance hook",
+          );
+        }
         {
           if (hookResult?.prependContext) {
             effectivePrompt = `${hookResult.prependContext}\n\n${params.prompt}`;
@@ -2149,6 +2186,7 @@ export async function runEmbeddedAttempt(
       }
 
       return {
+        governance,
         aborted,
         timedOut,
         timedOutDuringCompaction,
@@ -2196,6 +2234,7 @@ export async function runEmbeddedAttempt(
       await sessionLock.release();
     }
   } finally {
+    clearGovernedRun(params.runId);
     restoreSkillEnv?.();
     process.chdir(prevCwd);
   }

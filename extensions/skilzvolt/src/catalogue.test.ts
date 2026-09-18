@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { SkilzVoltCatalogue } from "./catalogue.js";
 import { SkilzVoltClient } from "./client.js";
@@ -45,6 +46,269 @@ function makeClient(
 }
 
 describe("SkilzVoltCatalogue", () => {
+  it("reads every current-version chunk with the live skills_get contract and validates hash", async () => {
+    const content = '<!-- skilzvolt-workflow {"requirements":[{"id":"capture😀"}]} -->';
+    const codePoints = Array.from(content);
+    const split = Math.floor(codePoints.length / 2);
+    const firstChunk = codePoints.slice(0, split).join("");
+    const secondChunk = codePoints.slice(split).join("");
+    const hash = createHash("sha256").update(content, "utf8").digest("hex");
+    const calls: Record<string, unknown>[] = [];
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        id?: number;
+        method: string;
+        params?: { name?: string; arguments?: Record<string, unknown> };
+      };
+      if (body.method === "initialize") return rpc(body.id!, { protocolVersion: "2025-06-18" });
+      if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+      if (body.method === "tools/list") {
+        return rpc(body.id!, {
+          tools: [{ name: "workspaces_list" }, { name: "skills_search" }, { name: "skills_get" }],
+        });
+      }
+      if (body.method === "tools/call" && body.params?.name === "skills_get") {
+        const args = body.params.arguments ?? {};
+        calls.push(args);
+        const first = args.start_char === undefined;
+        return rpc(body.id!, {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                first
+                  ? {
+                      skill_id: "skill-1",
+                      version_id: "v2",
+                      version_is_current: true,
+                      content: firstChunk,
+                      content_hash: hash,
+                      total_content_chars: codePoints.length,
+                      total_content_bytes: Buffer.byteLength(content),
+                      chunk: {
+                        start_char: 0,
+                        end_char: split,
+                        complete: false,
+                        next_start_char: split,
+                        content_utf8_bytes: Buffer.byteLength(firstChunk),
+                        content_serialized_bytes: Buffer.byteLength(firstChunk),
+                      },
+                      content_metadata: { origin: "vault", is_untrusted: false },
+                      resources: [],
+                    }
+                  : {
+                      skill_id: "skill-1",
+                      version_id: "v2",
+                      version_is_current: true,
+                      content: secondChunk,
+                      chunk: {
+                        start_char: split,
+                        end_char: codePoints.length,
+                        complete: true,
+                        content_utf8_bytes: Buffer.byteLength(secondChunk),
+                        content_serialized_bytes: Buffer.byteLength(secondChunk),
+                      },
+                    },
+              ),
+            },
+          ],
+        });
+      }
+      return rpc(body.id!, { content: [] });
+    });
+    const client = new SkilzVoltClient({
+      connectionKeyEnv: "TEST_SKILZVOLT_KEY",
+      allowProposals: true,
+      fetchImpl: fetchImpl as typeof fetch,
+      getBearerToken: () => "svk_test_only",
+    });
+    const catalogue = new SkilzVoltCatalogue(client);
+    const entry = {
+      skillId: "skill-1",
+      workspaceId: "workspace-1",
+      name: "learning",
+      description: "Learn",
+      currentVersionId: "v2",
+    };
+    const live = await catalogue.readCurrentSkill(entry, "test");
+    expect(live.content).toBe(content);
+    expect(calls).toEqual([
+      {
+        skill_id: "skill-1",
+        version_id: "v2",
+        max_chars: 12000,
+        include_metadata: true,
+        include_resources: true,
+      },
+      {
+        skill_id: "skill-1",
+        max_chars: 12000,
+        include_metadata: true,
+        include_resources: true,
+        version_id: "v2",
+        start_char: split,
+      },
+    ]);
+    expect(calls[0]).not.toHaveProperty("workspace_id");
+    expect(calls[0]).not.toHaveProperty("skillId");
+  });
+
+  it("rejects stale versions and content hash mismatches", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        id?: number;
+        method: string;
+        params?: { name?: string };
+      };
+      if (body.method === "initialize") return rpc(body.id!, { protocolVersion: "2025-06-18" });
+      if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+      if (body.method === "tools/list") {
+        return rpc(body.id!, {
+          tools: [{ name: "workspaces_list" }, { name: "skills_search" }, { name: "skills_get" }],
+        });
+      }
+      return rpc(body.id!, {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              skill_id: "skill-1",
+              version_id: "v1",
+              version_is_current: false,
+              content: "stale",
+              content_hash: "00".repeat(32),
+              total_content_chars: 5,
+              total_content_bytes: 5,
+              complete: true,
+            }),
+          },
+        ],
+      });
+    });
+    const client = new SkilzVoltClient({
+      connectionKeyEnv: "TEST_SKILZVOLT_KEY",
+      allowProposals: true,
+      fetchImpl: fetchImpl as typeof fetch,
+      getBearerToken: () => "svk_test_only",
+    });
+    const catalogue = new SkilzVoltCatalogue(client);
+    await expect(
+      catalogue.readCurrentSkill(
+        {
+          skillId: "skill-1",
+          workspaceId: "workspace-1",
+          name: "learning",
+          description: "",
+          currentVersionId: "v2",
+        },
+        "test",
+      ),
+    ).rejects.toThrow(/current|current-version|version/i);
+  });
+
+  it("fetches referenced workflow resources and fails closed when the resource read fails", async () => {
+    const content = "plain skill";
+    const hash = createHash("sha256").update(content).digest("hex");
+    let resourceCalls = 0;
+    let failResource = false;
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        id?: number;
+        method: string;
+        params?: { name?: string; arguments?: Record<string, unknown> };
+      };
+      if (body.method === "initialize") return rpc(body.id!, { protocolVersion: "2025-06-18" });
+      if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+      if (body.method === "tools/list") {
+        return rpc(body.id!, {
+          tools: [
+            { name: "workspaces_list" },
+            { name: "skills_search" },
+            { name: "skills_get" },
+            { name: "skills_get_resource" },
+          ],
+        });
+      }
+      if (body.params?.name === "skills_get_resource") {
+        resourceCalls += 1;
+        if (failResource) {
+          return rpc(body.id!, {
+            isError: true,
+            content: [{ type: "text", text: "resource unavailable" }],
+          });
+        }
+        const resourceText = JSON.stringify({ requirements: [{ id: "capture" }] });
+        return rpc(body.id!, {
+          resource_id: "workflow-1",
+          skill_id: "skill-1",
+          version_id: "v2",
+          content_sha256: createHash("sha256").update(resourceText).digest("hex"),
+          content_length: Buffer.byteLength(resourceText),
+          content: resourceText,
+        });
+      }
+      return rpc(body.id!, {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              skill_id: "skill-1",
+              version_id: "v2",
+              version_is_current: true,
+              content,
+              content_hash: hash,
+              total_content_chars: Array.from(content).length,
+              total_content_bytes: Buffer.byteLength(content),
+              chunk: { start_char: 0, end_char: content.length, complete: true },
+              resources: [
+                {
+                  resource_id: "workflow-1",
+                  content_sha256: createHash("sha256")
+                    .update(JSON.stringify({ requirements: [{ id: "capture" }] }))
+                    .digest("hex"),
+                  content_length: Buffer.byteLength(
+                    JSON.stringify({ requirements: [{ id: "capture" }] }),
+                  ),
+                },
+              ],
+            }),
+          },
+        ],
+      });
+    });
+    const client = new SkilzVoltClient({
+      connectionKeyEnv: "TEST_SKILZVOLT_KEY",
+      allowProposals: true,
+      fetchImpl: fetchImpl as typeof fetch,
+      getBearerToken: () => "svk_test_only",
+    });
+    const live = await new SkilzVoltCatalogue(client).readCurrentSkill(
+      {
+        skillId: "skill-1",
+        workspaceId: "workspace-1",
+        name: "learning",
+        description: "",
+        currentVersionId: "v2",
+      },
+      "test",
+    );
+    expect(live.workflow.requirements[0]?.id).toBe("capture");
+    expect(resourceCalls).toBe(1);
+    failResource = true;
+    await expect(
+      new SkilzVoltCatalogue(client).readCurrentSkill(
+        {
+          skillId: "skill-1",
+          workspaceId: "workspace-1",
+          name: "learning",
+          description: "",
+          currentVersionId: "v2",
+        },
+        "test",
+      ),
+    ).rejects.toThrow();
+  });
+
   it("bootstraps compact lines, keeps duplicate names across workspaces, and hides routing metadata", async () => {
     const client = makeClient(() => ({
       revision: "rev-1",

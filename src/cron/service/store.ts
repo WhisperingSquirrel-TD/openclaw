@@ -78,6 +78,14 @@ function copyTopLevelAgentTurnFields(
     payload.allowUnsafeExternalContent = raw.allowUnsafeExternalContent;
     mutated = true;
   }
+  if (
+    typeof payload.governedSkill !== "string" &&
+    typeof raw.governedSkill === "string" &&
+    raw.governedSkill.trim()
+  ) {
+    payload.governedSkill = raw.governedSkill.trim();
+    mutated = true;
+  }
 
   if (typeof payload.deliver !== "boolean" && typeof raw.deliver === "boolean") {
     payload.deliver = raw.deliver;
@@ -126,6 +134,9 @@ function stripLegacyTopLevelFields(raw: Record<string, unknown>) {
   }
   if ("allowUnsafeExternalContent" in raw) {
     delete raw.allowUnsafeExternalContent;
+  }
+  if ("governedSkill" in raw) {
+    delete raw.governedSkill;
   }
   if ("message" in raw) {
     delete raw.message;

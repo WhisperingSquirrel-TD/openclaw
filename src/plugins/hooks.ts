@@ -140,6 +140,9 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
     acc: PluginHookBeforePromptBuildResult | undefined,
     next: PluginHookBeforePromptBuildResult,
   ): PluginHookBeforePromptBuildResult => ({
+    block: Boolean(acc?.block || next.block),
+    blockReason: acc?.blockReason ?? next.blockReason,
+    governance: acc?.governance ?? next.governance,
     systemPrompt: next.systemPrompt ?? acc?.systemPrompt,
     prependContext: concatOptionalTextSegments({
       left: acc?.prependContext,
@@ -411,6 +414,7 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
       (acc, next) => ({
         content: next.content ?? acc?.content,
         cancel: next.cancel ?? acc?.cancel,
+        internalMetadata: next.internalMetadata ?? acc?.internalMetadata,
       }),
     );
   }
@@ -445,8 +449,9 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
       ctx,
       (acc, next) => ({
         params: next.params ?? acc?.params,
-        block: next.block ?? acc?.block,
-        blockReason: next.blockReason ?? acc?.blockReason,
+        block: Boolean(acc?.block || next.block),
+        blockReason: acc?.blockReason ?? next.blockReason,
+        governanceAuthorized: Boolean(acc?.governanceAuthorized || next.governanceAuthorized),
       }),
     );
   }

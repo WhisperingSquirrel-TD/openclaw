@@ -12,6 +12,7 @@ import {
   isTransientHttpError,
   sanitizeUserFacingText,
 } from "../../agents/pi-embedded-helpers.js";
+import { isRuntimeGovernedRun } from "../../agents/pi-embedded-runner/run/attempt.js";
 import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import { resolveCompactionReserveTokensFloor } from "../../agents/pi-settings.js";
 import {
@@ -48,6 +49,20 @@ import type { FollowupRun } from "./queue.js";
 import { createBlockReplyDeliveryHandler } from "./reply-delivery.js";
 import { createReplyMediaPathNormalizer } from "./reply-media-paths.js";
 import type { TypingSignaler } from "./typing-mode.js";
+
+export async function emitToolLifecycleStatus(params: {
+  runId: string;
+  phase: "start" | "update";
+  name?: string;
+  signalToolStart: () => Promise<void>;
+  onToolStart?: (event: { name?: string; phase: "start" | "update" }) => Promise<void> | void;
+}): Promise<void> {
+  if (isRuntimeGovernedRun(params.runId)) {
+    return;
+  }
+  await params.signalToolStart();
+  await params.onToolStart?.({ name: params.name, phase: params.phase });
+}
 
 export type RuntimeFallbackAttempt = {
   provider: string;
@@ -356,6 +371,9 @@ export async function runAgentTurnWithFallback(params: {
               blockReplyBreak: params.resolvedBlockStreamingBreak,
               blockReplyChunking: params.blockReplyChunking,
               onPartialReply: async (payload) => {
+                if (isRuntimeGovernedRun(runId)) {
+                  return;
+                }
                 const textForTyping = await handlePartialForTyping(payload);
                 if (!params.opts?.onPartialReply || textForTyping === undefined) {
                   return;
@@ -372,8 +390,12 @@ export async function runAgentTurnWithFallback(params: {
               onReasoningStream:
                 params.typingSignals.shouldStartOnReasoning || params.opts?.onReasoningStream
                   ? async (payload) => {
+                      if (isRuntimeGovernedRun(runId)) {
+                        return;
+                      }
                       await params.typingSignals.signalReasoningDelta();
                       await params.opts?.onReasoningStream?.({
+                        ...(isRuntimeGovernedRun(runId) ? { text: "" } : {}),
                         text: payload.text,
                         mediaUrls: payload.mediaUrls,
                       });
@@ -393,8 +415,13 @@ export async function runAgentTurnWithFallback(params: {
                   const phase = typeof evt.data.phase === "string" ? evt.data.phase : "";
                   const name = typeof evt.data.name === "string" ? evt.data.name : undefined;
                   if (phase === "start" || phase === "update") {
-                    await params.typingSignals.signalToolStart();
-                    await params.opts?.onToolStart?.({ name, phase });
+                    await emitToolLifecycleStatus({
+                      runId,
+                      phase,
+                      name,
+                      signalToolStart: () => params.typingSignals.signalToolStart(),
+                      onToolStart: params.opts?.onToolStart,
+                    });
                   }
                 }
                 // Track auto-compaction completion
@@ -409,18 +436,27 @@ export async function runAgentTurnWithFallback(params: {
               // even when regular block streaming is disabled. The handler sends directly
               // via opts.onBlockReply when the pipeline isn't available.
               onBlockReply: params.opts?.onBlockReply
-                ? createBlockReplyDeliveryHandler({
-                    onBlockReply: params.opts.onBlockReply,
-                    currentMessageId:
-                      params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid,
-                    normalizeStreamingText,
-                    applyReplyToMode: params.applyReplyToMode,
-                    normalizeMediaPaths: normalizeReplyMediaPaths,
-                    typingSignals: params.typingSignals,
-                    blockStreamingEnabled: params.blockStreamingEnabled,
-                    blockReplyPipeline,
-                    directlySentBlockKeys,
-                  })
+                ? async (payload) => {
+                    // Check before constructing the delivery handler: construction can
+                    // normalize/enqueue into the block pipeline, which must never happen
+                    // for governed runs (the registry may be cleared before final flush).
+                    if (isRuntimeGovernedRun(runId)) {
+                      return;
+                    }
+                    const deliverBlock = createBlockReplyDeliveryHandler({
+                      onBlockReply: params.opts!.onBlockReply!,
+                      currentMessageId:
+                        params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid,
+                      normalizeStreamingText,
+                      applyReplyToMode: params.applyReplyToMode,
+                      normalizeMediaPaths: normalizeReplyMediaPaths,
+                      typingSignals: params.typingSignals,
+                      blockStreamingEnabled: params.blockStreamingEnabled,
+                      blockReplyPipeline,
+                      directlySentBlockKeys,
+                    });
+                    await deliverBlock(payload);
+                  }
                 : undefined,
               onBlockReplyFlush:
                 params.blockStreamingEnabled && blockReplyPipeline
@@ -443,6 +479,9 @@ export async function runAgentTurnWithFallback(params: {
                     // See: https://github.com/openclaw/openclaw/issues/11044
                     let toolResultChain: Promise<void> = Promise.resolve();
                     return (payload: ReplyPayload) => {
+                      if (isRuntimeGovernedRun(runId)) {
+                        return;
+                      }
                       toolResultChain = toolResultChain
                         .then(async () => {
                           const { text, skip } = normalizeStreamingText(payload);

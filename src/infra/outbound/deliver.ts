@@ -127,6 +127,8 @@ type ChannelHandlerParams = {
   channel: Exclude<OutboundChannel, "none">;
   to: string;
   accountId?: string;
+  metadata?: Record<string, unknown>;
+  sessionKey?: string;
   replyToId?: string | null;
   threadId?: string | number | null;
   identity?: OutboundIdentity;
@@ -225,6 +227,7 @@ type DeliverOutboundPayloadsCoreParams = {
   channel: Exclude<OutboundChannel, "none">;
   to: string;
   accountId?: string;
+  metadata?: Record<string, unknown>;
   payloads: ReplyPayload[];
   replyToId?: string | null;
   threadId?: string | number | null;
@@ -397,16 +400,23 @@ async function applyMessageSendingHook(params: {
   to: string;
   channel: Exclude<OutboundChannel, "none">;
   accountId?: string;
+  metadata?: Record<string, unknown>;
+  sessionKey?: string;
 }): Promise<{
   cancelled: boolean;
   payload: ReplyPayload;
   payloadSummary: NormalizedOutboundPayload;
+  internalMetadata?: Record<string, unknown>;
 }> {
   if (!params.enabled) {
+    const governed =
+      typeof params.metadata?.skilzvoltRunId === "string" &&
+      typeof params.metadata?.skilzvoltSkill === "string";
     return {
-      cancelled: false,
+      cancelled: governed,
       payload: params.payload,
       payloadSummary: params.payloadSummary,
+      internalMetadata: undefined,
     };
   }
   try {
@@ -418,18 +428,37 @@ async function applyMessageSendingHook(params: {
           channel: params.channel,
           accountId: params.accountId,
           mediaUrls: params.payloadSummary.mediaUrls,
+          ...params.metadata,
         },
       },
       {
         channelId: params.channel,
         accountId: params.accountId ?? undefined,
+        sessionKey: params.sessionKey,
       },
     );
-    if (sendingResult?.cancel) {
+    const governed =
+      typeof params.metadata?.skilzvoltRunId === "string" &&
+      typeof params.metadata?.skilzvoltSkill === "string";
+    const attestation = sendingResult?.internalMetadata;
+    const validAttestation =
+      governed &&
+      attestation?.skilzvoltRunId === params.metadata?.skilzvoltRunId &&
+      attestation?.skilzvoltSkill === params.metadata?.skilzvoltSkill &&
+      attestation?.skilzvoltSkillId &&
+      attestation?.skilzvoltReceiptId &&
+      attestation?.skilzvoltVersionId &&
+      typeof attestation.skilzvoltContentSha256 === "string" &&
+      /^[a-f0-9]{64}$/i.test(attestation.skilzvoltContentSha256) &&
+      typeof attestation.skilzvoltWorkflowSha256 === "string" &&
+      /^[a-f0-9]{64}$/i.test(attestation.skilzvoltWorkflowSha256) &&
+      attestation.skilzvoltProofOutcome === "complete";
+    if (sendingResult?.cancel || (governed && !validAttestation)) {
       return {
         cancelled: true,
         payload: params.payload,
         payloadSummary: params.payloadSummary,
+        internalMetadata: undefined,
       };
     }
     if (sendingResult?.content == null) {
@@ -437,6 +466,7 @@ async function applyMessageSendingHook(params: {
         cancelled: false,
         payload: params.payload,
         payloadSummary: params.payloadSummary,
+        internalMetadata: sendingResult?.internalMetadata,
       };
     }
     const payload = {
@@ -450,13 +480,17 @@ async function applyMessageSendingHook(params: {
         ...params.payloadSummary,
         text: sendingResult.content,
       },
+      internalMetadata: sendingResult.internalMetadata,
     };
   } catch {
-    // Don't block delivery on hook failure.
+    const governed =
+      typeof params.metadata?.skilzvoltRunId === "string" &&
+      typeof params.metadata?.skilzvoltSkill === "string";
     return {
-      cancelled: false,
+      cancelled: governed,
       payload: params.payload,
       payloadSummary: params.payloadSummary,
+      internalMetadata: undefined,
     };
   }
 }
@@ -701,12 +735,25 @@ async function deliverOutboundPayloadsCore(
         to,
         channel,
         accountId,
+        metadata: params.metadata,
+        sessionKey: params.session?.key,
       });
       if (hookResult.cancelled) {
         continue;
       }
       const effectivePayload = hookResult.payload;
       payloadSummary = hookResult.payloadSummary;
+      const attachInternalMetadata = (from: number) => {
+        if (!hookResult.internalMetadata) {
+          return;
+        }
+        for (let index = from; index < results.length; index += 1) {
+          results[index] = {
+            ...results[index],
+            meta: { ...results[index]?.meta, ...hookResult.internalMetadata },
+          };
+        }
+      };
 
       params.onPayload?.(payloadSummary);
       const sendOverrides = {
@@ -714,8 +761,10 @@ async function deliverOutboundPayloadsCore(
         threadId: params.threadId ?? undefined,
       };
       if (handler.sendPayload && effectivePayload.channelData) {
+        const beforeCount = results.length;
         const delivery = await handler.sendPayload(effectivePayload, sendOverrides);
         results.push(delivery);
+        attachInternalMetadata(beforeCount);
         emitMessageSent({
           success: true,
           content: payloadSummary.text,
@@ -730,6 +779,7 @@ async function deliverOutboundPayloadsCore(
         } else {
           await sendTextChunks(payloadSummary.text, sendOverrides);
         }
+        attachInternalMetadata(beforeCount);
         const messageId = results.at(-1)?.messageId;
         emitMessageSent({
           success: results.length > beforeCount,
@@ -756,6 +806,7 @@ async function deliverOutboundPayloadsCore(
         }
         const beforeCount = results.length;
         await sendTextChunks(fallbackText, sendOverrides);
+        attachInternalMetadata(beforeCount);
         const messageId = results.at(-1)?.messageId;
         emitMessageSent({
           success: results.length > beforeCount,
@@ -766,6 +817,7 @@ async function deliverOutboundPayloadsCore(
       }
 
       let first = true;
+      const beforeCount = results.length;
       let lastMessageId: string | undefined;
       for (const url of payloadSummary.mediaUrls) {
         throwIfAborted(abortSignal);
@@ -781,6 +833,7 @@ async function deliverOutboundPayloadsCore(
           lastMessageId = delivery.messageId;
         }
       }
+      attachInternalMetadata(beforeCount);
       emitMessageSent({
         success: true,
         content: payloadSummary.text,

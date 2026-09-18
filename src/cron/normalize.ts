@@ -258,6 +258,9 @@ function copyTopLevelAgentTurnFields(next: UnknownRecord, payload: UnknownRecord
   ) {
     payload.allowUnsafeExternalContent = next.allowUnsafeExternalContent;
   }
+  if (typeof payload.governedSkill !== "string" && typeof next.governedSkill === "string") {
+    payload.governedSkill = next.governedSkill.trim();
+  }
 }
 
 function copyTopLevelLegacyDeliveryFields(next: UnknownRecord, payload: UnknownRecord) {
@@ -294,6 +297,7 @@ function stripLegacyTopLevelFields(next: UnknownRecord) {
   delete next.thinking;
   delete next.timeoutSeconds;
   delete next.allowUnsafeExternalContent;
+  delete next.governedSkill;
   delete next.message;
   delete next.text;
   delete next.deliver;
