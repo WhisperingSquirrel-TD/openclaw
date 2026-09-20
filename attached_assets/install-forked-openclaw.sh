@@ -93,6 +93,8 @@ fi
 # This guarantees we always run the newest version of this script.
 # OPENCLAW_REEXEC=1 is set on the re-exec to prevent an infinite loop.
 # ─────────────────────────────────────────────────────────────────────────────
+OPENCLAW_REPO_URL="${OPENCLAW_REPO_URL:-https://github.com/WhisperingSquirrel-TD/openclaw.git}"
+OPENCLAW_BRANCH="${OPENCLAW_BRANCH:-main}"
 if [ -z "${OPENCLAW_REEXEC:-}" ]; then
     echo ""
     echo "========================================="
@@ -100,27 +102,43 @@ if [ -z "${OPENCLAW_REEXEC:-}" ]; then
     echo "========================================="
     echo ""
     if [ -d "$HOME/openclaw" ]; then
-        warn "Pulling latest changes..."
+        warn "Fetching $OPENCLAW_REPO_URL ($OPENCLAW_BRANCH)..."
         STASHED=0
         if [ -n "$(git -C "$HOME/openclaw" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
             git -C "$HOME/openclaw" stash push -m "install auto-stash $(date '+%F %T')" 2>/dev/null && STASHED=1
         fi
-        git -C "$HOME/openclaw" pull || warn "Git pull failed — proceeding with existing code"
-        if [ "$STASHED" -eq 1 ] && ! git -C "$HOME/openclaw" stash pop 2>/dev/null; then
-            # A conflicted pop leaves literal <<<<<<< markers in the working
-            # tree — and services (e.g. mgmt-bot) are SYMLINKED to these files,
-            # so that would crash them. On conflict the stash is kept, so a
-            # hard reset restores clean upstream files without losing the edits.
-            git -C "$HOME/openclaw" reset --hard HEAD >/dev/null 2>&1 || true
-            warn "git stash pop CONFLICTED — restored clean upstream files instead."
-            warn "  Your local edits are safe in the stash: git -C ~/openclaw stash list"
-            warn "  Review them with: git -C ~/openclaw stash show -p"
-            warn "  Do NOT 'stash pop' again onto files that changed upstream — cherry-pick the hunks manually."
+        if git -C "$HOME/openclaw" remote get-url origin >/dev/null 2>&1; then
+            git -C "$HOME/openclaw" remote set-url origin "$OPENCLAW_REPO_URL"
+        else
+            git -C "$HOME/openclaw" remote add origin "$OPENCLAW_REPO_URL"
         fi
-        info "Code updated"
+        if git -C "$HOME/openclaw" fetch --prune origin "$OPENCLAW_BRANCH"; then
+            REMOTE_REF="origin/$OPENCLAW_BRANCH"
+            LOCAL_HEAD="$(git -C "$HOME/openclaw" rev-parse HEAD 2>/dev/null || true)"
+            REMOTE_HEAD="$(git -C "$HOME/openclaw" rev-parse "$REMOTE_REF" 2>/dev/null || true)"
+            if [ -n "$LOCAL_HEAD" ] && [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ]; then
+                BACKUP_BRANCH="install-preupdate-$(date '+%Y%m%d-%H%M%S')"
+                git -C "$HOME/openclaw" branch "$BACKUP_BRANCH" "$LOCAL_HEAD" 2>/dev/null || true
+                warn "Local checkout differed from GitHub; preserved it as $BACKUP_BRANCH"
+                git -C "$HOME/openclaw" checkout -B "$OPENCLAW_BRANCH" "$REMOTE_REF"
+            fi
+            if [ "$STASHED" -eq 1 ]; then
+                warn "Local uncommitted edits remain in the install stash and were not reapplied over fresh code"
+                warn "  Review with: git -C ~/openclaw stash list"
+            fi
+            info "Code updated to $(git -C "$HOME/openclaw" rev-parse --short HEAD)"
+        else
+            warn "Git fetch failed — proceeding with existing code"
+            if [ "$STASHED" -eq 1 ]; then
+                if ! git -C "$HOME/openclaw" stash pop 2>/dev/null; then
+                    git -C "$HOME/openclaw" reset --hard HEAD >/dev/null 2>&1 || true
+                    warn "Could not restore the local install stash; it remains safely stored in git stash"
+                fi
+            fi
+        fi
     else
         warn "Cloning fork from GitHub..."
-        git clone https://github.com/WhisperingSquirrel-TD/openclaw.git "$HOME/openclaw" \
+        git clone --branch "$OPENCLAW_BRANCH" "$OPENCLAW_REPO_URL" "$HOME/openclaw" \
             || fail "Clone failed. Check your connection and repo URL."
         info "Fork cloned"
     fi
