@@ -169,7 +169,6 @@ describe("SkilzVolt plugin registration", () => {
     expect(result?.appendSystemContext).toContain("Do not block");
     expect(readCurrentSkill).not.toHaveBeenCalled();
   });
-
   it("loads the current body for an unambiguous ordinary skill match", async () => {
     const entry = {
       skillId: "skill-crm-sharepoint",
@@ -195,7 +194,9 @@ describe("SkilzVolt plugin registration", () => {
     };
     vi.spyOn(SkilzVoltCatalogue.prototype, "getLines").mockResolvedValue({
       ok: true,
-      lines: ["- crm-sharepoint: Maintain CRM and SharePoint truth for accounts and meeting artifacts [SkilzVolt]"],
+      lines: [
+        "- crm-sharepoint: Maintain CRM and SharePoint truth for accounts and meeting artifacts [SkilzVolt]",
+      ],
     });
     vi.spyOn(SkilzVoltCatalogue.prototype, "getEntries").mockReturnValue([entry]);
     const readCurrentSkill = vi
