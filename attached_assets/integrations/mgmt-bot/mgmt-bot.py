@@ -324,11 +324,19 @@ def _get_current_model(config: dict) -> str:
 
 def _set_model(config: dict, model: str) -> dict:
     if "agents" in config and "defaults" in config.get("agents", {}):
-        config.setdefault("agents", {}).setdefault("defaults", {}).setdefault("model", {})["primary"] = model
+        defaults = config.setdefault("agents", {}).setdefault("defaults", {})
+        current = defaults.get("model")
+        model_config = dict(current) if isinstance(current, dict) else {}
+        model_config["primary"] = model
+        defaults["model"] = model_config
     elif "agent" in config:
         config["agent"]["model"] = model
     else:
-        config.setdefault("agents", {}).setdefault("defaults", {}).setdefault("model", {})["primary"] = model
+        defaults = config.setdefault("agents", {}).setdefault("defaults", {})
+        current = defaults.get("model")
+        model_config = dict(current) if isinstance(current, dict) else {}
+        model_config["primary"] = model
+        defaults["model"] = model_config
     return config
 
 
