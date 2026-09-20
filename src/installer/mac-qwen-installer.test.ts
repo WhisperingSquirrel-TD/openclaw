@@ -48,6 +48,7 @@ describe("Mac Mini Qwen installer gate", () => {
     expect(installer.slice(modelsCheck, activation)).toContain(
       'OPENCLAW_STATE_DIR="$PRIMARY_STATE_DIR"',
     );
+    expect(installer.slice(modelsCheck, activation)).toContain('config.pop("plugins", None)');
     expect(installer.slice(modelsCheck, activation)).toContain("--timeout 1800");
     expect(installer.slice(modelsCheck, activation)).toContain("stderr=${MAC_QWEN_PROBE_DETAIL}");
   });

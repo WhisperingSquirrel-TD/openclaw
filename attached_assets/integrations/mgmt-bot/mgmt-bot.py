@@ -356,14 +356,6 @@ MAC_QWEN_SENTINEL = "QWEN-LOCAL-OK"
 MAC_QWEN_PRIMARY_STATE_DIR = Path("/home/tomdean88/.openclaw")
 MAC_QWEN_PRIMARY_CONFIG_PATH = MAC_QWEN_PRIMARY_STATE_DIR / "openclaw.json"
 MAC_QWEN_PRIMARY_SERVICE = "openclaw-gateway.service"
-SKILZVOLT_PROBE_CONFIG_KEYS = {
-    "connectionKeyEnv",
-    "allowProposals",
-    "sharePointWriterEnabled",
-    "expenseSharePointEnabled",
-    "agentIds",
-    "organisationSkillNames",
-}
 
 
 def _qwen_primary_boundary_error() -> str | None:
@@ -448,19 +440,10 @@ def _qwen_provider_error(config: dict) -> str | None:
 def _qwen_probe_config(config: dict, target: Path) -> None:
     """Write a probe-only config without changing the installed default."""
     probe = json.loads(json.dumps(config))
-    skilzvolt_entry = (
-        probe.get("plugins", {})
-        .get("entries", {})
-        .get("skilzvolt")
-    )
-    if isinstance(skilzvolt_entry, dict):
-        skilzvolt_config = skilzvolt_entry.get("config")
-        if isinstance(skilzvolt_config, dict):
-            skilzvolt_entry["config"] = {
-                key: value
-                for key, value in skilzvolt_config.items()
-                if key in SKILZVOLT_PROBE_CONFIG_KEYS
-            }
+    # Plugin schemas can depend on the installed config location/version. The
+    # sentinel only verifies model resolution, so plugins do not belong in this
+    # temporary config and must not block the probe.
+    probe.pop("plugins", None)
     defaults = probe.setdefault("agents", {}).setdefault("defaults", {})
     model = defaults.get("model")
     model = dict(model) if isinstance(model, dict) else {}

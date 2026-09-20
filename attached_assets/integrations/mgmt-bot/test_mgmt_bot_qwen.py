@@ -141,7 +141,7 @@ class QwenManagementBotTests(unittest.TestCase):
         self.assertIn("apiKey=[redacted]", detail)
         self.assertNotIn("secret-value", detail)
 
-    def test_qwen_probe_removes_unsupported_skilzvolt_config(self):
+    def test_qwen_probe_omits_plugins_without_mutating_live_config(self):
         config = config_with_qwen()
         config["plugins"] = {
             "entries": {
@@ -159,11 +159,7 @@ class QwenManagementBotTests(unittest.TestCase):
         mgmt_bot._qwen_probe_config(config, target)
 
         probe = json.loads(target.read_text())
-        probe_config = probe["plugins"]["entries"]["skilzvolt"]["config"]
-        self.assertEqual(
-            probe_config,
-            {"connectionKeyEnv": "SKILZVOLT_CONNECTION_KEY"},
-        )
+        self.assertNotIn("plugins", probe)
         self.assertTrue(
             config["plugins"]["entries"]["skilzvolt"]["config"]["crmSharePointEnabled"]
         )

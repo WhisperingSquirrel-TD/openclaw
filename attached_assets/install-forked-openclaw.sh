@@ -2313,6 +2313,10 @@ import json, sys
 source, target, model_ref = sys.argv[1:]
 with open(source) as handle:
     config = json.load(handle)
+# The sentinel only verifies model resolution. Do not copy plugin configuration
+# into the temporary file: plugin schemas can depend on the installed config
+# location/version and must not block an otherwise valid model probe.
+config.pop("plugins", None)
 agents = config.setdefault("agents", {})
 defaults = agents.setdefault("defaults", {})
 model = defaults.get("model")
