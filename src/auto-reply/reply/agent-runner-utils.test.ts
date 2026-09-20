@@ -120,6 +120,34 @@ describe("agent-runner-utils", () => {
     });
   });
 
+  it("uses the actual custom local provider identity for its timeout", () => {
+    const run = makeRun({
+      config: {
+        agents: {
+          defaults: {
+            providerTimeoutSeconds: {
+              "custom-mac-ollama": 1800,
+            },
+          },
+        },
+        models: { providers: {} },
+      },
+    });
+
+    const resolved = buildEmbeddedRunBaseParams({
+      run,
+      provider: "custom-mac-ollama",
+      model: "qwen3-coder-131k",
+      runId: "run-qwen",
+      authProfile: resolveProviderScopedAuthProfile({
+        provider: "custom-mac-ollama",
+        primaryProvider: "custom-mac-ollama",
+      }),
+    });
+
+    expect(resolved.timeoutMs).toBe(1_800_000);
+  });
+
   it("builds embedded contexts and scopes auth profile by provider", () => {
     const run = makeRun({
       authProfileId: "profile-openai",

@@ -6,6 +6,7 @@ import {
   buildAssistantMessage,
   parseNdjsonStream,
   resolveOllamaBaseUrlForRun,
+  warmUpOllamaModel,
 } from "./ollama-stream.js";
 
 describe("convertToOllamaMessages", () => {
@@ -295,6 +296,51 @@ describe("parseNdjsonStream", () => {
       | undefined;
     expect(args?.retries).toBe(3);
     expect(args?.delayMs).toBe(2500);
+  });
+});
+
+describe("warmUpOllamaModel", () => {
+  it("warms only the explicitly verified remote model", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    try {
+      await warmUpOllamaModel({
+        baseUrl: "http://192.168.86.46:11434",
+        model: "qwen3-coder-131k",
+        keepAlive: "10m",
+        timeoutMs: 1000,
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://192.168.86.46:11434/api/generate",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          model: "qwen3-coder-131k",
+          prompt: "",
+          keep_alive: "10m",
+          stream: false,
+        }),
+      }),
+    );
+  });
+
+  it("does not fall back to localhost when route parameters are missing", async () => {
+    const fetchMock = vi.fn();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    try {
+      await warmUpOllamaModel({ model: "qwen3-coder-131k" });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
