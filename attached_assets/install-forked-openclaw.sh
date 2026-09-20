@@ -602,6 +602,7 @@ skilzvolt_config = skilzvolt_entry.setdefault('config', {})
 if not isinstance(skilzvolt_config, dict):
     skilzvolt_entry['config'] = {}
     skilzvolt_config = skilzvolt_entry['config']
+skilzvolt_config.pop('crmSharePointEnabled', None)
 skilzvolt_config.setdefault('connectionKeyEnv', 'SKILZVOLT_CONNECTION_KEY')
 skilzvolt_config.setdefault('allowProposals', True)
 skilzvolt_config.setdefault('agentIds', ['main'])
@@ -1514,7 +1515,6 @@ skilzvolt["enabled"] = True
 plugin_config = skilzvolt.setdefault("config", {})
 plugin_config["expenseSharePointEnabled"] = True
 plugin_config["sharePointWriterEnabled"] = True
-plugin_config["crmSharePointEnabled"] = True
 tools = config.setdefault("tools", {})
 also_allow = tools.setdefault("alsoAllow", [])
 if not isinstance(also_allow, list):

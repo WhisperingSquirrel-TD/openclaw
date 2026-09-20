@@ -141,6 +141,33 @@ class QwenManagementBotTests(unittest.TestCase):
         self.assertIn("apiKey=[redacted]", detail)
         self.assertNotIn("secret-value", detail)
 
+    def test_qwen_probe_removes_unsupported_skilzvolt_config(self):
+        config = config_with_qwen()
+        config["plugins"] = {
+            "entries": {
+                "skilzvolt": {
+                    "enabled": True,
+                    "config": {
+                        "connectionKeyEnv": "SKILZVOLT_CONNECTION_KEY",
+                        "crmSharePointEnabled": True,
+                    },
+                },
+            },
+        }
+        target = Path(self.tmpdir.name) / "qwen-probe.json"
+
+        mgmt_bot._qwen_probe_config(config, target)
+
+        probe = json.loads(target.read_text())
+        probe_config = probe["plugins"]["entries"]["skilzvolt"]["config"]
+        self.assertEqual(
+            probe_config,
+            {"connectionKeyEnv": "SKILZVOLT_CONNECTION_KEY"},
+        )
+        self.assertTrue(
+            config["plugins"]["entries"]["skilzvolt"]["config"]["crmSharePointEnabled"]
+        )
+
     def test_wrong_qwen_override_is_rejected_without_write_or_restart(self):
         self.env["OPENCLAW_LOCAL_QWEN30B_MODEL"] = "openai/gpt-5.6"
         with (
