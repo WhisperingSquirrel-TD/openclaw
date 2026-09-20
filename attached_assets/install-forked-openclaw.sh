@@ -10,6 +10,20 @@ info() { echo -e "${GREEN}[✓] $1${NC}"; }
 warn() { echo -e "${YELLOW}[!] $1${NC}"; }
 fail() { echo -e "${RED}[✗] $1${NC}"; exit 1; }
 
+# This installer is intentionally scoped to the primary Pi installation.
+# Refuse to run under another home/state boundary so it cannot touch the
+# retired L1-v2 checkout, L1 chat instance, or their service.
+PRIMARY_HOME="/home/tomdean88"
+PRIMARY_STATE_DIR="$PRIMARY_HOME/.openclaw"
+PRIMARY_GATEWAY_SERVICE="openclaw-gateway.service"
+if [ "$HOME" != "$PRIMARY_HOME" ]; then
+    fail "Refusing install outside the primary Pi user boundary: expected $PRIMARY_HOME, got $HOME"
+fi
+if [ "${OPENCLAW_HOME:-$HOME}" != "$HOME" ] || \
+   [ "${OPENCLAW_STATE_DIR:-$PRIMARY_STATE_DIR}" != "$PRIMARY_STATE_DIR" ]; then
+    fail "Refusing install with a non-primary OpenClaw home/state directory"
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Auto-load ~/.openclaw/.env so callers never need to `source` manually.
 # set -a exports every variable defined while active; set +a turns it off.
@@ -159,10 +173,10 @@ echo "  L1 — Install Forked OpenClaw"
 echo "========================================="
 echo ""
 
-# Step 1: Stop L1
-warn "Stopping L1..."
-~/l1-stop.sh 2>/dev/null || true
-info "L1 stopped"
+# Step 1: Do not stop any unmanaged or retired L1 instance.
+# The only process this installer may restart is the primary
+# openclaw-gateway.service after the verification gate passes.
+info "Leaving unmanaged and retired L1 instances untouched"
 
 # Step 2: Uninstall existing OpenClaw
 warn "Uninstalling current OpenClaw..."
@@ -663,7 +677,8 @@ pruning.setdefault('mode', 'cache-ttl')
 pruning.setdefault('ttl', '2h')
 pruning.setdefault('keepLastAssistants', 5)
 
-# Give Ollama a generous per-provider session timeout.  A real session
+# Give Ollama and the verified Mac Mini Qwen route generous per-provider
+# session timeouts. A real session
 # pumps SOUL.md (~2500 tok), multiple memory files, tool descriptions and
 # conversation history through the model — easily 10,000-20,000 input
 # tokens.  At Pi 4 prefill rates of 20-50 tok/s that alone takes
@@ -677,6 +692,35 @@ if not isinstance(provider_timeouts, dict):
     agent_defaults['providerTimeoutSeconds'] = {}
     provider_timeouts = agent_defaults['providerTimeoutSeconds']
 provider_timeouts['ollama'] = 1800
+provider_timeouts['custom-mac-ollama'] = 1800
+
+# Configure the verified Mac Mini Ollama endpoint without changing the
+# default model yet. Activation happens only after the reachability,
+# exact-model, OpenAI-compatible, and sentinel checks below all pass.
+models_cfg = c.setdefault('models', {})
+if not isinstance(models_cfg, dict):
+    c['models'] = {}
+    models_cfg = c['models']
+providers_cfg = models_cfg.setdefault('providers', {})
+if not isinstance(providers_cfg, dict):
+    models_cfg['providers'] = {}
+    providers_cfg = models_cfg['providers']
+providers_cfg['custom-mac-ollama'] = {
+    'baseUrl': 'http://192.168.86.46:11434/v1',
+    'apiKey': 'ollama-local',
+    'api': 'openai-completions',
+    'timeoutSeconds': 1800,
+    'models': [{
+        'id': 'qwen3-coder-131k',
+        'name': 'qwen3-coder-131k',
+        'reasoning': False,
+        'input': ['text'],
+        'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0},
+        'contextWindow': 16384,
+        'maxTokens': 2048,
+    }],
+}
+print('Mac Mini Qwen provider configured (default unchanged pending verification)')
 
 print(f'Token efficiency: lightContext={hb[\"lightContext\"]}, heartbeat every={hb[\"every\"]}, ' +
       f'activeHours={active_hours[\"start\"]}-{active_hours[\"end\"]}, ' +
@@ -839,9 +883,9 @@ fi
 # Seed Ollama auth entry in every agent's auth-profiles.json.
 # Ollama is a local provider that needs no real key, but OpenClaw's auth
 # store check fails with "No API key found for provider ollama" unless an
-# entry exists. This seeds the key as the literal string "ollama" (the
-# convention for keyless local providers). setdefault-style: never
-# overwrites a key that is already present.
+# entry exists. This seeds the non-secret compatibility marker "ollama-local"
+# for both the legacy Ollama provider and the verified Mac route.
+# setdefault-style: never overwrites a key that is already present.
 #
 # Also pre-creates ~/.openclaw/agents/main/agent/auth-profiles.json if it
 # does not exist yet — so Ollama auth is present before L1's first start,
@@ -859,8 +903,10 @@ warn "Seeding Ollama auth entry in agent auth stores..."
 python3 - <<'PYEOF'
 import json, pathlib, subprocess as _sp
 
-OLLAMA_KEY   = "ollama:ollama-local"   # must match apiKey in agents/main/agent/models.json
-OLLAMA_VALUE = {"apiKey": "ollama-local"}
+OLLAMA_KEY   = "ollama:ollama-local"   # legacy local Ollama profile
+OLLAMA_VALUE = {"type": "api_key", "provider": "ollama", "key": "ollama-local"}
+MAC_QWEN_KEY = "custom-mac-ollama:mac-mini"
+MAC_QWEN_VALUE = {"type": "api_key", "provider": "custom-mac-ollama", "key": "ollama-local"}
 OLD_KEYS     = ["ollama", "ollama:default", "ollama:ollama-local"]  # may be at wrong level
 
 def seed_auth_file(auth_file: pathlib.Path) -> str:
@@ -879,17 +925,26 @@ def seed_auth_file(auth_file: pathlib.Path) -> str:
         if "profiles" not in data or not isinstance(data["profiles"], dict):
             data["profiles"] = {}
         # Check if already correctly placed inside profiles
-        if OLLAMA_KEY in data["profiles"]:
-            if changed:
-                auth_file.write_text(json.dumps(data, indent=2))
-            return f"OK   {auth_file}: ollama:ollama-local already present in profiles"
-        data["profiles"][OLLAMA_KEY] = OLLAMA_VALUE
-        auth_file.write_text(json.dumps(data, indent=2))
-        return f"SET  {auth_file}: ollama:ollama-local added to profiles"
+        changed = False
+        if OLLAMA_KEY not in data["profiles"]:
+            data["profiles"][OLLAMA_KEY] = OLLAMA_VALUE
+            changed = True
+        if MAC_QWEN_KEY not in data["profiles"]:
+            data["profiles"][MAC_QWEN_KEY] = MAC_QWEN_VALUE
+            changed = True
+        if changed:
+            auth_file.write_text(json.dumps(data, indent=2))
+            return f"SET  {auth_file}: local Ollama profiles added"
+        return f"OK   {auth_file}: local Ollama profiles already present"
     else:
         auth_file.parent.mkdir(parents=True, exist_ok=True)
-        auth_file.write_text(json.dumps({"profiles": {OLLAMA_KEY: OLLAMA_VALUE}}, indent=2))
-        return f"CREATED {auth_file}: pre-seeded with ollama:ollama-local in profiles"
+        auth_file.write_text(json.dumps({
+            "profiles": {
+                OLLAMA_KEY: OLLAMA_VALUE,
+                MAC_QWEN_KEY: MAC_QWEN_VALUE,
+            },
+        }, indent=2))
+        return f"CREATED {auth_file}: pre-seeded local Ollama profiles"
 
 agents_dir = pathlib.Path.home() / ".openclaw" / "agents"
 
@@ -931,16 +986,17 @@ else:
     try:
         d = json.loads(models_file.read_text())
         changed = False
-        for model in d.get("providers", {}).get("ollama", {}).get("models", []):
-            old_ctx = model.get("contextWindow")
-            old_max = model.get("maxTokens")
-            if old_ctx != OLLAMA_CONTEXT or old_max != OLLAMA_MAX_TOKS:
-                model["contextWindow"] = OLLAMA_CONTEXT
-                model["maxTokens"]     = OLLAMA_MAX_TOKS
-                print(f"  SET  {model['id']}: contextWindow {old_ctx}→{OLLAMA_CONTEXT}, maxTokens {old_max}→{OLLAMA_MAX_TOKS}")
-                changed = True
-            else:
-                print(f"  OK   {model['id']}: contextWindow already {OLLAMA_CONTEXT}")
+        for provider_name in ("ollama", "custom-mac-ollama"):
+            for model in d.get("providers", {}).get(provider_name, {}).get("models", []):
+                old_ctx = model.get("contextWindow")
+                old_max = model.get("maxTokens")
+                if old_ctx != OLLAMA_CONTEXT or old_max != OLLAMA_MAX_TOKS:
+                    model["contextWindow"] = OLLAMA_CONTEXT
+                    model["maxTokens"]     = OLLAMA_MAX_TOKS
+                    print(f"  SET  {provider_name}/{model['id']}: contextWindow {old_ctx}→{OLLAMA_CONTEXT}, maxTokens {old_max}→{OLLAMA_MAX_TOKS}")
+                    changed = True
+                else:
+                    print(f"  OK   {provider_name}/{model['id']}: contextWindow already {OLLAMA_CONTEXT}")
         if changed:
             models_file.write_text(json.dumps(d, indent=2))
     except Exception as e:
@@ -2178,6 +2234,164 @@ if [ -d "$TOTP_DIR" ]; then
     info "TOTP secret files protected"
 fi
 
+# ---------------------------------------------------------------------------
+# Fail-closed Mac Mini Qwen activation gate.
+#
+# The provider is present in openclaw.json, but the existing default remains
+# unchanged until every check below succeeds. The temporary probe config is
+# never installed and only changes model selection for this bounded request.
+# ---------------------------------------------------------------------------
+MAC_QWEN_PROVIDER="custom-mac-ollama"
+MAC_QWEN_MODEL="qwen3-coder-131k"
+MAC_QWEN_REF="${MAC_QWEN_PROVIDER}/${MAC_QWEN_MODEL}"
+MAC_QWEN_NATIVE_URL="http://192.168.86.46:11434"
+MAC_QWEN_V1_URL="${MAC_QWEN_NATIVE_URL}/v1"
+MAC_QWEN_TAGS_FILE="$(mktemp)"
+MAC_QWEN_V1_MODELS_FILE="$(mktemp)"
+MAC_QWEN_PROBE_CONFIG="$(mktemp)"
+MAC_QWEN_PROBE_OUTPUT="$(mktemp)"
+MAC_QWEN_PROBE_ERROR="$(mktemp)"
+trap 'rm -f "$MAC_QWEN_TAGS_FILE" "$MAC_QWEN_V1_MODELS_FILE" "$MAC_QWEN_PROBE_CONFIG" "$MAC_QWEN_PROBE_OUTPUT" "$MAC_QWEN_PROBE_ERROR"' EXIT
+
+if ! curl -fsS --max-time 15 "$MAC_QWEN_NATIVE_URL/api/tags" >"$MAC_QWEN_TAGS_FILE"; then
+    fail "Mac Mini Qwen activation blocked: /api/tags is unreachable"
+fi
+
+MAC_QWEN_WIRE_MODEL="$(python3 - "$MAC_QWEN_TAGS_FILE" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+try:
+    data = json.loads(open(path).read())
+    names = [str(item.get("name", "")).strip()
+             for item in data.get("models", [])
+             if isinstance(item, dict) and str(item.get("name", "")).strip()]
+except Exception:
+    raise SystemExit(2)
+allowed = {"qwen3-coder-131k", "qwen3-coder-131k:latest"}
+matches = [name for name in names if name in allowed]
+if len(matches) != 1:
+    raise SystemExit(3)
+print(matches[0])
+PYEOF
+)" || fail "Mac Mini Qwen activation blocked: exact qwen3-coder-131k model is not present"
+info "Mac Mini Qwen exact model verified: ${MAC_QWEN_WIRE_MODEL} (configured ref: ${MAC_QWEN_REF})"
+
+if ! curl -fsS --max-time 15 "$MAC_QWEN_V1_URL/models" >"$MAC_QWEN_V1_MODELS_FILE"; then
+    fail "Mac Mini Qwen activation blocked: /v1/models is unreachable"
+fi
+if ! python3 - "$MAC_QWEN_V1_MODELS_FILE" "$MAC_QWEN_WIRE_MODEL" <<'PYEOF'
+import json, sys
+path, wire_model = sys.argv[1], sys.argv[2]
+try:
+    data = json.loads(open(path).read())
+    ids = [str(item.get("id", "")).strip()
+           for item in data.get("data", [])
+           if isinstance(item, dict) and str(item.get("id", "")).strip()]
+except Exception:
+    raise SystemExit(2)
+allowed = {"qwen3-coder-131k", "qwen3-coder-131k:latest"}
+if not allowed.intersection(ids):
+    raise SystemExit(3)
+PYEOF
+then
+    fail "Mac Mini Qwen activation blocked: exact model is absent from /v1/models"
+fi
+info "Mac Mini Qwen OpenAI-compatible model list verified"
+
+if ! python3 - "$CONFIG_FILE" "$MAC_QWEN_PROBE_CONFIG" "$MAC_QWEN_REF" <<'PYEOF'
+import json, sys
+source, target, model_ref = sys.argv[1:]
+with open(source) as handle:
+    config = json.load(handle)
+agents = config.setdefault("agents", {})
+defaults = agents.setdefault("defaults", {})
+model = defaults.get("model")
+if not isinstance(model, dict):
+    model = {}
+else:
+    model = dict(model)
+model["primary"] = model_ref
+model["fallbacks"] = []
+defaults["model"] = model
+for entry in agents.get("list", []):
+    if isinstance(entry, dict) and entry.get("id") == "main":
+        entry_model = entry.get("model")
+        entry_model = dict(entry_model) if isinstance(entry_model, dict) else {}
+        entry_model["primary"] = model_ref
+        entry_model["fallbacks"] = []
+        entry["model"] = entry_model
+with open(target, "w") as handle:
+    json.dump(config, handle, indent=2)
+    handle.write("\n")
+PYEOF
+then
+    fail "Mac Mini Qwen activation blocked: could not create temporary probe config"
+fi
+chmod 600 "$MAC_QWEN_PROBE_CONFIG"
+
+if ! OPENCLAW_CONFIG_PATH="$MAC_QWEN_PROBE_CONFIG" \
+     OPENCLAW_NONINTERACTIVE=1 \
+     timeout --signal=TERM 1810s \
+     openclaw agent --local --agent main \
+       --message "Reply with exactly QWEN-LOCAL-OK and nothing else." \
+       --timeout 1800 --json \
+       >"$MAC_QWEN_PROBE_OUTPUT" 2>"$MAC_QWEN_PROBE_ERROR"; then
+    fail "Mac Mini Qwen activation blocked: OpenClaw-resolved sentinel request failed"
+fi
+if ! python3 - "$MAC_QWEN_PROBE_OUTPUT" <<'PYEOF'
+import json, sys
+try:
+    result = json.load(open(sys.argv[1]))
+    payloads = result.get("payloads") or []
+    texts = [str(item.get("text", "")).strip()
+             for item in payloads if isinstance(item, dict)]
+except Exception:
+    raise SystemExit(2)
+if texts != ["QWEN-LOCAL-OK"]:
+    raise SystemExit(3)
+PYEOF
+then
+    fail "Mac Mini Qwen activation blocked: sentinel did not return exactly QWEN-LOCAL-OK"
+fi
+info "Mac Mini Qwen OpenClaw-resolved sentinel verified: QWEN-LOCAL-OK"
+
+sudo chattr -i "$CONFIG_FILE" 2>/dev/null || true
+if ! python3 - "$CONFIG_FILE" "$MAC_QWEN_REF" <<'PYEOF'
+import json, sys
+config_path, model_ref = sys.argv[1:]
+with open(config_path) as handle:
+    config = json.load(handle)
+agents = config.setdefault("agents", {})
+defaults = agents.setdefault("defaults", {})
+model = defaults.get("model")
+model = dict(model) if isinstance(model, dict) else {}
+model["primary"] = model_ref
+defaults["model"] = model
+for entry in agents.get("list", []):
+    if isinstance(entry, dict) and entry.get("id") == "main":
+        entry_model = entry.get("model")
+        entry_model = dict(entry_model) if isinstance(entry_model, dict) else {}
+        entry_model["primary"] = model_ref
+        entry["model"] = entry_model
+with open(config_path, "w") as handle:
+    json.dump(config, handle, indent=2)
+    handle.write("\n")
+PYEOF
+then
+    sudo chattr +i "$CONFIG_FILE" 2>/dev/null || true
+    fail "Mac Mini Qwen activation blocked: could not activate verified default"
+fi
+sudo chattr +i "$CONFIG_FILE" 2>/dev/null || true
+info "Default model activated: ${MAC_QWEN_REF}"
+
+# Fire-and-forget warm-up of only the already verified remote model.
+nohup curl -fsS --max-time 1800 \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"${MAC_QWEN_WIRE_MODEL}\",\"prompt\":\"\",\"keep_alive\":\"10m\",\"stream\":false}" \
+    "$MAC_QWEN_NATIVE_URL/api/generate" \
+    >/dev/null 2>&1 &
+info "Mac Mini Qwen warm-up started asynchronously (${MAC_QWEN_WIRE_MODEL}, keep_alive=10m)"
+
 # Step 12b-pre: Patch gateway service unit to include ~/.npm-packages/bin in PATH.
 # The systemd user service doesn't inherit the shell PATH set in .bashrc, so
 # the gateway can't find qmd (installed to ~/.npm-packages/bin) at runtime.
@@ -2217,13 +2431,8 @@ else
     warn "Gateway service unit not found at $GATEWAY_SVC — skipping PATH patch"
 fi
 
-# Step 12b: Restart L1 — prefer `systemctl --user restart` (the SAME path /restart
-# and the model-switch commands use; it leaves the unit reporting is-active=active),
-# and fall back to l1-start.sh only if systemd is unavailable. The old ordering ran
-# l1-start.sh FIRST, which started the gateway OUTSIDE systemd: `systemctl is-active`
-# then read "inactive" and the assistant stayed dormant until a manual model swap
-# forced a real systemctl restart. Stopping any l1-start process first prevents it
-# holding the port against the systemd-managed instance.
+# Step 12b: Restart only the primary systemd-managed gateway. The activation gate
+# above has already proved the route; never fall back to an unmanaged launcher.
 #
 # Source .env so OPENCLAW_VAULT_PASSPHRASE is in the environment before gateway
 # startup — prevents interactive passphrase prompts during direct terminal runs.
@@ -2238,31 +2447,10 @@ fi
 
 echo ""
 warn "Restarting L1..."
-# Stop any gateway a previous l1-start.sh launched OUTSIDE systemd so it can't
-# hold the port against the systemd-managed instance started below.
-[ -f "$HOME/l1-stop.sh" ] && bash "$HOME/l1-stop.sh" 2>/dev/null || true
-sleep 2
-_l1_started=false
-if systemctl --user is-enabled openclaw-gateway.service 2>/dev/null | grep -q "enabled\|static"; then
-    if systemctl --user restart openclaw-gateway.service; then
-        info "openclaw-gateway.service restarted (systemd-active) — new code is live"
-        _l1_started=true
-    else
-        warn "systemctl --user restart failed — falling back to l1-start.sh"
-    fi
+if ! systemctl --user restart "$PRIMARY_GATEWAY_SERVICE"; then
+    fail "Primary gateway restart failed; no unmanaged fallback was attempted"
 fi
-if [ "$_l1_started" = false ]; then
-    if [ -f "$HOME/l1-start.sh" ]; then
-        bash "$HOME/l1-start.sh" && \
-            info "L1 restarted via l1-start.sh — new code is live" || \
-            warn "l1-start.sh returned non-zero — check gateway.log"
-    else
-        pkill -f "node.*openclaw" 2>/dev/null || true
-        pkill -f "ts-node.*openclaw" 2>/dev/null || true
-        sleep 2
-        warn "No restart method available — start L1 manually"
-    fi
-fi
+info "$PRIMARY_GATEWAY_SERVICE restarted — verified Mac Mini Qwen route is live"
 
 # Step 13: Update integrity hashes
 md5sum /mnt/l1-secure/*.md > ~/l1-hashes.txt 2>/dev/null || true
@@ -2579,7 +2767,9 @@ python3 - <<'PYEOF'
 import json, pathlib, subprocess as _sp
 
 OLLAMA_KEY   = "ollama:ollama-local"
-OLLAMA_VALUE = {"apiKey": "ollama-local"}
+OLLAMA_VALUE = {"type": "api_key", "provider": "ollama", "key": "ollama-local"}
+MAC_QWEN_KEY = "custom-mac-ollama:mac-mini"
+MAC_QWEN_VALUE = {"type": "api_key", "provider": "custom-mac-ollama", "key": "ollama-local"}
 OLD_KEYS     = ["ollama", "ollama:default", "ollama:ollama-local"]  # may be at wrong level
 
 def seed_auth_file(auth_file: pathlib.Path) -> str:
@@ -2594,17 +2784,25 @@ def seed_auth_file(auth_file: pathlib.Path) -> str:
         changed = any(data.pop(k, None) is not None for k in OLD_KEYS)
         if "profiles" not in data or not isinstance(data["profiles"], dict):
             data["profiles"] = {}
-        if OLLAMA_KEY in data["profiles"]:
-            if changed:
-                auth_file.write_text(json.dumps(data, indent=2))
-            return f"OK   {auth_file}: ollama:ollama-local present in profiles"
-        data["profiles"][OLLAMA_KEY] = OLLAMA_VALUE
-        auth_file.write_text(json.dumps(data, indent=2))
-        return f"SET  {auth_file}: ollama:ollama-local added to profiles"
+        if OLLAMA_KEY not in data["profiles"]:
+            data["profiles"][OLLAMA_KEY] = OLLAMA_VALUE
+            changed = True
+        if MAC_QWEN_KEY not in data["profiles"]:
+            data["profiles"][MAC_QWEN_KEY] = MAC_QWEN_VALUE
+            changed = True
+        if changed:
+            auth_file.write_text(json.dumps(data, indent=2))
+            return f"SET  {auth_file}: local Ollama profiles added"
+        return f"OK   {auth_file}: local Ollama profiles present in profiles"
     else:
         auth_file.parent.mkdir(parents=True, exist_ok=True)
-        auth_file.write_text(json.dumps({"profiles": {OLLAMA_KEY: OLLAMA_VALUE}}, indent=2))
-        return f"CREATED {auth_file}: pre-seeded"
+        auth_file.write_text(json.dumps({
+            "profiles": {
+                OLLAMA_KEY: OLLAMA_VALUE,
+                MAC_QWEN_KEY: MAC_QWEN_VALUE,
+            },
+        }, indent=2))
+        return f"CREATED {auth_file}: pre-seeded local Ollama profiles"
 
 agents_dir = pathlib.Path.home() / ".openclaw" / "agents"
 main_auth  = agents_dir / "main" / "agent" / "auth-profiles.json"

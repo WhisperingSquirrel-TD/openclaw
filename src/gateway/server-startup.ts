@@ -10,7 +10,12 @@ import {
   resolveHooksGmailModel,
 } from "../agents/model-selection.js";
 import { clearLocalProviderCooldownsToDisk } from "../agents/auth-profiles.js";
-import { warmUpOllamaModels } from "../agents/ollama-stream.js";
+import {
+  MAC_QWEN_NATIVE_BASE_URL,
+  MAC_QWEN_MODEL_ID,
+  MAC_QWEN_PROVIDER,
+} from "../agents/mac-qwen-route.js";
+import { warmUpOllamaModel } from "../agents/ollama-stream.js";
 import { resolveAgentSessionDirs } from "../agents/session-dirs.js";
 import { cleanStaleLockFiles } from "../agents/session-write-lock.js";
 import type { CliDeps } from "../cli/deps.js";
@@ -67,21 +72,22 @@ export async function startGatewaySidecars(params: {
     params.log.warn(`session lock cleanup failed on startup: ${String(err)}`);
   }
 
-  // Clear stale cooldowns for local providers (Ollama) on every gateway start.
+  // Clear stale cooldowns for local providers on every gateway start.
   // Ollama is a local service that recovers in seconds; exponential-backoff
   // cooldowns persisted from a previous session should never block the fallback
   // path after a restart.
   try {
-    await clearLocalProviderCooldownsToDisk(["ollama"]);
+    await clearLocalProviderCooldownsToDisk(["ollama", MAC_QWEN_PROVIDER]);
   } catch (err) {
     params.log.warn(`local provider cooldown clear failed on startup: ${String(err)}`);
   }
 
-  // Pre-warm Ollama models in the background so the first real user request
-  // does not time out while the model loads from disk (10–20 s on Pi 4).
-  // Fire-and-forget: startup is not blocked and failures are silently ignored.
-  void warmUpOllamaModels({
-    keepAlive: "-1",
+  // Pre-warm only the verified Mac Mini route. Never discover or warm every
+  // model on a local Ollama instance, because that can evict the intended model.
+  void warmUpOllamaModel({
+    baseUrl: MAC_QWEN_NATIVE_BASE_URL,
+    model: MAC_QWEN_MODEL_ID,
+    keepAlive: "10m",
     timeoutMs: 120_000,
   }).catch(() => {});
 

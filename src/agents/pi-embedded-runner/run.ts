@@ -30,6 +30,7 @@ import {
 } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
+import { isLocalOllamaProvider } from "../mac-qwen-route.js";
 import {
   ensureAuthProfileStore,
   getApiKeyForModel,
@@ -403,10 +404,11 @@ export async function runEmbeddedPiAgent(
       }
 
       const authStore = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
-      // Ollama is a local service that recovers in seconds. Clear any stale
-      // exponential-backoff cooldowns so a previous OOM/overload in an earlier
-      // session never blocks the fallback path in the current session.
-      clearProviderCooldowns(authStore, "ollama");
+      // Local Ollama services recover quickly. Clear only the provider being
+      // attempted; unrelated provider cooldowns must remain intact.
+      if (isLocalOllamaProvider(provider)) {
+        clearProviderCooldowns(authStore, provider);
+      }
       const preferredProfileId = params.authProfileId?.trim();
       let lockedProfileId = params.authProfileIdSource === "user" ? preferredProfileId : undefined;
       if (lockedProfileId) {

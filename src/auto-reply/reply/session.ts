@@ -4,7 +4,9 @@ import {
   buildTelegramTopicConversationId,
   parseTelegramChatIdFromTarget,
 } from "../../acp/conversation-id.js";
-import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { clearProviderCooldowns, ensureAuthProfileStore } from "../../agents/auth-profiles.js";
+import { isLocalOllamaProvider } from "../../agents/mac-qwen-route.js";
 import { clearBootstrapSnapshotOnSessionRollover } from "../../agents/bootstrap-cache.js";
 import { normalizeChatType } from "../../channels/chat-type.js";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -592,6 +594,21 @@ export async function initSessionState(params: {
   };
 
   // Run session plugin hooks (fire-and-forget)
+  if (isNewSession) {
+    try {
+      const authStore = ensureAuthProfileStore(resolveAgentDir(cfg, agentId), {
+        allowKeychainPrompt: false,
+      });
+      for (const provider of ["ollama", "custom-mac-ollama"]) {
+        if (isLocalOllamaProvider(provider)) {
+          clearProviderCooldowns(authStore, provider);
+        }
+      }
+    } catch (err) {
+      log.warn(`local provider cooldown clear failed for new session: ${String(err)}`);
+    }
+  }
+
   const hookRunner = getGlobalHookRunner();
   if (hookRunner && isNewSession) {
     const effectiveSessionId = sessionId ?? "";

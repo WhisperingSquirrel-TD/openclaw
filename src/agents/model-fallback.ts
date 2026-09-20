@@ -14,6 +14,7 @@ import {
   resolveAuthProfileOrder,
 } from "./auth-profiles.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
+import { isLocalOllamaProvider } from "./mac-qwen-route.js";
 import {
   coerceToFailoverError,
   describeFailoverError,
@@ -472,13 +473,6 @@ export async function runWithModelFallback<T>(params: {
   const authStore = params.cfg
     ? ensureAuthProfileStore(params.agentDir, { allowKeychainPrompt: false })
     : null;
-  // Clear stale exponential-backoff cooldowns for local providers (Ollama)
-  // before the candidate loop runs its cooldown checks. Ollama recovers in
-  // seconds and should never be skipped due to a cooldown carried over from
-  // a previous session or message.
-  if (authStore) {
-    clearProviderCooldowns(authStore, "ollama");
-  }
   const attempts: FallbackAttempt[] = [];
   let lastError: unknown;
 
@@ -488,6 +482,11 @@ export async function runWithModelFallback<T>(params: {
     const candidate = candidates[i];
     let runOptions: ModelFallbackRunOptions | undefined;
     if (authStore) {
+      // Clear only the local provider being attempted, immediately before
+      // resolving its profiles. Cloud-provider cooldown state is untouched.
+      if (isLocalOllamaProvider(candidate.provider)) {
+        clearProviderCooldowns(authStore, candidate.provider);
+      }
       const profileIds = resolveAuthProfileOrder({
         cfg: params.cfg,
         store: authStore,

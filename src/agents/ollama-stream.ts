@@ -571,64 +571,48 @@ export function createOllamaStreamFn(
 /**
  * Fire-and-forget Ollama model warm-up.
  *
- * Queries /api/tags to discover installed models, then sends a minimal
- * /api/generate request per model with `keep_alive` set so Ollama loads them
- * into RAM before the first real user request arrives.
+ * Sends one minimal /api/generate request for the explicitly supplied model
+ * with `keep_alive` set so Ollama loads that model into RAM before the first
+ * real user request arrives. Callers must supply the endpoint and model;
+ * this function never discovers or warms an entire Ollama registry.
  *
- * On a Pi 4, llama3.2:3b needs ~10–20 s to load from disk — pre-warming
- * prevents the first real request from timing out during model load.
+ * On a Pi 4, local models can need several seconds to load from disk —
+ * pre-warming prevents the first real request from timing out during model
+ * load.
  *
  * Safe to call unconditionally: if Ollama isn't running the fetch will fail
  * silently and nothing blows up.
  */
-export async function warmUpOllamaModels(params?: {
+export async function warmUpOllamaModel(params: {
   baseUrl?: string;
+  model?: string;
   keepAlive?: string;
-  /** ms budget for the entire warm-up sequence. Default: 60 000 */
+  /** ms budget for the single warm-up request. Default: 60 000 */
   timeoutMs?: number;
 }): Promise<void> {
-  const base = ((params?.baseUrl ?? OLLAMA_NATIVE_BASE_URL)).replace(/\/$/, "");
-  const keepAlive = params?.keepAlive ?? "10m";
-  const timeoutMs = params?.timeoutMs ?? 60_000;
-  const deadline = Date.now() + timeoutMs;
-
-  const remaining = () => Math.max(0, deadline - Date.now());
-
-  let models: string[] = [];
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), Math.min(5_000, remaining()));
-    const tagsRes = await fetch(`${base}/api/tags`, { signal: ctrl.signal }).finally(
-      () => clearTimeout(timer),
-    );
-    if (tagsRes.ok) {
-      const json = (await tagsRes.json()) as { models?: Array<{ name?: string }> };
-      models = (json.models ?? []).map((m) => m.name ?? "").filter(Boolean);
-    }
-  } catch {
+  const rawBase = params.baseUrl?.trim();
+  const model = params.model?.trim();
+  if (!rawBase || !model) {
+    return;
+  }
+  const base = rawBase.replace(/\/v1\/?$/, "").replace(/\/$/, "");
+  const keepAlive = params.keepAlive ?? "10m";
+  const timeoutMs = params.timeoutMs ?? 60_000;
+  if (timeoutMs <= 0) {
     return;
   }
 
-  for (const model of models) {
-    if (remaining() <= 0) {
-      break;
-    }
-    try {
-      const ctrl = new AbortController();
-      // Allow up to 90 s per model — Pi 4 can take 45–60 s to load a 2 GB
-      // model from a cold disk cache.  stream:false makes Ollama return a
-      // single JSON response instead of a streaming body so the fetch
-      // completes immediately once the model finishes loading.
-      const timer = setTimeout(() => ctrl.abort(), Math.min(90_000, remaining()));
-      await fetch(`${base}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, prompt: "", keep_alive: keepAlive, stream: false }),
-        signal: ctrl.signal,
-      }).finally(() => clearTimeout(timer));
-    } catch {
-      // best-effort — ignore per-model failures
-    }
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    await fetch(`${base}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, prompt: "", keep_alive: keepAlive, stream: false }),
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(timer));
+  } catch {
+    // best-effort — warm-up must never block gateway startup
   }
 }
 
