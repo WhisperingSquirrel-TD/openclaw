@@ -349,7 +349,6 @@ MAC_QWEN_MODEL_ID = "qwen3-coder-131k"
 MAC_QWEN_MODEL_REF = f"{MAC_QWEN_PROVIDER}/{MAC_QWEN_MODEL_ID}"
 MAC_QWEN_NATIVE_URL = "http://192.168.86.46:11434"
 MAC_QWEN_V1_URL = f"{MAC_QWEN_NATIVE_URL}/v1"
-MAC_QWEN_AUTH_MARKER = "ollama-local"
 MAC_QWEN_TIMEOUT_SECONDS = 1800
 MAC_QWEN_CONTEXT_WINDOW = 16384
 MAC_QWEN_MAX_TOKENS = 2048
@@ -405,9 +404,12 @@ def _qwen_provider_error(config: dict) -> str | None:
     if not isinstance(provider, dict):
         return f"provider {MAC_QWEN_PROVIDER} is missing"
 
+    api_key = provider.get("apiKey")
+    if not isinstance(api_key, str) or not api_key.strip():
+        return "provider field apiKey is missing or empty"
+
     expected_provider = {
         "baseUrl": f"{MAC_QWEN_V1_URL}",
-        "apiKey": MAC_QWEN_AUTH_MARKER,
         "api": "openai-completions",
         "timeoutSeconds": MAC_QWEN_TIMEOUT_SECONDS,
         "models": [{

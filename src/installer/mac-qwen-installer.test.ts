@@ -11,7 +11,9 @@ describe("Mac Mini Qwen installer gate", () => {
   it("writes the exact provider contract and timeout without selecting it immediately", () => {
     expect(installer).toContain("providers_cfg['custom-mac-ollama'] = {");
     expect(installer).toContain("'baseUrl': 'http://192.168.86.46:11434/v1'");
-    expect(installer).toContain("'apiKey': 'ollama-local'");
+    expect(installer).toContain("existing_mac_provider = providers_cfg.get('custom-mac-ollama')");
+    expect(installer).toContain("existing_mac_api_key = 'ollama-local'");
+    expect(installer).toContain("'apiKey': existing_mac_api_key");
     expect(installer).toContain("'api': 'openai-completions'");
     expect(installer).toContain("'timeoutSeconds': 1800");
     expect(installer).toContain("'id': 'qwen3-coder-131k'");

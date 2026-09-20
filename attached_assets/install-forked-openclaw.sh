@@ -705,9 +705,19 @@ providers_cfg = models_cfg.setdefault('providers', {})
 if not isinstance(providers_cfg, dict):
     models_cfg['providers'] = {}
     providers_cfg = models_cfg['providers']
+existing_mac_provider = providers_cfg.get('custom-mac-ollama')
+existing_mac_api_key = (
+    existing_mac_provider.get('apiKey')
+    if isinstance(existing_mac_provider, dict)
+    else None
+)
+if not isinstance(existing_mac_api_key, str) or not existing_mac_api_key.strip():
+    existing_mac_api_key = 'ollama-local'
 providers_cfg['custom-mac-ollama'] = {
     'baseUrl': 'http://192.168.86.46:11434/v1',
-    'apiKey': 'ollama-local',
+    # Preserve the key already used by this provider. Ollama is local and the
+    # bounded endpoint/sentinel checks below provide the actual verification.
+    'apiKey': existing_mac_api_key,
     'api': 'openai-completions',
     'timeoutSeconds': 1800,
     'models': [{

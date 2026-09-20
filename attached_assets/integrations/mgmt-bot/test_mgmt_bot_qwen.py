@@ -21,7 +21,7 @@ SPEC.loader.exec_module(mgmt_bot)
 def exact_qwen_provider():
     return {
         "baseUrl": "http://192.168.86.46:11434/v1",
-        "apiKey": "ollama-local",
+        "apiKey": "legacy-mac-provider-key",
         "api": "openai-completions",
         "timeoutSeconds": 1800,
         "models": [{
