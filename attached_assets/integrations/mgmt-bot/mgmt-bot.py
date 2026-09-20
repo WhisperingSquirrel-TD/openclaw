@@ -416,27 +416,17 @@ def _qwen_provider_error(config: dict) -> str | None:
     if not isinstance(api_key, str) or not api_key.strip():
         return "provider field apiKey is missing or empty"
 
-    expected_provider = {
-        "baseUrl": f"{MAC_QWEN_V1_URL}",
-        "api": "openai-completions",
-        "models": [{
-            "id": MAC_QWEN_MODEL_ID,
-            "name": MAC_QWEN_MODEL_ID,
-            "reasoning": False,
-            "input": ["text"],
-            "cost": {
-                "input": 0,
-                "output": 0,
-                "cacheRead": 0,
-                "cacheWrite": 0,
-            },
-            "contextWindow": MAC_QWEN_CONTEXT_WINDOW,
-            "maxTokens": MAC_QWEN_MAX_TOKENS,
-        }],
-    }
-    for key, expected in expected_provider.items():
-        if provider.get(key) != expected:
-            return f"provider field {key} is not the approved Qwen value"
+    if provider.get("baseUrl") != MAC_QWEN_V1_URL:
+        return "provider field baseUrl is not the approved Qwen value"
+    if provider.get("api") != "openai-completions":
+        return "provider field api is not the approved Qwen value"
+
+    provider_models = provider.get("models")
+    if not isinstance(provider_models, list) or not any(
+        isinstance(model, dict) and model.get("id") == MAC_QWEN_MODEL_ID
+        for model in provider_models
+    ):
+        return "provider models does not include the approved Qwen model ID"
 
     timeouts = config.get("agents", {}).get("defaults", {}).get(
         "providerTimeoutSeconds", {}

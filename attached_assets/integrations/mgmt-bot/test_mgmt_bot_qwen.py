@@ -177,6 +177,20 @@ class QwenManagementBotTests(unittest.TestCase):
 
         self.assertIsNone(mgmt_bot._qwen_provider_error(config))
 
+    def test_existing_qwen_model_metadata_is_not_rejected(self):
+        config = config_with_qwen()
+        model = config["models"]["providers"]["custom-mac-ollama"]["models"][0]
+        model.update(
+            name="Qwen Coder local",
+            reasoning=True,
+            input=["text", "image"],
+            cost={"input": 1, "output": 2},
+            contextWindow=131072,
+            maxTokens=4096,
+        )
+
+        self.assertIsNone(mgmt_bot._qwen_provider_error(config))
+
     def test_wrong_qwen_override_is_rejected_without_write_or_restart(self):
         self.env["OPENCLAW_LOCAL_QWEN30B_MODEL"] = "openai/gpt-5.6"
         with (
