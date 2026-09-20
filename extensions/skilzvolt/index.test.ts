@@ -102,10 +102,10 @@ describe("SkilzVolt plugin registration", () => {
     });
   });
 
-  it("exposes the fixed CRM SharePoint boundary only for an owner after explicit opt-in", () => {
+  it("exposes the generic SharePoint writer only for an owner after explicit opt-in", () => {
     const factories: OpenClawPluginToolFactory[] = [];
     const api = {
-      pluginConfig: { agentIds: ["main"], crmSharePointEnabled: true },
+      pluginConfig: { agentIds: ["main"], sharePointWriterEnabled: true },
       registerTool: vi.fn((factory: OpenClawPluginToolFactory) => factories.push(factory)),
       on: vi.fn(),
       logger: { info: vi.fn(), warn: vi.fn() },
@@ -113,10 +113,10 @@ describe("SkilzVolt plugin registration", () => {
 
     registerSkilzVolt(api);
 
-    const crmFactory = factories[4];
-    expect(crmFactory?.({ senderIsOwner: false })).toBeNull();
-    expect(crmFactory?.({ senderIsOwner: true })).toMatchObject({
-      name: "crm_sharepoint",
+    const writerFactory = factories[4];
+    expect(writerFactory?.({ senderIsOwner: false })).toBeNull();
+    expect(writerFactory?.({ senderIsOwner: true })).toMatchObject({
+      name: "sharepoint_write",
       ownerOnly: true,
     });
   });
@@ -170,17 +170,17 @@ describe("SkilzVolt plugin registration", () => {
     expect(readCurrentSkill).not.toHaveBeenCalled();
   });
 
-  it("automatically loads the live CRM skill before allowing the typed side-effect tool", async () => {
+  it("loads the current body for an unambiguous ordinary skill match", async () => {
     const entry = {
       skillId: "skill-crm-sharepoint",
       workspaceId: "workspace-1",
       name: "crm-sharepoint",
-      description: "Governed CRM and SharePoint handoff",
+      description: "Maintain CRM and SharePoint truth for accounts and meeting artifacts",
       currentVersionId: "version-1",
     };
     const live = {
       entry,
-      content: "CRM workflow",
+      content: "Use the bounded SharePoint writer for exact paths.",
       receipt: {
         receiptId: "receipt-1",
         skillId: entry.skillId,
@@ -188,14 +188,14 @@ describe("SkilzVolt plugin registration", () => {
         versionId: entry.currentVersionId,
         contentSha256: "a".repeat(64),
         readAt: 1,
-        purpose: "typed CRM SharePoint side-effect boundary",
+        purpose: "Keep CRM and SharePoint truth aligned",
         skillName: entry.name,
       },
       workflow: { requirements: [{ id: "processor-readback" }] },
     };
     vi.spyOn(SkilzVoltCatalogue.prototype, "getLines").mockResolvedValue({
       ok: true,
-      lines: ["- crm-sharepoint: Governed CRM and SharePoint handoff [SkilzVolt]"],
+      lines: ["- crm-sharepoint: Maintain CRM and SharePoint truth for accounts and meeting artifacts [SkilzVolt]"],
     });
     vi.spyOn(SkilzVoltCatalogue.prototype, "getEntries").mockReturnValue([entry]);
     const readCurrentSkill = vi
@@ -206,7 +206,7 @@ describe("SkilzVolt plugin registration", () => {
       handler: (...args: unknown[]) => unknown;
     }> = [];
     const api = {
-      pluginConfig: { agentIds: ["main"], crmSharePointEnabled: true },
+      pluginConfig: { agentIds: ["main"] },
       registerTool: vi.fn(),
       on: vi.fn((name: string, handler: (...args: unknown[]) => unknown) =>
         hooks.push({ name, handler }),
@@ -215,13 +215,14 @@ describe("SkilzVolt plugin registration", () => {
     } as unknown as OpenClawPluginApi;
 
     registerSkilzVolt(api);
-    const toolHook = hooks.find((hook) => hook.name === "before_tool_call");
-    const result = await toolHook?.handler(
-      { toolName: "crm_sharepoint", params: { action: "run_pending" } },
-      { runId: "run-crm-1" },
-    );
+    const promptHook = hooks.find((hook) => hook.name === "before_prompt_build");
+    const result = (await promptHook?.handler(
+      { prompt: "Please update crm-sharepoint for this account" },
+      { agentId: "main", runId: "run-crm-1" },
+    )) as { appendSystemContext?: string; block?: boolean } | undefined;
 
-    expect(result).toMatchObject({ governanceAuthorized: true });
+    expect(result?.block).toBeUndefined();
+    expect(result?.appendSystemContext).toContain("Use the bounded SharePoint writer");
     expect(readCurrentSkill).toHaveBeenCalledTimes(1);
   });
 });

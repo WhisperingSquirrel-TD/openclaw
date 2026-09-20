@@ -1352,21 +1352,17 @@ else
     warn "SharePoint queue processor not found at $SP_QUEUE_SRC — skipping"
 fi
 
-# The CRM SharePoint bridge is a fixed, owner-only OpenClaw tool. Copy the
-# handoff worker into the service workspace rather than exposing the mutable
-# checkout or a symlink to the gateway. The worker itself imports the
-# service-owned queue producer and never edits queue JSON directly.
-CRM_HANDOFF_SRC="$HOME/openclaw/.local/intake-repair/scripts/crm-capture-handoff.py"
-CRM_HANDOFF_DST="$HOME/.openclaw/workspace/scripts/crm-capture-handoff.py"
-CRM_LEDGER_SRC="$HOME/openclaw/.local/intake-repair/scripts/intake_ledger.py"
-CRM_LEDGER_DST="$HOME/.openclaw/workspace/scripts/intake_ledger.py"
-if [ -f "$CRM_HANDOFF_SRC" ] && [ -f "$CRM_LEDGER_SRC" ]; then
+# Install the normal bounded writer used by organisation skills. It is copied
+# rather than symlinked because the OpenClaw tool verifies the deployed helper
+# is a regular file before invoking it.
+SP_WRITER_SRC="$HOME/openclaw/attached_assets/integrations/microsoft/sharepoint_queue_writer.py"
+SP_WRITER_DST="$HOME/.openclaw/workspace/scripts/sharepoint-queue-writer.py"
+if [ -f "$SP_WRITER_SRC" ]; then
     mkdir -p "$HOME/.openclaw/workspace/scripts"
-    install -m 700 "$CRM_HANDOFF_SRC" "$CRM_HANDOFF_DST"
-    install -m 700 "$CRM_LEDGER_SRC" "$CRM_LEDGER_DST"
-    info "CRM SharePoint handoff bridge installed: $CRM_HANDOFF_DST"
+    install -m 700 "$SP_WRITER_SRC" "$SP_WRITER_DST"
+    info "SharePoint bounded writer installed: $SP_WRITER_DST"
 else
-    warn "CRM SharePoint handoff source not found — crm_sharepoint remains unavailable"
+    warn "SharePoint bounded writer not found at $SP_WRITER_SRC — skill writes will report unavailable"
 fi
 
 # The expense route is default-off. Its Python boundary is copied out of the
@@ -1433,6 +1429,7 @@ skilzvolt = entries.setdefault("skilzvolt", {})
 skilzvolt["enabled"] = True
 plugin_config = skilzvolt.setdefault("config", {})
 plugin_config["expenseSharePointEnabled"] = True
+plugin_config["sharePointWriterEnabled"] = True
 plugin_config["crmSharePointEnabled"] = True
 tools = config.setdefault("tools", {})
 also_allow = tools.setdefault("alsoAllow", [])

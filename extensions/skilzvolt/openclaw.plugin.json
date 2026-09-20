@@ -16,10 +16,10 @@
         "default": true,
         "description": "Allow the three governed SkilzVolt proposal operations."
       },
-      "crmSharePointEnabled": {
+      "sharePointWriterEnabled": {
         "type": "boolean",
         "default": false,
-        "description": "Explicitly enable the fixed owner-only CRM/SharePoint handoff after the workspace CRM worker and service-owned queue producer have been installed. Enabling SkilzVolt alone never enables this route."
+        "description": "Enable the owner-only bounded SharePoint writer used by organisation skills. It never exposes shell commands or direct queue-file editing."
       },
       "expenseSharePointEnabled": {
         "type": "boolean",
