@@ -37,8 +37,9 @@ describe("SkilzVolt plugin registration", () => {
 
     registerSkilzVolt(api);
 
-    expect(factories).toHaveLength(4);
+    expect(factories).toHaveLength(5);
     expect(factories.map((factory) => factory({ senderIsOwner: false }))).toEqual([
+      null,
       null,
       null,
       null,
@@ -57,6 +58,7 @@ describe("SkilzVolt plugin registration", () => {
       { name: "skilzvolt", ownerOnly: true },
       { name: "skilzvolt_workflow_proof", ownerOnly: true },
       { name: "skilzvolt_local_migration", ownerOnly: true },
+      undefined,
       undefined,
     ]);
 
@@ -96,6 +98,25 @@ describe("SkilzVolt plugin registration", () => {
     expect(expenseFactory?.({ senderIsOwner: false })).toBeNull();
     expect(expenseFactory?.({ senderIsOwner: true })).toMatchObject({
       name: "expense_sharepoint",
+      ownerOnly: true,
+    });
+  });
+
+  it("exposes the generic SharePoint writer only for an owner after explicit opt-in", () => {
+    const factories: OpenClawPluginToolFactory[] = [];
+    const api = {
+      pluginConfig: { agentIds: ["main"], sharePointWriterEnabled: true },
+      registerTool: vi.fn((factory: OpenClawPluginToolFactory) => factories.push(factory)),
+      on: vi.fn(),
+      logger: { info: vi.fn(), warn: vi.fn() },
+    } as unknown as OpenClawPluginApi;
+
+    registerSkilzVolt(api);
+
+    const writerFactory = factories[4];
+    expect(writerFactory?.({ senderIsOwner: false })).toBeNull();
+    expect(writerFactory?.({ senderIsOwner: true })).toMatchObject({
+      name: "sharepoint_write",
       ownerOnly: true,
     });
   });
@@ -147,5 +168,62 @@ describe("SkilzVolt plugin registration", () => {
     expect(result?.appendSystemContext).toContain("Intent candidates only");
     expect(result?.appendSystemContext).toContain("Do not block");
     expect(readCurrentSkill).not.toHaveBeenCalled();
+  });
+  it("loads the current body for an unambiguous ordinary skill match", async () => {
+    const entry = {
+      skillId: "skill-crm-sharepoint",
+      workspaceId: "workspace-1",
+      name: "crm-sharepoint",
+      description: "Maintain CRM and SharePoint truth for accounts and meeting artifacts",
+      currentVersionId: "version-1",
+    };
+    const live = {
+      entry,
+      content: "Use the bounded SharePoint writer for exact paths.",
+      receipt: {
+        receiptId: "receipt-1",
+        skillId: entry.skillId,
+        workspaceId: entry.workspaceId,
+        versionId: entry.currentVersionId,
+        contentSha256: "a".repeat(64),
+        readAt: 1,
+        purpose: "Keep CRM and SharePoint truth aligned",
+        skillName: entry.name,
+      },
+      workflow: { requirements: [{ id: "processor-readback" }] },
+    };
+    vi.spyOn(SkilzVoltCatalogue.prototype, "getLines").mockResolvedValue({
+      ok: true,
+      lines: [
+        "- crm-sharepoint: Maintain CRM and SharePoint truth for accounts and meeting artifacts [SkilzVolt]",
+      ],
+    });
+    vi.spyOn(SkilzVoltCatalogue.prototype, "getEntries").mockReturnValue([entry]);
+    const readCurrentSkill = vi
+      .spyOn(SkilzVoltCatalogue.prototype, "readCurrentSkill")
+      .mockResolvedValue(live);
+    const hooks: Array<{
+      name: string;
+      handler: (...args: unknown[]) => unknown;
+    }> = [];
+    const api = {
+      pluginConfig: { agentIds: ["main"] },
+      registerTool: vi.fn(),
+      on: vi.fn((name: string, handler: (...args: unknown[]) => unknown) =>
+        hooks.push({ name, handler }),
+      ),
+      logger: { info: vi.fn(), warn: vi.fn() },
+    } as unknown as OpenClawPluginApi;
+
+    registerSkilzVolt(api);
+    const promptHook = hooks.find((hook) => hook.name === "before_prompt_build");
+    const result = (await promptHook?.handler(
+      { prompt: "Please update crm-sharepoint for this account" },
+      { agentId: "main", runId: "run-crm-1" },
+    )) as { appendSystemContext?: string; block?: boolean } | undefined;
+
+    expect(result?.block).toBeUndefined();
+    expect(result?.appendSystemContext).toContain("Use the bounded SharePoint writer");
+    expect(readCurrentSkill).toHaveBeenCalledTimes(1);
   });
 });

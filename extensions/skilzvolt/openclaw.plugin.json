@@ -16,6 +16,11 @@
         "default": true,
         "description": "Allow the three governed SkilzVolt proposal operations."
       },
+      "sharePointWriterEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Enable the owner-only bounded SharePoint writer used by organisation skills. It never exposes shell commands or direct queue-file editing."
+      },
       "expenseSharePointEnabled": {
         "type": "boolean",
         "default": false,

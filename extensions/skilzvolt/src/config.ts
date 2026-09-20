@@ -18,6 +18,7 @@ export const DEFAULT_ORGANISATION_SKILLS = [
 export type SkilzVoltConfig = {
   connectionKeyEnv: string;
   allowProposals: boolean;
+  sharePointWriterEnabled: boolean;
   expenseSharePointEnabled: boolean;
   agentIds: string[];
   organisationSkillNames: string[];
@@ -47,6 +48,7 @@ export function resolveSkilzVoltConfig(raw: unknown): SkilzVoltConfig {
   return {
     connectionKeyEnv,
     allowProposals: value.allowProposals !== false,
+    sharePointWriterEnabled: value.sharePointWriterEnabled === true,
     // This local finance boundary is deliberately independent of enabling the
     // SkilzVolt RPC adapter. A deployment must opt in explicitly.
     expenseSharePointEnabled: value.expenseSharePointEnabled === true,
