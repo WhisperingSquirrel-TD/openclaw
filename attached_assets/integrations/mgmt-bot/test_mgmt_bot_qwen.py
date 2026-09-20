@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -122,6 +123,23 @@ class QwenManagementBotTests(unittest.TestCase):
         self.assertTrue(ok, detail)
         self.assertEqual(detail, "QWEN-LOCAL-OK")
         probe.assert_called_once()
+
+    def test_openclaw_probe_reports_redacted_failure_detail(self):
+        with patch.object(
+            mgmt_bot.subprocess,
+            "run",
+            return_value=SimpleNamespace(
+                returncode=7,
+                stdout="",
+                stderr="provider custom-mac-ollama apiKey=secret-value",
+            ),
+        ):
+            ok, detail = mgmt_bot._qwen_openclaw_probe(Path("/tmp/qwen-probe.json"))
+
+        self.assertFalse(ok)
+        self.assertIn("exit=7", detail)
+        self.assertIn("apiKey=[redacted]", detail)
+        self.assertNotIn("secret-value", detail)
 
     def test_wrong_qwen_override_is_rejected_without_write_or_restart(self):
         self.env["OPENCLAW_LOCAL_QWEN30B_MODEL"] = "openai/gpt-5.6"

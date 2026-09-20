@@ -40,10 +40,12 @@ describe("Mac Mini Qwen installer gate", () => {
     expect(modelsCheck).toBeGreaterThan(tagsCheck);
     expect(sentinelCheck).toBeGreaterThan(modelsCheck);
     expect(activation).toBeGreaterThan(sentinelCheck);
+    expect(installer.slice(modelsCheck, activation)).toContain("OPENCLAW_CONFIG_PATH=");
     expect(installer.slice(modelsCheck, activation)).toContain(
-      "OPENCLAW_CONFIG_PATH=",
+      'OPENCLAW_STATE_DIR="$PRIMARY_STATE_DIR"',
     );
     expect(installer.slice(modelsCheck, activation)).toContain("--timeout 1800");
+    expect(installer.slice(modelsCheck, activation)).toContain("stderr=${MAC_QWEN_PROBE_DETAIL}");
   });
 
   it("cannot fall back to the retired or unmanaged L1 launchers", () => {
@@ -51,8 +53,6 @@ describe("Mac Mini Qwen installer gate", () => {
     expect(installer).not.toContain("l1-stop.sh");
     expect(installer).not.toContain("19789");
     expect(installer).toContain('PRIMARY_GATEWAY_SERVICE="openclaw-gateway.service"');
-    expect(installer).toContain(
-      'systemctl --user restart "$PRIMARY_GATEWAY_SERVICE"',
-    );
+    expect(installer).toContain('systemctl --user restart "$PRIMARY_GATEWAY_SERVICE"');
   });
 });

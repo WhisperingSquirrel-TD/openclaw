@@ -488,7 +488,18 @@ def _qwen_openclaw_probe(probe_config: Path) -> tuple[bool, str]:
         return False, f"OpenClaw probe could not start: {exc}"
 
     if result.returncode != 0:
-        return False, "OpenClaw-resolved sentinel request failed"
+        detail = re.sub(
+            r"(api[-_ ]?key|authorization|bearer|token|secret|password)([=: ]+)\S+",
+            r"\1\2[redacted]",
+            (result.stderr or "").replace("\n", " "),
+            flags=re.IGNORECASE,
+        )
+        detail = re.sub(r"\s+", " ", detail).strip()[:900] or "<no stderr>"
+        return (
+            False,
+            "OpenClaw-resolved sentinel request failed "
+            f"(exit={result.returncode}; stderr={detail})",
+        )
     try:
         payload = json.loads(result.stdout)
         texts = [

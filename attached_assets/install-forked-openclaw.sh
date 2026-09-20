@@ -2329,14 +2329,25 @@ then
 fi
 chmod 600 "$MAC_QWEN_PROBE_CONFIG"
 
-if ! OPENCLAW_CONFIG_PATH="$MAC_QWEN_PROBE_CONFIG" \
-     OPENCLAW_NONINTERACTIVE=1 \
-     timeout --signal=TERM 1810s \
-     openclaw agent --local --agent main \
-       --message "Reply with exactly QWEN-LOCAL-OK and nothing else." \
-       --timeout 1800 --json \
-       >"$MAC_QWEN_PROBE_OUTPUT" 2>"$MAC_QWEN_PROBE_ERROR"; then
-    fail "Mac Mini Qwen activation blocked: OpenClaw-resolved sentinel request failed"
+if OPENCLAW_CONFIG_PATH="$MAC_QWEN_PROBE_CONFIG" \
+   OPENCLAW_STATE_DIR="$PRIMARY_STATE_DIR" \
+   OPENCLAW_NONINTERACTIVE=1 \
+   timeout --signal=TERM 1810s \
+   openclaw agent --local --agent main \
+     --message "Reply with exactly QWEN-LOCAL-OK and nothing else." \
+     --timeout 1800 --json \
+     >"$MAC_QWEN_PROBE_OUTPUT" 2>"$MAC_QWEN_PROBE_ERROR"; then
+    :
+else
+    MAC_QWEN_PROBE_RC=$?
+    MAC_QWEN_PROBE_DETAIL="$(
+        tail -n 12 "$MAC_QWEN_PROBE_ERROR" 2>/dev/null |
+            tr '\n' ' ' |
+            sed -E 's/[[:space:]]+/ /g; s/(api[-_ ]?key|authorization|bearer|token|secret|password)([=: ]+)[^ ]+/\1\2[redacted]/Ig' |
+            cut -c1-900
+    )"
+    [ -n "$MAC_QWEN_PROBE_DETAIL" ] || MAC_QWEN_PROBE_DETAIL="<no stderr>"
+    fail "Mac Mini Qwen activation blocked: OpenClaw-resolved sentinel request failed (exit=${MAC_QWEN_PROBE_RC}; stderr=${MAC_QWEN_PROBE_DETAIL})"
 fi
 if ! python3 - "$MAC_QWEN_PROBE_OUTPUT" <<'PYEOF'
 import json, sys
