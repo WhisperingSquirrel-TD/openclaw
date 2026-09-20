@@ -341,6 +341,223 @@ def _set_model(config: dict, model: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Primary Mac Mini Qwen route verification
+# ---------------------------------------------------------------------------
+
+MAC_QWEN_PROVIDER = "custom-mac-ollama"
+MAC_QWEN_MODEL_ID = "qwen3-coder-131k"
+MAC_QWEN_MODEL_REF = f"{MAC_QWEN_PROVIDER}/{MAC_QWEN_MODEL_ID}"
+MAC_QWEN_NATIVE_URL = "http://192.168.86.46:11434"
+MAC_QWEN_V1_URL = f"{MAC_QWEN_NATIVE_URL}/v1"
+MAC_QWEN_AUTH_MARKER = "ollama-local"
+MAC_QWEN_TIMEOUT_SECONDS = 1800
+MAC_QWEN_CONTEXT_WINDOW = 16384
+MAC_QWEN_MAX_TOKENS = 2048
+MAC_QWEN_SENTINEL = "QWEN-LOCAL-OK"
+MAC_QWEN_PRIMARY_STATE_DIR = Path("/home/tomdean88/.openclaw")
+MAC_QWEN_PRIMARY_CONFIG_PATH = MAC_QWEN_PRIMARY_STATE_DIR / "openclaw.json"
+MAC_QWEN_PRIMARY_SERVICE = "openclaw-gateway.service"
+
+
+def _qwen_primary_boundary_error() -> str | None:
+    """Reject stale installs, alternate state dirs, and service overrides."""
+    configured_state = Path(
+        _cfg("OPENCLAW_STATE_DIR", str(STATE_DIR))
+    ).expanduser().resolve()
+    configured_config = _config_path().expanduser().resolve()
+    expected_state = MAC_QWEN_PRIMARY_STATE_DIR.expanduser().resolve()
+    expected_config = MAC_QWEN_PRIMARY_CONFIG_PATH.expanduser().resolve()
+
+    if configured_state != expected_state:
+        return (
+            "state directory is not the primary installation "
+            f"({configured_state})"
+        )
+    if configured_config != expected_config:
+        return (
+            "config path is not the primary installation "
+            f"({configured_config})"
+        )
+    if _service() != MAC_QWEN_PRIMARY_SERVICE:
+        return (
+            "service is not the primary gateway "
+            f"({_service()})"
+        )
+    return None
+
+
+def _qwen_http_json(url: str) -> dict:
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("endpoint returned a non-object JSON response")
+    return payload
+
+
+def _qwen_provider_error(config: dict) -> str | None:
+    providers = config.get("models", {}).get("providers", {})
+    provider = providers.get(MAC_QWEN_PROVIDER) if isinstance(providers, dict) else None
+    if not isinstance(provider, dict):
+        return f"provider {MAC_QWEN_PROVIDER} is missing"
+
+    expected_provider = {
+        "baseUrl": f"{MAC_QWEN_V1_URL}",
+        "apiKey": MAC_QWEN_AUTH_MARKER,
+        "api": "openai-completions",
+        "timeoutSeconds": MAC_QWEN_TIMEOUT_SECONDS,
+        "models": [{
+            "id": MAC_QWEN_MODEL_ID,
+            "name": MAC_QWEN_MODEL_ID,
+            "reasoning": False,
+            "input": ["text"],
+            "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+            },
+            "contextWindow": MAC_QWEN_CONTEXT_WINDOW,
+            "maxTokens": MAC_QWEN_MAX_TOKENS,
+        }],
+    }
+    for key, expected in expected_provider.items():
+        if provider.get(key) != expected:
+            return f"provider field {key} is not the approved Qwen value"
+
+    timeouts = config.get("agents", {}).get("defaults", {}).get(
+        "providerTimeoutSeconds", {}
+    )
+    if not isinstance(timeouts, dict) or timeouts.get(MAC_QWEN_PROVIDER) != MAC_QWEN_TIMEOUT_SECONDS:
+        return "agents.defaults.providerTimeoutSeconds is not 1800 for Qwen"
+    return None
+
+
+def _qwen_probe_config(config: dict, target: Path) -> None:
+    """Write a probe-only config without changing the installed default."""
+    probe = json.loads(json.dumps(config))
+    defaults = probe.setdefault("agents", {}).setdefault("defaults", {})
+    model = defaults.get("model")
+    model = dict(model) if isinstance(model, dict) else {}
+    model["primary"] = MAC_QWEN_MODEL_REF
+    model["fallbacks"] = []
+    defaults["model"] = model
+
+    for entry in probe.get("agents", {}).get("list", []):
+        if isinstance(entry, dict) and entry.get("id") == "main":
+            entry_model = entry.get("model")
+            entry_model = dict(entry_model) if isinstance(entry_model, dict) else {}
+            entry_model["primary"] = MAC_QWEN_MODEL_REF
+            entry_model["fallbacks"] = []
+            entry["model"] = entry_model
+
+    target.write_text(json.dumps(probe, indent=2) + "\n")
+    target.chmod(0o600)
+
+
+def _qwen_openclaw_probe(probe_config: Path) -> tuple[bool, str]:
+    """Resolve the exact model through OpenClaw and require the exact sentinel."""
+    env = dict(os.environ)
+    env["OPENCLAW_CONFIG_PATH"] = str(probe_config)
+    env["OPENCLAW_STATE_DIR"] = str(MAC_QWEN_PRIMARY_STATE_DIR)
+    env["OPENCLAW_NONINTERACTIVE"] = "1"
+    try:
+        result = subprocess.run(
+            [
+                "openclaw",
+                "agent",
+                "--local",
+                "--agent",
+                "main",
+                "--message",
+                "Reply with exactly QWEN-LOCAL-OK and nothing else.",
+                "--timeout",
+                str(MAC_QWEN_TIMEOUT_SECONDS),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=MAC_QWEN_TIMEOUT_SECONDS + 10,
+            env=env,
+        )
+    except Exception as exc:
+        return False, f"OpenClaw probe could not start: {exc}"
+
+    if result.returncode != 0:
+        return False, "OpenClaw-resolved sentinel request failed"
+    try:
+        payload = json.loads(result.stdout)
+        texts = [
+            str(item.get("text", "")).strip()
+            for item in (payload.get("payloads") or [])
+            if isinstance(item, dict)
+        ]
+    except Exception:
+        return False, "OpenClaw probe returned invalid JSON"
+    if texts != [MAC_QWEN_SENTINEL]:
+        return False, "sentinel did not return exactly QWEN-LOCAL-OK"
+    return True, MAC_QWEN_SENTINEL
+
+
+def _verify_qwen_route(config: dict) -> tuple[bool, str]:
+    """Verify the route completely before the bot writes or restarts anything."""
+    boundary_error = _qwen_primary_boundary_error()
+    if boundary_error:
+        return False, f"primary installation boundary rejected: {boundary_error}"
+
+    provider_error = _qwen_provider_error(config)
+    if provider_error:
+        return False, provider_error
+
+    try:
+        tags = _qwen_http_json(f"{MAC_QWEN_NATIVE_URL}/api/tags")
+        names = [
+            str(item.get("name", "")).strip()
+            for item in (tags.get("models") or [])
+            if isinstance(item, dict) and str(item.get("name", "")).strip()
+        ]
+        allowed_names = {
+            MAC_QWEN_MODEL_ID,
+            f"{MAC_QWEN_MODEL_ID}:latest",
+        }
+        matches = [name for name in names if name in allowed_names]
+        if len(matches) != 1:
+            return False, "exact qwen3-coder-131k model is not uniquely present in /api/tags"
+
+        v1_models = _qwen_http_json(f"{MAC_QWEN_V1_URL}/models")
+        ids = [
+            str(item.get("id", "")).strip()
+            for item in (v1_models.get("data") or [])
+            if isinstance(item, dict) and str(item.get("id", "")).strip()
+        ]
+        if not allowed_names.intersection(ids):
+            return False, "exact qwen3-coder-131k model is absent from /v1/models"
+    except Exception as exc:
+        return False, f"Mac Mini Qwen endpoint verification failed: {exc}"
+
+    probe_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            prefix=".openclaw-qwen-probe-",
+            dir=MAC_QWEN_PRIMARY_STATE_DIR,
+            delete=False,
+        ) as handle:
+            probe_path = Path(handle.name)
+        _qwen_probe_config(config, probe_path)
+        return _qwen_openclaw_probe(probe_path)
+    except Exception as exc:
+        return False, f"OpenClaw probe setup failed: {exc}"
+    finally:
+        if probe_path is not None:
+            probe_path.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
 # systemd helpers
 # ---------------------------------------------------------------------------
 
@@ -665,9 +882,38 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
     import re as _re
     model = _re.sub(r'^export\s+\S+=', '', model).rstrip(".")
 
+    # Unlike the other model commands, Qwen is a fixed, fail-closed route.
+    # Never let an environment override redirect this command to a cloud model,
+    # an old IP-encoded provider, or a different local model.
+    if provider == "qwen30b" and model != MAC_QWEN_MODEL_REF:
+        send(
+            token,
+            chat_id,
+            "❌ Qwen activation blocked: "
+            f"`{env_var}` must resolve to the exact approved route "
+            f"`{MAC_QWEN_MODEL_REF}`.",
+        )
+        _audit(
+            f"cmd_switch rejected provider=qwen30b requested={model} "
+            "reason=noncanonical-route"
+        )
+        return
+
     try:
         config  = _read_config()
         provider_id = model.split("/", 1)[0] if "/" in model else gateway_prefix
+        if provider == "qwen30b":
+            verified, detail = _verify_qwen_route(config)
+            if not verified:
+                _audit(f"cmd_switch qwen verification failed: {detail}")
+                send(
+                    token,
+                    chat_id,
+                    "❌ Qwen activation blocked — default unchanged.\n"
+                    f"Reason: {detail}",
+                )
+                return
+            _audit(f"cmd_switch qwen route verified: {detail}")
         if provider_id.startswith("custom-") and provider_id not in config.get("models", {}).get("providers", {}):
             send(token, chat_id,
                  f"❌ Provider {provider_id} is not configured in openclaw.json yet.\n"
