@@ -37,8 +37,9 @@ describe("SkilzVolt plugin registration", () => {
 
     registerSkilzVolt(api);
 
-    expect(factories).toHaveLength(4);
+    expect(factories).toHaveLength(5);
     expect(factories.map((factory) => factory({ senderIsOwner: false }))).toEqual([
+      null,
       null,
       null,
       null,
@@ -57,6 +58,7 @@ describe("SkilzVolt plugin registration", () => {
       { name: "skilzvolt", ownerOnly: true },
       { name: "skilzvolt_workflow_proof", ownerOnly: true },
       { name: "skilzvolt_local_migration", ownerOnly: true },
+      undefined,
       undefined,
     ]);
 
@@ -96,6 +98,25 @@ describe("SkilzVolt plugin registration", () => {
     expect(expenseFactory?.({ senderIsOwner: false })).toBeNull();
     expect(expenseFactory?.({ senderIsOwner: true })).toMatchObject({
       name: "expense_sharepoint",
+      ownerOnly: true,
+    });
+  });
+
+  it("exposes the fixed CRM SharePoint boundary only for an owner after explicit opt-in", () => {
+    const factories: OpenClawPluginToolFactory[] = [];
+    const api = {
+      pluginConfig: { agentIds: ["main"], crmSharePointEnabled: true },
+      registerTool: vi.fn((factory: OpenClawPluginToolFactory) => factories.push(factory)),
+      on: vi.fn(),
+      logger: { info: vi.fn(), warn: vi.fn() },
+    } as unknown as OpenClawPluginApi;
+
+    registerSkilzVolt(api);
+
+    const crmFactory = factories[4];
+    expect(crmFactory?.({ senderIsOwner: false })).toBeNull();
+    expect(crmFactory?.({ senderIsOwner: true })).toMatchObject({
+      name: "crm_sharepoint",
       ownerOnly: true,
     });
   });
@@ -147,5 +168,60 @@ describe("SkilzVolt plugin registration", () => {
     expect(result?.appendSystemContext).toContain("Intent candidates only");
     expect(result?.appendSystemContext).toContain("Do not block");
     expect(readCurrentSkill).not.toHaveBeenCalled();
+  });
+
+  it("automatically loads the live CRM skill before allowing the typed side-effect tool", async () => {
+    const entry = {
+      skillId: "skill-crm-sharepoint",
+      workspaceId: "workspace-1",
+      name: "crm-sharepoint",
+      description: "Governed CRM and SharePoint handoff",
+      currentVersionId: "version-1",
+    };
+    const live = {
+      entry,
+      content: "CRM workflow",
+      receipt: {
+        receiptId: "receipt-1",
+        skillId: entry.skillId,
+        workspaceId: entry.workspaceId,
+        versionId: entry.currentVersionId,
+        contentSha256: "a".repeat(64),
+        readAt: 1,
+        purpose: "typed CRM SharePoint side-effect boundary",
+        skillName: entry.name,
+      },
+      workflow: { requirements: [{ id: "processor-readback" }] },
+    };
+    vi.spyOn(SkilzVoltCatalogue.prototype, "getLines").mockResolvedValue({
+      ok: true,
+      lines: ["- crm-sharepoint: Governed CRM and SharePoint handoff [SkilzVolt]"],
+    });
+    vi.spyOn(SkilzVoltCatalogue.prototype, "getEntries").mockReturnValue([entry]);
+    const readCurrentSkill = vi
+      .spyOn(SkilzVoltCatalogue.prototype, "readCurrentSkill")
+      .mockResolvedValue(live);
+    const hooks: Array<{
+      name: string;
+      handler: (...args: unknown[]) => unknown;
+    }> = [];
+    const api = {
+      pluginConfig: { agentIds: ["main"], crmSharePointEnabled: true },
+      registerTool: vi.fn(),
+      on: vi.fn((name: string, handler: (...args: unknown[]) => unknown) =>
+        hooks.push({ name, handler }),
+      ),
+      logger: { info: vi.fn(), warn: vi.fn() },
+    } as unknown as OpenClawPluginApi;
+
+    registerSkilzVolt(api);
+    const toolHook = hooks.find((hook) => hook.name === "before_tool_call");
+    const result = await toolHook?.handler(
+      { toolName: "crm_sharepoint", params: { action: "run_pending" } },
+      { runId: "run-crm-1" },
+    );
+
+    expect(result).toMatchObject({ governanceAuthorized: true });
+    expect(readCurrentSkill).toHaveBeenCalledTimes(1);
   });
 });

@@ -16,6 +16,11 @@
         "default": true,
         "description": "Allow the three governed SkilzVolt proposal operations."
       },
+      "crmSharePointEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Explicitly enable the fixed owner-only CRM/SharePoint handoff after the workspace CRM worker and service-owned queue producer have been installed. Enabling SkilzVolt alone never enables this route."
+      },
       "expenseSharePointEnabled": {
         "type": "boolean",
         "default": false,
