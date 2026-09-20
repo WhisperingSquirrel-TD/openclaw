@@ -419,7 +419,6 @@ def _qwen_provider_error(config: dict) -> str | None:
     expected_provider = {
         "baseUrl": f"{MAC_QWEN_V1_URL}",
         "api": "openai-completions",
-        "timeoutSeconds": MAC_QWEN_TIMEOUT_SECONDS,
         "models": [{
             "id": MAC_QWEN_MODEL_ID,
             "name": MAC_QWEN_MODEL_ID,
@@ -442,8 +441,17 @@ def _qwen_provider_error(config: dict) -> str | None:
     timeouts = config.get("agents", {}).get("defaults", {}).get(
         "providerTimeoutSeconds", {}
     )
-    if not isinstance(timeouts, dict) or timeouts.get(MAC_QWEN_PROVIDER) != MAC_QWEN_TIMEOUT_SECONDS:
-        return "agents.defaults.providerTimeoutSeconds is not 1800 for Qwen"
+    configured_timeout = (
+        timeouts.get(MAC_QWEN_PROVIDER)
+        if isinstance(timeouts, dict)
+        else None
+    )
+    if configured_timeout is not None and (
+        isinstance(configured_timeout, bool)
+        or not isinstance(configured_timeout, (int, float))
+        or configured_timeout <= 0
+    ):
+        return "agents.defaults.providerTimeoutSeconds is invalid for Qwen"
     return None
 
 

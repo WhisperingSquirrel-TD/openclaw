@@ -168,6 +168,15 @@ class QwenManagementBotTests(unittest.TestCase):
             config["plugins"]["entries"]["skilzvolt"]["config"]["crmSharePointEnabled"]
         )
 
+    def test_existing_qwen_timeout_is_not_required_to_be_1800(self):
+        config = config_with_qwen()
+        config["models"]["providers"]["custom-mac-ollama"]["timeoutSeconds"] = 300
+        config["agents"]["defaults"]["providerTimeoutSeconds"][
+            "custom-mac-ollama"
+        ] = 300
+
+        self.assertIsNone(mgmt_bot._qwen_provider_error(config))
+
     def test_wrong_qwen_override_is_rejected_without_write_or_restart(self):
         self.env["OPENCLAW_LOCAL_QWEN30B_MODEL"] = "openai/gpt-5.6"
         with (
