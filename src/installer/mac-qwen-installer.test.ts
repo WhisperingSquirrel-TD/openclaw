@@ -18,6 +18,8 @@ describe("Mac Mini Qwen installer gate", () => {
     expect(installer).toContain("'timeoutSeconds': 1800");
     expect(installer).toContain("skilzvolt_config.pop('crmSharePointEnabled', None)");
     expect(installer).not.toContain('plugin_config["crmSharePointEnabled"] = True');
+    expect(installer).toContain('model["fallbacks"] = []');
+    expect(installer).toContain('entry_model["fallbacks"] = []');
     expect(installer).toContain("'id': 'qwen3-coder-131k'");
     expect(installer).toContain("'reasoning': False");
     expect(installer).toContain("'input': ['text']");

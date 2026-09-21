@@ -23,6 +23,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+INTEGRATIONS_DIR = Path(__file__).resolve().parents[1]
+if str(INTEGRATIONS_DIR) not in sys.path:
+    sys.path.insert(0, str(INTEGRATIONS_DIR))
+from model_route import apply_exclusive_model, clear_session_model_routes  # noqa: E402
+
 
 def _load_dotenv() -> None:
     env_file = Path.home() / ".openclaw" / ".env"
@@ -96,12 +101,7 @@ def _sanitize_model(model: str) -> str:
 
 def _set_model(config: dict, model: str) -> dict:
     model = _sanitize_model(model)
-    try:
-        config["agents"]["defaults"]["model"]["primary"] = model
-    except (KeyError, TypeError):
-        config.setdefault("agents", {}).setdefault("defaults", {}) \
-              .setdefault("model", {})["primary"] = model
-    return config
+    return apply_exclusive_model(config, model)
 
 
 def _get_current_model(config: dict) -> str:
@@ -154,29 +154,30 @@ def main() -> None:
         sys.exit(1)
 
     current = _get_current_model(config)
-    if current == CODEX_MODEL:
-        log(f"Config already shows {CODEX_MODEL} — skipping write, but restarting gateway anyway")
-        log("(Gateway may be running a different model if a previous restart failed)")
-        _chattr("+i", CONFIG_PATH)
-        if not _restart_gateway():
-            sys.exit(1)
-        log("Daily reset complete")
-        return
-
+    before_exclusive = json.dumps(config, sort_keys=True)
     config = _set_model(config, CODEX_MODEL)
+    config_changed = json.dumps(config, sort_keys=True) != before_exclusive
 
-    try:
-        with CONFIG_PATH.open("w") as f:
-            json.dump(config, f, indent=2)
-        log(f"Config written: {current} → {CODEX_MODEL}")
-    except Exception as e:
-        log(f"ERROR: Could not write config: {e}")
-        log("FLAG TO TOM: daily-reset.py could not update openclaw.json — "
-            "likely still immutable (chattr -i failed). "
-            "Check if 'sudo chattr' is allowed without password in cron.")
-        _chattr("+i", CONFIG_PATH)
-        sys.exit(1)
+    if config_changed:
+        try:
+            with CONFIG_PATH.open("w") as f:
+                json.dump(config, f, indent=2)
+            log(f"Config enforced: {current} → {CODEX_MODEL} (exclusive, no fallbacks)")
+        except Exception as e:
+            log(f"ERROR: Could not write config: {e}")
+            log("FLAG TO TOM: daily-reset.py could not update openclaw.json — "
+                "likely still immutable (chattr -i failed). "
+                "Check if 'sudo chattr' is allowed without password in cron.")
+            _chattr("+i", CONFIG_PATH)
+            sys.exit(1)
+    else:
+        log(f"Config already exclusively uses {CODEX_MODEL}")
 
+    files_changed, entries_changed = clear_session_model_routes(CONFIG_PATH.parent)
+    log(
+        f"Cleared persisted session routes: files={files_changed}, "
+        f"entries={entries_changed}"
+    )
     _chattr("+i", CONFIG_PATH)
 
     if not _restart_gateway():

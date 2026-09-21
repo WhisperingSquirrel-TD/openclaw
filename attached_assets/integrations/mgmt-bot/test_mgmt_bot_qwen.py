@@ -102,6 +102,81 @@ class QwenManagementBotTests(unittest.TestCase):
             self.config_path,
         )
 
+    def test_model_switch_makes_global_and_agent_routes_exclusive(self):
+        config = config_with_qwen()
+        config["agents"]["list"].append({
+            "id": "worker",
+            "model": {
+                "primary": "custom-mac-ollama/qwen3-coder-131k",
+                "fallbacks": ["openai-codex/gpt-5.6-terra"],
+            },
+        })
+
+        mgmt_bot._set_model(config, "openai-codex/gpt-5.6-terra")
+
+        self.assertEqual(
+            config["agents"]["defaults"]["model"],
+            {"primary": "openai-codex/gpt-5.6-terra", "fallbacks": []},
+        )
+        for entry in config["agents"]["list"]:
+            self.assertEqual(
+                entry["model"],
+                {"primary": "openai-codex/gpt-5.6-terra", "fallbacks": []},
+            )
+
+    def test_switch_clears_persisted_session_routes_even_when_default_matches(self):
+        session_path = self.state_dir / "agents" / "main" / "sessions" / "sessions.json"
+        session_path.parent.mkdir(parents=True)
+        session_path.write_text(json.dumps({
+            "telegram:main": {
+                "sessionId": "session-1",
+                "providerOverride": "custom-mac-ollama",
+                "modelOverride": "qwen3-coder-131k",
+                "modelProvider": "custom-mac-ollama",
+                "model": "qwen3-coder-131k",
+            },
+        }))
+        config = config_with_qwen()
+        config["agents"]["defaults"]["model"] = {
+            "primary": "openai-codex/gpt-5.6-terra",
+            "fallbacks": [],
+        }
+        config["agents"]["list"][0]["model"] = {
+            "primary": "openai-codex/gpt-5.6-terra",
+            "fallbacks": [],
+        }
+        self.config_path.write_text(json.dumps(config))
+        self.env["OPENCLAW_CODEX56_TERRA_MODEL"] = "openai-codex/gpt-5.6-terra"
+        written = {}
+
+        def capture_write(updated):
+            written.update(updated)
+            self.config_path.write_text(json.dumps(updated))
+
+        with (
+            patch.dict(os.environ, self.env, clear=True),
+            patch.object(mgmt_bot, "_write_config", side_effect=capture_write),
+            patch.object(
+                mgmt_bot,
+                "_restart_gateway",
+                return_value=(True, "Gateway restarted successfully"),
+            ) as restart,
+            patch.object(mgmt_bot, "_service_status", return_value="active"),
+            patch.object(
+                mgmt_bot,
+                "send",
+                side_effect=lambda _token, _chat, text: self.messages.append(text),
+            ),
+        ):
+            mgmt_bot.cmd_switch("token", "chat", "codex56terra")
+
+        entry = json.loads(session_path.read_text())["telegram:main"]
+        self.assertNotIn("providerOverride", entry)
+        self.assertNotIn("modelOverride", entry)
+        self.assertNotIn("modelProvider", entry)
+        self.assertNotIn("model", entry)
+        restart.assert_called_once()
+
     def test_verifier_requires_exact_provider_and_openclaw_sentinel(self):
         responses = [
             {"models": [{"name": "qwen3-coder-131k:latest"}]},

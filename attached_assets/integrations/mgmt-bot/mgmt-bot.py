@@ -102,6 +102,15 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+INTEGRATIONS_DIR = Path(__file__).resolve().parents[1]
+if str(INTEGRATIONS_DIR) not in sys.path:
+    sys.path.insert(0, str(INTEGRATIONS_DIR))
+from model_route import (  # noqa: E402
+    apply_exclusive_model,
+    clear_session_model_routes,
+    session_model_routes,
+)
+
 STATE_DIR   = Path.home() / ".openclaw"
 OFFSET_FILE = STATE_DIR / "mgmt-bot-offset.json"
 SOUL_PENDING_FLAG = Path("/tmp/oc-mgmt-soul-pending")
@@ -292,6 +301,10 @@ def _config_path() -> Path:
     return state_dir / "openclaw.json"
 
 
+def _state_dir() -> Path:
+    return Path(_cfg("OPENCLAW_STATE_DIR", str(STATE_DIR))).expanduser()
+
+
 def _read_config() -> dict:
     p = _config_path()
     if not p.exists():
@@ -323,21 +336,7 @@ def _get_current_model(config: dict) -> str:
 
 
 def _set_model(config: dict, model: str) -> dict:
-    if "agents" in config and "defaults" in config.get("agents", {}):
-        defaults = config.setdefault("agents", {}).setdefault("defaults", {})
-        current = defaults.get("model")
-        model_config = dict(current) if isinstance(current, dict) else {}
-        model_config["primary"] = model
-        defaults["model"] = model_config
-    elif "agent" in config:
-        config["agent"]["model"] = model
-    else:
-        defaults = config.setdefault("agents", {}).setdefault("defaults", {})
-        current = defaults.get("model")
-        model_config = dict(current) if isinstance(current, dict) else {}
-        model_config["primary"] = model
-        defaults["model"] = model_config
-    return config
+    return apply_exclusive_model(config, model)
 
 
 # ---------------------------------------------------------------------------
@@ -822,6 +821,13 @@ def cmd_status(token: str, chat_id: str) -> None:
     soul_src  = "🔐 encrypted vault" if vault_enc else "📄 plaintext SOUL.md"
 
     reset_info = _daily_reset_status()
+    routes = session_model_routes(_state_dir())
+    if routes:
+        session_info = "⚠️ " + ", ".join(
+            f"{route} ({count})" for route, count in sorted(routes.items())
+        )
+    else:
+        session_info = "✅ none (sessions follow the global route)"
 
     send(token, chat_id,
          f"*OpenClaw Status*\n\n"
@@ -831,6 +837,7 @@ def cmd_status(token: str, chat_id: str) -> None:
          f"🔌 Linger: {linger}\n"
          f"🧠 Soul: {soul_src}\n"
          f"⏱ Uptime: {uptime}\n"
+         f"🧵 Persisted session routes: {session_info}\n"
          f"🔄 Daily reset: {reset_info}")
 
 
@@ -935,14 +942,26 @@ def cmd_switch(token: str, chat_id: str, provider: str) -> None:
                  f"Run the protected config patch first, then retry {model}.")
             return
         current = _get_current_model(config)
+        before_exclusive = json.dumps(config, sort_keys=True)
         _audit(f"cmd_switch provider={provider} label={label} current={current} requested={model}")
-        if current == model:
+        config = _set_model(config, model)
+        config_changed = json.dumps(config, sort_keys=True) != before_exclusive
+        session_files, session_entries = clear_session_model_routes(_state_dir())
+        route_was_already_clean = (
+            current == model
+            and not config_changed
+            and session_files == 0
+            and session_entries == 0
+        )
+        if route_was_already_clean:
             send(token, chat_id, f"ℹ️ Already using {model} ({label}) — no change.")
             return
-        config = _set_model(config, model)
         _write_config(config)
         after = _get_current_model(_read_config())
-        _audit(f"cmd_switch config_written provider={provider} after={after}")
+        _audit(
+            f"cmd_switch config_written provider={provider} after={after} "
+            f"session_files={session_files} session_entries={session_entries}"
+        )
     except Exception as e:
         _audit(f"cmd_switch failed provider={provider}: {e}")
         send(token, chat_id, f"❌ Failed to update config: {e}")

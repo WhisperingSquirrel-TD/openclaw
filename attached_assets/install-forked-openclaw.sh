@@ -1154,9 +1154,14 @@ fi
 # User can switch during the day via /codex56sol, /sonnet5, /gpt54, etc.
 RESET_SRC="$HOME/openclaw/attached_assets/integrations/provider-switch/daily-reset.py"
 RESET_DST="$HOME/.openclaw/integrations/provider-switch/daily-reset.py"
+ROUTE_HELPER_SRC="$HOME/openclaw/attached_assets/integrations/model_route.py"
+ROUTE_HELPER_DST="$HOME/.openclaw/integrations/model_route.py"
 RESET_LOG="$HOME/.openclaw/workspace/memory/daily-reset.log"
 
-if [ -f "$RESET_SRC" ]; then
+if [ -f "$RESET_SRC" ] && [ -f "$ROUTE_HELPER_SRC" ]; then
+    mkdir -p "$(dirname "$ROUTE_HELPER_DST")"
+    ln -sf "$ROUTE_HELPER_SRC" "$ROUTE_HELPER_DST"
+    chmod +x "$ROUTE_HELPER_SRC"
     mkdir -p "$(dirname "$RESET_DST")"
     ln -sf "$RESET_SRC" "$RESET_DST"
     chmod +x "$RESET_DST"
@@ -2391,12 +2396,14 @@ defaults = agents.setdefault("defaults", {})
 model = defaults.get("model")
 model = dict(model) if isinstance(model, dict) else {}
 model["primary"] = model_ref
+model["fallbacks"] = []
 defaults["model"] = model
 for entry in agents.get("list", []):
     if isinstance(entry, dict) and entry.get("id") == "main":
         entry_model = entry.get("model")
         entry_model = dict(entry_model) if isinstance(entry_model, dict) else {}
         entry_model["primary"] = model_ref
+        entry_model["fallbacks"] = []
         entry["model"] = entry_model
 with open(config_path, "w") as handle:
     json.dump(config, handle, indent=2)
